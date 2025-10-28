@@ -1,0 +1,8 @@
+README.md
+pyproject.toml
+src/template_repo.egg-info/PKG-INFO
+src/template_repo.egg-info/SOURCES.txt
+src/template_repo.egg-info/dependency_links.txt
+src/template_repo.egg-info/requires.txt
+src/template_repo.egg-info/top_level.txt
+tests/test.py

@@ -1,0 +1,7 @@
+numpy
+pandas
+
+[dev]
+pytest
+ruff
+pydocstyle

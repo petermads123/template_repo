@@ -1,0 +1,45 @@
+[build-system]
+requires = ["setuptools>=61.0"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "template_repo"
+version = "0.1.0"
+description = "A short description of your project."
+authors = [
+  { name = "Your Name", email = "you@example.com" }
+]
+readme = "README.md"
+requires-python = ">=3.13"
+
+# Runtime dependencies
+dependencies = [
+  "numpy",
+  "pandas",
+]
+
+# Optional groups (e.g. dev dependencies)
+[project.optional-dependencies]
+dev = [
+  "pytest",
+  "ruff",
+  "pydocstyle",
+]
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
+# --- Ruff Configuration ---
+[tool.ruff]
+line-length = 88
+select = ["E", "F", "B", "ANN", "D"]
+ignore = ["E501", "ANN101"]
+target-version = "py313"
+
+[tool.ruff.pydocstyle]
+convention = "google"
+
+# --- Pytest Configuration ---
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+addopts = "-v"

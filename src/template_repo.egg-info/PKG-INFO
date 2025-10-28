@@ -1,8 +1,22 @@
+Metadata-Version: 2.4
+Name: template_repo
+Version: 0.1.0
+Summary: A short description of your project.
+Author-email: Your Name <you@example.com>
+Requires-Python: >=3.13
+Description-Content-Type: text/markdown
+Requires-Dist: numpy
+Requires-Dist: pandas
+Provides-Extra: dev
+Requires-Dist: pytest; extra == "dev"
+Requires-Dist: ruff; extra == "dev"
+Requires-Dist: pydocstyle; extra == "dev"
+
 # template_repo
 This is a template repo for creating new projects
 
 ## Setup
-1. To setup this repo first choose a name set this name in pyproject.toml, environment.yml and Makefile
+1. To setup this repo first choose a name within the pyproject.toml file under project and in environment.yaml name the environment to be build when developing the code
 2. Define dependencies withing pyproject.toml
 3. Make sure ruff is installed in your vscode
 - In settings.json have the following lines pasted:

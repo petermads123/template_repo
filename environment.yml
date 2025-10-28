@@ -1,0 +1,10 @@
+name: template_repo
+channels:
+  - conda-forge
+  - gurobi
+  - defaults
+dependencies:
+  - python=3.13.3
+  - pip
+  - pip:
+      - -e .[dev]
