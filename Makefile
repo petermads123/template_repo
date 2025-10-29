@@ -1,7 +1,7 @@
 # Makefile for myproject
 
 # Default environment name
-ENV_NAME = myproject
+ENV_NAME = template_repo
 
 .PHONY: setup update lint format test clean
 
