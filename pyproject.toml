@@ -32,8 +32,8 @@ where = ["src"]
 # --- Ruff Configuration ---
 [tool.ruff]
 line-length = 88
-select = ["E", "F", "B", "ANN", "D"]
-ignore = ["E501", "ANN101"]
+select = ["E" "W", "I", "F", "B", "ANN", "D", "UP", "TID", "N", "SIM", "ARG", "ERA", "DTZ"]
+ignore = ["E501", "ANN101", "N806", "N803"]
 target-version = "py313"
 
 [tool.ruff.pydocstyle]
