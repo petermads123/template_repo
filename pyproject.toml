@@ -1,0 +1,50 @@
+[build-system]
+requires = ["setuptools>=61.0"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "template_repo"
+version = "0.1.0"
+description = "template_repo"
+authors = [
+  { name = "Peter Mads Pedersen", email = "petermads123@hotmail.com" }
+]
+readme = "README.md"
+requires-python = ">=3.13"
+
+# Runtime dependencies
+dependencies = [
+  "numpy",
+  "pandas",
+]
+
+# Optional groups (e.g. dev dependencies)
+[project.optional-dependencies]
+dev = [
+  "pytest",
+  "ruff",
+  "pydocstyle",
+  "mypy",
+]
+
+[tool.setuptools.packages.find]
+where = ["template_repo"]
+
+# --- Ruff Configuration ---
+[tool.ruff]
+line-length = 88
+select = ["E", "W", "I", "F", "B", "ANN", "D", "UP", "TID", "N", "SIM", "ARG", "ERA", "DTZ"]
+ignore = ["E501", "ANN101", "N806", "N803"]
+target-version = "py313"
+
+[tool.ruff.pydocstyle]
+convention = "google"
+
+# --- Pytest Configuration ---
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+addopts = "-v"
+
+# --- Mypy configuration ---
+[tool.mypy]
+ignore_missing_imports = true
