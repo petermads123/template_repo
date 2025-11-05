@@ -28,7 +28,7 @@ dev = [
 ]
 
 [tool.setuptools.packages.find]
-where = ["template_repo"]
+where = ["src"]
 
 # --- Ruff Configuration ---
 [tool.ruff]
@@ -44,7 +44,3 @@ convention = "google"
 [tool.pytest.ini_options]
 testpaths = ["tests"]
 addopts = "-v"
-
-# --- Mypy configuration ---
-[tool.mypy]
-ignore_missing_imports = true
