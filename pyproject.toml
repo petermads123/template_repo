@@ -43,3 +43,8 @@ convention = "google"
 [tool.pytest.ini_options]
 testpaths = ["tests"]
 addopts = "-v"
+
+# --- Mypy configuration ---
+[tool.mypy]
+ignore_missing_imports = true
+follow_untyped_imports = true
