@@ -12,3 +12,4 @@ Change the package-folder (template_repo) to the same name
 - Acticate environment: conda activate <env_name>
 - Deactivate: conda deactivate
 - Download all packages defined by pyproject.toml: pip install -e.
+- test
