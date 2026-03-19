@@ -13,10 +13,7 @@ readme = "README.md"
 requires-python = ">=3.13"
 
 # Runtime dependencies
-dependencies = [
-  "numpy",
-  "pandas",
-]
+dependencies = []
 
 # Optional groups (e.g. dev dependencies)
 [project.optional-dependencies]
@@ -27,7 +24,7 @@ dev = [
 ]
 
 [tool.setuptools.packages.find]
-where = ["."]
+where = ["src"]
 
 # --- Ruff Configuration ---
 [tool.ruff]
