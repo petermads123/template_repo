@@ -1,10 +1,13 @@
 # template_repo
-The purpose of this repo is to simply give a template for future repos
+Package description
 
 ## Setup
-Add dependencies in pyproject.toml
-Also change project name in here
-Change the folder name (template_repo) to the same name
+Change folder "template_repo" to <package_name>
+### pyproject.toml
+[project]
+- Change name to <package_name>
+- Change description
+- Change dependencies
 
 ## Development
 1. Have git installed on your machine.
