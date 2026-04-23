@@ -3,7 +3,7 @@ Repo describtion
 Install via:
     pip install git+https://github.com/<repo_owner>/<repo_name>.git@main
 or in dependecies in pyproject.toml:
-    "energidata @ git+https://github.com/<repo_owner>/<repo_name>.git@main"
+    "<repo_name> @ git+https://github.com/<repo_owner>/<repo_name>.git@main"
 
 ## Setup
 Change folder "template_repo" to <package_name>
