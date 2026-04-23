@@ -1,5 +1,9 @@
 # template_repo
-Package description
+Repo describtion
+Install via:
+    pip install git+https://github.com/<repo_owner>/<repo_name>.git@main
+or in dependecies in pyproject.toml:
+    "energidata @ git+https://github.com/<repo_owner>/<repo_name>.git@main"
 
 ## Setup
 Change folder "template_repo" to <package_name>
@@ -8,6 +12,8 @@ Change folder "template_repo" to <package_name>
 - Change name to <package_name>
 - Change description
 - Change dependencies
+### README
+Change the description and urls for downloading the repo as a package.
 
 ## Development
 1. Have git installed on your machine.
@@ -17,6 +23,6 @@ Change folder "template_repo" to <package_name>
 5. Download dependencies by running "pip install -e." in the powershell terminal. Environment should activate automatically when powershell terminal is launched.
 
 ### Ruff
-    For proper development, please have Ruff installed.
-    After installement; go to File -> Preferences -> Settings.
-        Turn on "Format on save".
+For proper development, please have Ruff installed.
+After installement; go to File -> Preferences -> Settings.
+    Turn on "Format on save".
