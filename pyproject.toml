@@ -20,20 +20,32 @@ dependencies = []
 dev = [
   "pytest",
   "ruff",
-  "pydocstyle",
+  "mypy",
 ]
 
 [tool.setuptools.packages.find]
 where = ["."]
+# Excluding rather than including means renaming the package folder needs no
+# change here.
+exclude = ["tests*"]
 
 # --- Ruff Configuration ---
 [tool.ruff]
 line-length = 88
-select = ["E", "W", "I", "F", "B", "ANN", "D", "UP", "TID", "N", "SIM", "ARG", "ERA", "DTZ"]
-ignore = ["E501", "ANN101", "N806", "N803", "F401"]
-target-version = "py313"
 
-[tool.ruff.pydocstyle]
+[tool.ruff.lint]
+select = ["E", "W", "I", "F", "B", "ANN", "D", "UP", "TID", "N", "SIM", "ARG", "ERA", "DTZ"]
+# E501: line length is the formatter's job.
+# N806/N803: allow non-lowercase names for math-style variables and arguments.
+ignore = ["E501", "N806", "N803"]
+
+[tool.ruff.lint.per-file-ignores]
+# F401: __init__.py re-exports are not unused imports.
+"__init__.py" = ["F401"]
+# D100/D103: tests do not need module or function docstrings.
+"tests/**" = ["D100", "D103"]
+
+[tool.ruff.lint.pydocstyle]
 convention = "google"
 
 # --- Pytest Configuration ---
@@ -43,5 +55,8 @@ addopts = "-v"
 
 # --- Mypy configuration ---
 [tool.mypy]
+# Named explicitly because mypy does not respect .gitignore and would otherwise
+# descend into .venv. Update the package name when renaming.
+files = ["template_repo", "tests"]
 ignore_missing_imports = true
 follow_untyped_imports = true

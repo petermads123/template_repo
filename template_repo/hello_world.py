@@ -1,3 +1,13 @@
-"""Hello World!"""
+"""Example module. Replace with real code."""
 
-print("Hello, World!")
+
+def greet(name: str = "World") -> str:
+    """Build a greeting.
+
+    Args:
+        name: Who to greet.
+
+    Returns:
+        The greeting.
+    """
+    return f"Hello, {name}!"
