@@ -23,10 +23,14 @@ Or in `dependencies` in `pyproject.toml`:
 5. `README.md`: update the title, the description and the two install URLs above.
 6. `pyproject.toml`: add runtime dependencies to `[project] dependencies`.
 7. `tests/test_hello_world.py`: change the import to `from <package_name> import greet`.
-8. Replace `<package_name>/hello_world.py` and `tests/test_hello_world.py` with real code.
+8. `STRUCTURE.md`: update the tree and the module paths to the new package name.
+9. `README.md`: this checklist mentions the package name too.
+10. Replace `<package_name>/hello_world.py` and `tests/test_hello_world.py` with real code,
+    updating `STRUCTURE.md` as you go.
 
-Nothing else references the package name: `__init__.py` uses a relative import and
-`[tool.setuptools.packages.find]` excludes `tests*` rather than naming the package.
+Nothing else references the package name: `__init__.py` uses a relative import,
+`[tool.setuptools.packages.find]` excludes `tests*` rather than naming the package, and
+everything under `.claude/` is package-name agnostic.
 
 Avoid naming the package folder `lib`, `build`, `dist` or `docs`: the `.gitignore` inherited
 from GitHub's Python template ignores those, so the folder would be silently untracked.
@@ -101,6 +105,32 @@ pytest
 `.vscode/settings.json` is checked in, so format-on-save, import sorting and Ruff as the
 Python formatter are already configured for this repo. Installing the Ruff extension (see
 Prerequisites) is all that is required.
+
+## Working with Claude Code
+
+This repo ships a Claude Code configuration under `.claude/`, plus `CLAUDE.md` (a routing
+map, loaded every session) and `STRUCTURE.md` (a map of what lives where, imported by
+`CLAUDE.md`).
+
+| Command | Use for |
+|---|---|
+| `/small-change` | Renames, wording, styling — anything cosmetic |
+| `/implement-feature` | New modules, new public functions, behavior changes |
+| `/create-pr` | Verifies the tree, then opens a draft PR after you confirm |
+| `/conventions` | The coding conventions, with worked examples |
+
+Two hooks run automatically: Ruff formats and fixes every `.py` file Claude edits, and a
+stop gate refuses to end a turn while ruff, mypy or pytest fail or `STRUCTURE.md` is out of
+sync. Create `.claude/.skip-gate` to bypass the gate deliberately.
+
+Three caveats worth knowing:
+
+- **Hooks are read at session start.** Editing anything under `.claude/hooks/` or
+  `.claude/settings.json` needs a Claude Code restart. Skills and rules hot-reload.
+- **The first session prompts for workspace trust**, because `.claude/settings.json`
+  registers hooks. Accept it or the hooks stay inactive.
+- The hooks call `python` from your PATH and only use the standard library; they locate
+  `ruff`, `mypy` and `pytest` inside `.venv` themselves.
 
 ### Troubleshooting
 

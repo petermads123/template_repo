@@ -11,3 +11,14 @@ def greet(name: str = "World") -> str:
         The greeting.
     """
     return f"Hello, {name}!"
+
+
+def main() -> None:
+    """Showcase this module's functionality."""
+    print(greet())
+    print(greet("Peter"))
+    print(greet("Ærø"))
+
+
+if __name__ == "__main__":
+    main()
