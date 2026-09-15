@@ -5,7 +5,7 @@ paths:
 
 # Python conventions
 
-These are non-negotiable. `/conventions` has the worked examples.
+These are non-negotiable.
 
 ## Tooling
 
@@ -22,6 +22,7 @@ These are non-negotiable. `/conventions` has the worked examples.
 - Google-convention docstrings on every public module, class and function, with `Args:`,
   `Returns:` and `Raises:` where they apply. Ruff's `D` rules enforce this.
 - Private helpers start with `_` and stay out of `STRUCTURE.md`.
+- Error messages name the offending value: `f"window must be positive, got {window}"`.
 
 ## Every module has a `main()`
 
@@ -46,6 +47,35 @@ if __name__ == "__main__":
 - A library module's `main()` must run standalone: `python -m <package>.<module>`.
 - **Exempt**: `__init__.py`, everything under `tests/`, and `conftest.py`.
 
+**Good** — representative calls, printed, including one interesting edge:
+
+```python
+def main() -> None:
+    """Showcase this module's functionality."""
+    print(rolling_mean([1, 2, 3, 4], window=2))
+    print(rolling_mean([1, 2], window=5))  # fewer samples than the window
+```
+
+**Bad** — a test suite wearing a showcase costume. Assertions belong in `tests/`:
+
+```python
+def main() -> None:
+    """Showcase this module's functionality."""
+    assert rolling_mean([1, 2, 3, 4], 2) == [1.5, 2.5, 3.5]
+```
+
+**Also bad** — proves nothing a reader can see:
+
+```python
+def main() -> None:
+    """Showcase this module's functionality."""
+    rolling_mean([1, 2, 3], 2)
+```
+
+The test: could someone run `python -m package.module` and understand what the module does
+from the output alone? If not, the showcase is not doing its job. `template_repo/hello_world.py`
+is the worked example in this repo.
+
 If a module is also re-exported from `__init__.py`, `python -m` prints a `RuntimeWarning`
 about the module already being in `sys.modules`. That is expected and harmless — it is the
 normal consequence of a package re-exporting its own submodule. Do not "fix" it by removing
@@ -61,7 +91,8 @@ through this checklist and include the ones that apply:
 | Empty | empty string, empty list/dict, zero |
 | Boundaries | first, last, off-by-one either side of a limit |
 | Numbers | negative, very large, float precision, division by zero |
-| Optional | `None` where the type allows it, missing defaults |
+| Missing | `None` where the type allows it, omitted defaults, absent keys |
+| Malformed | wrong type, wrong shape, unparseable text, truncated input |
 | Text | non-ASCII, leading/trailing whitespace, very long strings |
 | Purity | arguments are not mutated |
 | Idempotency | calling twice gives the same result |
@@ -69,3 +100,6 @@ through this checklist and include the ones that apply:
 
 Use `@pytest.mark.parametrize` when the same assertion holds across many inputs. A test
 name should say what it proves: `test_greet_preserves_unicode`, not `test_greet_2`.
+
+Never weaken a test to make it pass and never delete an inconvenient case. Both turn a real
+finding into a silent one.

@@ -28,12 +28,16 @@ Or in `dependencies` in `pyproject.toml`:
 10. Replace `<package_name>/hello_world.py` and `tests/test_hello_world.py` with real code,
     updating `STRUCTURE.md` as you go.
 
+`docs/plans/` starts with only `TEMPLATE.md` in it. Leave that file alone — `/feature`
+copies it for each new piece of work.
+
 Nothing else references the package name: `__init__.py` uses a relative import,
 `[tool.setuptools.packages.find]` excludes `tests*` rather than naming the package, and
 everything under `.claude/` is package-name agnostic.
 
-Avoid naming the package folder `lib`, `build`, `dist` or `docs`: the `.gitignore` inherited
-from GitHub's Python template ignores those, so the folder would be silently untracked.
+Avoid naming the package folder `lib`, `build`, `dist` or `sdist`: the `.gitignore`
+inherited from GitHub's Python template ignores those, so the folder would be silently
+untracked. `docs` is not ignored, but it is already taken by `docs/plans/`.
 
 ## Development
 
@@ -112,16 +116,53 @@ This repo ships a Claude Code configuration under `.claude/`, plus `CLAUDE.md` (
 map, loaded every session) and `STRUCTURE.md` (a map of what lives where, imported by
 `CLAUDE.md`).
 
-| Command | Use for |
-|---|---|
-| `/small-change` | Renames, wording, styling — anything cosmetic |
-| `/implement-feature` | New modules, new public functions, behavior changes |
-| `/create-pr` | Verifies the tree, then opens a draft PR after you confirm |
-| `/conventions` | The coding conventions, with worked examples |
+### The implementation pipeline
 
-Two hooks run automatically: Ruff formats and fixes every `.py` file Claude edits, and a
-stop gate refuses to end a turn while ruff, mypy or pytest fail or `STRUCTURE.md` is out of
-sync. Create `.claude/.skip-gate` to bypass the gate deliberately.
+Anything that is not cosmetic goes through nine steps, with a hard stop after each one so
+you decide when to move on. The state lives in `docs/plans/<slug>.md` rather than in the
+conversation, so a feature survives closing the session and coming back tomorrow.
+
+| Step | Command | Produces |
+|---|---|---|
+| 1 | `/conceptualize` | The concept, agreed with you, and numbered acceptance criteria |
+| 2 | `/plan` | Modules, full signatures, implementation guide, test intents |
+| 3 | `/implement` | The branch and the production code |
+| 4 | `/verify` | ruff, mypy, and a check that the code matches the plan |
+| 5 | `/test` | The edge-case suite, and fixes for what it finds |
+| 6 | `/concept-check` | An audit against step 1, criterion by criterion |
+| 7 | `/ship` | Commit and push |
+| 8 | `/recommend` | Ranked follow-ups, decided with you |
+| 9 | `/create-pr` | A draft pull request to `main` |
+
+Start with `/feature <what to build>` — it creates the plan file and opens step 1. After
+that, each step is opened by running its own command. A step never starts the next one on
+its own.
+
+Two things are worth knowing about the shape of it. **Step 6 audits against step 1, not
+step 2**: a plan can drift from its concept a little at each step while passing every check
+along the way, and this is where that gets caught. And **step 8 is where new scope belongs**
+— ideas that turn up during steps 1 to 7 are a distraction, but with the finished feature in
+front of you they are a decision. A recommendation you accept goes back through the pipeline
+as a second round in the same plan file.
+
+| Other commands | Use for |
+|---|---|
+| `/small-change` | Renames, wording, styling — anything cosmetic, no plan file |
+| `/feature` with no argument | "Where did we get to?" |
+
+### Hooks
+
+Four run automatically:
+
+- **Session start** — reports the active plan and its step, so a new session picks up where
+  the last one stopped. Silent when nothing is in flight.
+- **Before any shell command** — refuses a `git commit` or `git push` that would land on
+  `main`, including inside a `&&` chain.
+- **After every `.py` write** — Ruff formats and auto-fixes the file; only unfixable issues
+  come back.
+- **Before a turn ends** — the stop gate. During steps 1 to 3 it only reports; from step 4,
+  and for any work with no plan file, it refuses to end the turn while ruff, mypy or pytest
+  fail or `STRUCTURE.md` is out of sync. Create `.claude/.skip-gate` to bypass it.
 
 Three caveats worth knowing:
 

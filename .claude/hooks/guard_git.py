@@ -1,0 +1,170 @@
+"""PreToolUse hook: stop commits and pushes that would land on `main`.
+
+`CLAUDE.md` says never commit to `main`, and the remote protects it anyway — but
+a rejected push happens after the mistake, and a local commit on `main` has to
+be unpicked by hand. This hook refuses the command instead, and says what to do
+instead of just saying no.
+
+It inspects the Bash command about to run, splitting compound commands so a
+`git checkout main && git commit` is caught on its second half. Anything it
+cannot confidently parse is allowed through: the guard exists to catch slips,
+and a parser that blocks legitimate work is worse than one that misses an
+exotic invocation.
+
+Stdlib only: `jq` is not available on this machine and hook commands default to
+Git Bash on Windows, so the usual shell recipe does not work here.
+"""
+
+from __future__ import annotations
+
+import json
+import re
+import shlex
+import sys
+from pathlib import Path
+
+from plan_state import current_branch
+
+PROTECTED = "main"
+
+# Compound-command separators. `||` must precede `|` so it is matched first.
+SEPARATORS = re.compile(r"&&|\|\||;|\n|\|")
+
+# Git options that swallow the next token, hiding the subcommand behind them.
+OPTIONS_WITH_VALUE = {"-C", "-c", "--git-dir", "--work-tree", "--exec-path"}
+
+
+def segments(command: str) -> list[list[str]]:
+    """Split a shell command into its individual invocations.
+
+    Args:
+        command: The full command line the Bash tool is about to run.
+
+    Returns:
+        One token list per invocation. Unparseable segments are dropped.
+    """
+    parsed: list[list[str]] = []
+    for raw in SEPARATORS.split(command):
+        piece = raw.strip()
+        if not piece:
+            continue
+        try:
+            tokens = shlex.split(piece)
+        except ValueError:
+            continue  # unbalanced quotes: not something to block on
+        if tokens:
+            parsed.append(tokens)
+    return parsed
+
+
+def git_subcommand(tokens: list[str]) -> tuple[str, list[str]]:
+    """Identify the git subcommand in one invocation.
+
+    Args:
+        tokens: The invocation's tokens.
+
+    Returns:
+        The subcommand and the arguments following it. Both are empty when the
+        invocation is not git.
+    """
+    if not tokens or Path(tokens[0]).name not in {"git", "git.exe"}:
+        return "", []
+
+    index = 1
+    while index < len(tokens):
+        token = tokens[index]
+        if token in OPTIONS_WITH_VALUE:
+            index += 2
+            continue
+        if token.startswith("-"):
+            index += 1
+            continue
+        return token, tokens[index + 1 :]
+    return "", []
+
+
+def push_targets_main(args: list[str], branch: str) -> bool:
+    """Decide whether a `git push` would write to the protected branch.
+
+    Args:
+        args: Arguments following `push`.
+        branch: The branch currently checked out.
+
+    Returns:
+        True if the push would update `main` on the remote.
+    """
+    options = [a for a in args if a.startswith("-")]
+    if {"--all", "--mirror"} & set(options):
+        return True
+
+    positional = [a for a in args if not a.startswith("-")]
+    refspecs = positional[1:]  # the first positional is the remote
+    if not refspecs:
+        return branch == PROTECTED
+
+    for spec in refspecs:
+        destination = spec.lstrip("+").split(":", 1)[-1].removeprefix("refs/heads/")
+        if destination == PROTECTED:
+            return True
+        if destination == "HEAD" and branch == PROTECTED:
+            return True
+    return False
+
+
+def violation(command: str, branch: str) -> str:
+    """Find the reason to refuse this command, if there is one.
+
+    Args:
+        command: The full command line.
+        branch: The branch currently checked out.
+
+    Returns:
+        An explanation to show Claude, or an empty string to allow the command.
+    """
+    for tokens in segments(command):
+        subcommand, args = git_subcommand(tokens)
+        if subcommand == "commit" and branch == PROTECTED:
+            return (
+                f"Refused: this would commit to `{PROTECTED}`, which this repo "
+                "never commits to directly.\n"
+                "Move the work onto a branch first, keeping the changes:\n"
+                "    git checkout -b <type>/<kebab-case-topic>\n"
+                "Prefixes: feat, fix, refactor, docs, test, chore."
+            )
+        if subcommand == "push" and push_targets_main(args, branch):
+            return (
+                f"Refused: this would push to `{PROTECTED}`, which is protected "
+                "on the remote and would be rejected anyway.\n"
+                "Push the feature branch and open a pull request instead:\n"
+                "    git push -u origin <branch>"
+            )
+    return ""
+
+
+def main() -> None:
+    """Allow or refuse the Bash command about to run."""
+    # lstrip the BOM: some shells prepend one when piping to a native command.
+    raw = sys.stdin.read().lstrip("﻿").strip()
+    try:
+        payload = json.loads(raw or "{}")
+    except json.JSONDecodeError:
+        sys.exit(0)  # never block on a payload we cannot read
+
+    tool_input = payload.get("tool_input")
+    if not isinstance(tool_input, dict):
+        sys.exit(0)
+    command = tool_input.get("command")
+    if not isinstance(command, str) or "git" not in command:
+        sys.exit(0)
+
+    project_dir = Path(payload.get("cwd") or Path.cwd())
+    reason = violation(command, current_branch(project_dir))
+    if reason:
+        print(reason, file=sys.stderr)
+        sys.exit(2)  # exit 2 blocks the tool call and shows Claude the reason
+
+    sys.exit(0)
+
+
+if __name__ == "__main__":
+    main()

@@ -52,6 +52,9 @@ convention = "google"
 [tool.pytest.ini_options]
 testpaths = ["tests"]
 addopts = "-v"
+# Import the package from the repo root, so `pytest` works on a fresh clone
+# before `pip install -e ".[dev]"` has been run.
+pythonpath = ["."]
 
 # --- Mypy configuration ---
 [tool.mypy]

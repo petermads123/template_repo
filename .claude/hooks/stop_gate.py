@@ -1,12 +1,20 @@
-"""Stop hook: refuse to end the turn on a broken tree.
+"""Stop hook: refuse to end the turn on a broken tree, once the step warrants it.
 
-Runs only when Python files actually changed, so conversational turns stay
-instant. When they did change, it runs the full verification set and
-cross-checks STRUCTURE.md against the modules on disk, then blocks with a
-specific reason if anything fails.
+The nine-step pipeline reaches step 3 with code written but no tests yet, so a
+gate that demanded green on every turn would collapse steps 3 to 5 into one.
+This hook therefore reads the active plan file and scales its strictness:
+
+- **No active plan** (a `/small-change`, or ad-hoc work): strict, as before.
+  Any turn that touched Python must leave ruff, mypy, pytest and STRUCTURE.md
+  in order.
+- **Steps 1 to 3**: advisory. Nothing is run; the turn ends freely, with a note
+  saying when the gate starts biting. Python changing during steps 1 or 2 is
+  itself worth a note, since those steps are meant to produce a plan, not code.
+- **Steps 4 to 9**: strict, same as no plan. Step 4 is where the pipeline
+  promises a green tree, and nothing after it is allowed to take that back.
 
 Stdlib only: `jq` is not available on this machine and hook commands default to
-Git Bash on Windows.
+Git Bash on Windows, so the usual shell recipe does not work here.
 
 Escape hatch: create `.claude/.skip-gate` to bypass this deliberately.
 """
@@ -19,8 +27,9 @@ import subprocess
 import sys
 from pathlib import Path
 
+from plan_state import GATE_FROM_STEP, Plan, active_plan, current_branch, git_lines
+
 TOOL_TIMEOUT_SECONDS = 300
-GIT_TIMEOUT_SECONDS = 30
 
 # Paths mentioned in STRUCTURE.md that look like this are prose, not real files.
 PLACEHOLDER = re.compile(r"[<>*]")
@@ -66,25 +75,6 @@ def capture(
     )
 
 
-def git_lines(project_dir: Path, args: list[str]) -> list[str]:
-    """Run a git command and return its non-empty output lines.
-
-    Args:
-        project_dir: Repository root.
-        args: Git arguments, without the leading "git".
-
-    Returns:
-        Output lines, or an empty list if git failed.
-    """
-    try:
-        result = capture(["git", *args], project_dir, GIT_TIMEOUT_SECONDS)
-    except (subprocess.TimeoutExpired, OSError):
-        return []
-    if result.returncode != 0:
-        return []
-    return [line for line in result.stdout.splitlines() if line.strip()]
-
-
 def changed_python_files(project_dir: Path) -> set[str]:
     """Find Python files changed in the working tree or committed on this branch.
 
@@ -107,8 +97,7 @@ def changed_python_files(project_dir: Path) -> set[str]:
         if path.endswith(".py"):
             changed.add(path)
 
-    branch = git_lines(project_dir, ["branch", "--show-current"])
-    if branch and branch[0] != "main":
+    if current_branch(project_dir) != "main":
         diff = git_lines(project_dir, ["diff", "--name-only", "main...HEAD"])
         changed.update(p for p in diff if p.endswith(".py"))
 
@@ -203,6 +192,50 @@ def gate_failures(project_dir: Path) -> list[str]:
     return failures
 
 
+def advisory_notes(project_dir: Path, plan: Plan, changed: set[str]) -> list[str]:
+    """Collect the non-blocking observations worth surfacing during steps 1 to 3.
+
+    Args:
+        project_dir: Repository root.
+        plan: The active plan.
+        changed: Python files changed in the tree or on this branch.
+
+    Returns:
+        Notes to show the user, empty if there is nothing to say.
+    """
+    notes = [
+        f"Plan `{plan.path}` is on step {plan.step} ({plan.step_name}). "
+        f"The verification gate starts at step {GATE_FROM_STEP}."
+    ]
+
+    if changed and plan.step <= 2:
+        notes.append(
+            f"{len(changed)} Python file(s) changed during a planning step. "
+            "Steps 1 and 2 are meant to produce a concept and a plan, not code."
+        )
+
+    branch = current_branch(project_dir)
+    if plan.branch and branch and branch != plan.branch:
+        notes.append(
+            f"The plan names branch `{plan.branch}` but `{branch}` is checked out."
+        )
+
+    return notes
+
+
+def notice(message: str) -> None:
+    """Show the user a message and let the turn end.
+
+    This ends the hook: reaching it means the current step is not gated, so
+    nothing further is checked.
+
+    Args:
+        message: What to surface.
+    """
+    print(json.dumps({"systemMessage": message}))
+    sys.exit(0)
+
+
 def block(reason: str) -> None:
     """Tell Claude Code to keep going instead of stopping.
 
@@ -211,6 +244,20 @@ def block(reason: str) -> None:
     """
     print(json.dumps({"decision": "block", "reason": reason}))
     sys.exit(0)
+
+
+def enforce(project_dir: Path) -> None:
+    """Run the full verification set and block if anything fails.
+
+    Args:
+        project_dir: Repository root.
+    """
+    problems = gate_failures(project_dir) + structure_problems(project_dir)
+    if problems:
+        block(
+            "The tree is not ready to hand back. Fix these, then stop again:\n\n"
+            + "\n\n".join(f"- {p}" for p in problems)
+        )
 
 
 def main() -> None:
@@ -231,15 +278,19 @@ def main() -> None:
     if (project_dir / ".claude" / ".skip-gate").exists():
         sys.exit(0)
 
-    if not changed_python_files(project_dir):
-        sys.exit(0)  # nothing to check; keep conversational turns instant
+    changed = changed_python_files(project_dir)
+    plan = active_plan(project_dir)
 
-    problems = gate_failures(project_dir) + structure_problems(project_dir)
-    if problems:
-        block(
-            "The tree is not ready to hand back. Fix these, then stop again:\n\n"
-            + "\n\n".join(f"- {p}" for p in problems)
-        )
+    if plan is None:
+        if changed:
+            enforce(project_dir)  # no pipeline in flight: hold the old strict line
+        sys.exit(0)
+
+    if not plan.gated:
+        notice("\n".join(advisory_notes(project_dir, plan, changed)))
+
+    if changed:
+        enforce(project_dir)
 
     sys.exit(0)
 
