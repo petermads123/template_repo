@@ -2,6 +2,8 @@
 name: small-change
 description: Make a small, low-risk edit — renaming a local variable, rewording a docstring or message, adjusting plot styling or formatting. Use for cosmetic changes that do not alter behavior, add or remove files, change a public signature, or need a new test. Applies whether the user names the skill or just describes such a change in prose. Anything that does any of those routes to the feature pipeline instead.
 argument-hint: [what to change]
+model: sonnet
+effort: high
 ---
 
 # Small change

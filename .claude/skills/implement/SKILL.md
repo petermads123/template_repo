@@ -2,6 +2,8 @@
 name: implement
 description: Step 3 of the feature pipeline. Create the branch and write the production code from the plan, updating STRUCTURE.md in the same change and recording any deviation from the plan. Use once the plan is agreed; tests come later, in step 5.
 argument-hint: [slug, if more than one plan exists]
+model: sonnet
+effort: xhigh
 ---
 
 # Step 3 — Implement

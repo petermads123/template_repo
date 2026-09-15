@@ -159,6 +159,12 @@ feature handled as a small change quietly skips the concept, the tests and the a
 A slash command still wins if you type one, and a question stays a question: asking how
 something works gets an answer, not a pipeline.
 
+Each step also picks its own model. Concept, planning and recommendations run on Opus
+because they are judgment; implementation, verification, tests, the concept check and the
+pull request run on Sonnet at high effort because the thinking has already been done and
+written down. The override lasts one step and reverts, so your own `/model` setting is left
+alone. `CLAUDE.md` has the table.
+
 Step 9 is not a formality. It is the only point where the branch is verified as a whole:
 steps 4 and 7 each checked one round at one moment, so on a multi-round branch nothing has
 yet proved that round 2 left round 1 working. It re-runs the full suite, every module

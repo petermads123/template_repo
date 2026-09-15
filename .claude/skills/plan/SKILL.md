@@ -2,6 +2,8 @@
 name: plan
 description: Step 2 of the feature pipeline. Turn an agreed concept into named modules, full public signatures, an ordered implementation guide and high-level test intents, all tied back to the acceptance criteria. Use after the concept is confirmed and before any code is written.
 argument-hint: [slug, if more than one plan exists]
+model: opus
+effort: high
 ---
 
 # Step 2 — Plan

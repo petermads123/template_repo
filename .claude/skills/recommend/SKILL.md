@@ -2,6 +2,8 @@
 name: recommend
 description: Step 8 of the feature pipeline. Propose ranked follow-up work that would make the shipped change into a better product, and agree with the user which to defer, reject, or take through another round. Use after the work is pushed and before opening the pull request.
 argument-hint: [slug, if more than one plan exists]
+model: opus
+effort: xhigh
 ---
 
 # Step 8 — Recommend

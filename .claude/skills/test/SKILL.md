@@ -2,6 +2,8 @@
 name: test
 description: Step 5 of the feature pipeline. Turn the plan's test intents into a concrete pytest suite, hunting edge cases — empty, boundary, unicode, missing and malformed input — then fix what the tests expose and re-run the static checks. Use after verification passes.
 argument-hint: [slug, if more than one plan exists]
+model: sonnet
+effort: xhigh
 ---
 
 # Step 5 — Test

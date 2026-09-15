@@ -114,6 +114,7 @@ and `/create-pr` builds the pull request body from every round in the folder.
 | Path | Role |
 |---|---|
 | `settings.json` | Registers the four hooks; pre-approves ruff/mypy/pytest and read-only git |
+| — | Every skill pins `model` and `effort` in its frontmatter; the table in `CLAUDE.md` says which and why |
 | `rules/python.md` | Coding conventions, auto-loaded for `**/*.py` |
 | `skills/feature/` | `/feature` — starts or resumes the pipeline |
 | `skills/conceptualize/` | `/conceptualize` — step 1, agree the concept |

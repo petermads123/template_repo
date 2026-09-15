@@ -2,6 +2,8 @@
 name: conceptualize
 description: Step 1 of the feature pipeline. Discuss and agree what a feature is, what it connects to, and the observable criteria that define it as done, writing the result into the plan file. Use at the start of a feature, or to revise a concept before planning.
 argument-hint: [what to build]
+model: opus
+effort: xhigh
 ---
 
 # Step 1 — Conceptualize

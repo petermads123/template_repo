@@ -30,6 +30,32 @@ round. In a session that is already mid-pipeline it reports the step instead.
 Exactly one plan file across the repo carries `status=active`. When step 8 opens the next
 round, the round before it becomes `done` and the new file takes over.
 
+### Each step picks its own model
+
+Every skill pins a model and effort in its frontmatter, so a step runs on what it needs
+rather than on whatever the session happens to be set to. The override lasts the turn and
+reverts on the next prompt.
+
+| Step | Model | Effort | Why |
+|---|---|---|---|
+| 1 Conceptualize | `opus` | `xhigh` | Shaping the concept is the most expensive thing to get wrong |
+| 2 Plan | `opus` | `high` | The design fork, and signatures step 4 checks literally |
+| 3 Implement | `sonnet` | `xhigh` | Transcribing a plan that has already done the thinking |
+| 4 Verify | `sonnet` | `xhigh` | Mechanical checks plus classifying each mismatch |
+| 5 Test | `sonnet` | `xhigh` | Edge cases and the bugs they expose |
+| 6 Concept check | `sonnet` | `xhigh` | A different model from the one that wrote the code |
+| 7 Ship | `sonnet` | `high` | Commit and push; procedural |
+| 8 Recommend | `opus` | `xhigh` | Judging what is worth building next |
+| 9 Pull request | `sonnet` | `xhigh` | Verification and writing, both well-specified |
+
+`/feature` carries step 1's settings because it opens step 1 in the same turn, and a model
+override applies for the rest of the turn it is set in. `/small-change` runs `sonnet` at
+`high` — it is the cheap path by design.
+
+Aliases rather than pinned IDs, so a newer Opus or Sonnet is picked up without editing
+eleven files. `ultracode` is a session-level effort setting and not valid here; `xhigh` is
+the closest a skill can pin.
+
 ### The gate between steps is the point
 
 **Finish one step, then stop and wait.** Never begin the next step because it looks

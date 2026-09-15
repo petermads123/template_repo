@@ -2,6 +2,8 @@
 name: feature
 description: Start or resume the nine-step implementation pipeline for a feature, module, behavior change or anything needing a design decision. Creates the plan file that carries the work from concept to pull request, or reports which step an in-flight plan is on. Use for any change that is not purely cosmetic, whether the user names the skill or just describes the work in prose.
 argument-hint: [what to build]
+model: opus
+effort: xhigh
 ---
 
 # Feature pipeline
