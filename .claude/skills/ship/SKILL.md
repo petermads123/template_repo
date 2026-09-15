@@ -3,7 +3,7 @@ name: ship
 description: Step 7 of the feature pipeline. Commit the verified, tested, concept-checked work and push it to its feature branch. Use after the concept check passes; this pushes the branch but does not open a pull request.
 argument-hint: [slug, if more than one plan exists]
 model: sonnet
-effort: high
+effort: max
 ---
 
 # Step 7 — Ship

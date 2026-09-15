@@ -41,22 +41,23 @@ reverts on the next prompt.
 |---|---|---|---|
 | 1 Conceptualize | `opus` | `xhigh` | Shaping the concept is the most expensive thing to get wrong |
 | 2 Plan | `opus` | `high` | The design fork, and signatures step 4 checks literally |
-| 3 Implement | `sonnet` | `xhigh` | Transcribing a plan that has already done the thinking |
-| 4 Verify | `sonnet` | `xhigh` | Mechanical checks plus classifying each mismatch |
-| 5 Test | `sonnet` | `xhigh` | Edge cases and the bugs they expose |
-| 6 Concept check | `sonnet` | `xhigh` | A different model from the one that wrote the code |
-| 7 Ship | `sonnet` | `high` | Commit and push; procedural |
+| 3 Implement | `sonnet` | `max` | Transcribing a plan that has already done the thinking |
+| 4 Verify | `sonnet` | `max` | Mechanical checks plus classifying each mismatch |
+| 5 Test | `sonnet` | `max` | Edge cases and the bugs they expose |
+| 6 Concept check | `sonnet` | `max` | A different model from the one that wrote the code |
+| 7 Ship | `sonnet` | `max` | Commit and push; procedural |
 | 8 Recommend | `opus` | `xhigh` | Judging what is worth building next |
-| 9 Pull request | `sonnet` | `xhigh` | Verification and writing, both well-specified |
+| 9 Pull request | `sonnet` | `max` | Verification and writing, both well-specified |
 | 10 Review | `opus` | `medium` | Most check-ins find nothing; the judgment is fix-or-new-round |
 
 `/feature` carries step 1's settings because it opens step 1 in the same turn, and a model
 override applies for the rest of the turn it is set in. `/small-change` runs `sonnet` at
-`high` — it is the cheap path by design.
+`max` too.
 
-Aliases rather than pinned IDs, so a newer Opus or Sonnet is picked up without editing
-eleven files. `ultracode` is a session-level effort setting and not valid here; `xhigh` is
-the closest a skill can pin.
+`max` is the top effort level; every Sonnet step uses it. Aliases rather than pinned IDs, so
+a newer Opus or Sonnet is picked up without editing twelve files. `ultracode` is a
+session-level effort setting and not valid in frontmatter, where the levels are `low`,
+`medium`, `high`, `xhigh` and `max`.
 
 ### Step 10 runs until the pull request closes
 

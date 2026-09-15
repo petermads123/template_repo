@@ -162,7 +162,7 @@ something works gets an answer, not a pipeline.
 
 Each step also picks its own model. Concept, planning and recommendations run on Opus
 because they are judgment; implementation, verification, tests, the concept check and the
-pull request run on Sonnet at high effort because the thinking has already been done and
+pull request run on Sonnet at max effort because the thinking has already been done and
 written down. The override lasts one step and reverts, so your own `/model` setting is left
 alone. `CLAUDE.md` has the table.
 
