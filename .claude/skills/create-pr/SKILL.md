@@ -1,6 +1,6 @@
 ---
 name: create-pr
-description: Step 9 of the feature pipeline. Verify the whole branch in one pass — clean tree, current base, the full test suite, every module showcase and every round's plan — then confirm with the user and open a draft pull request to main. Use when the work is shipped, the recommendations are decided, and the branch is ready for review.
+description: Step 9 of the feature pipeline. Verify the whole branch in one pass — clean tree, current base, the full test suite, every module showcase and every round's plan — then confirm with the user and open a pull request to main, ready for review. Use when the work is shipped, the recommendations are decided, and the branch is ready for review.
 argument-hint: [slug, if more than one plan exists]
 ---
 
@@ -116,14 +116,20 @@ report. If there is, something was written after the gates ran: go back to secti
 create the pull request, and do not run anything with a remote side effect until the user
 has answered.
 
-## 4. Open it as a draft
+## 4. Open it, ready for review
 
 ```bash
 git push -u origin <branch>
-gh pr create --draft --title "<title>" --body "<body>"
+gh pr create --title "<title>" --body "<body>"
 ```
 
-Draft on purpose: nothing auto-merges, and the user gets a last look on GitHub.
+**Not a draft.** Everything ahead of a reviewer has already happened: the branch was
+verified whole in section 2, audited against its concept in step 6, and the user said yes
+in section 3. A draft would understate that and leave them a button to press before anyone
+can look at it.
+
+This also means section 3 is the only gate between the work and a published pull request.
+Treat it that way — an unanswered confirmation is not a yes, and neither is silence.
 
 ## 5. Record and close the plan
 

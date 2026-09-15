@@ -124,7 +124,7 @@ and `/create-pr` builds the pull request body from every round in the folder.
 | `skills/concept-check/` | `/concept-check` — step 6, audit against the concept |
 | `skills/ship/` | `/ship` — step 7, commit and push |
 | `skills/recommend/` | `/recommend` — step 8, ranked follow-ups |
-| `skills/create-pr/` | `/create-pr` — step 9, draft pull request |
+| `skills/create-pr/` | `/create-pr` — step 9, pull request ready for review |
 | `skills/small-change/` | `/small-change` — cosmetic edits, outside the pipeline |
 | `agents/test-designer.md` | Read-only subagent that finds edge cases (feeds step 5) |
 | `agents/structure-auditor.md` | Read-only subagent that reconciles this file (feeds steps 4 and 6) |

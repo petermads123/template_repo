@@ -217,4 +217,4 @@ taken back through steps 1 to 7 on the same branch.
 | Field | Value |
 |---|---|
 | URL | |
-| Opened as | draft |
+| Opened as | ready for review |

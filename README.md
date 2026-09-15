@@ -141,7 +141,7 @@ docs/plans/
 | 6 | `/concept-check` | An audit against step 1, criterion by criterion |
 | 7 | `/ship` | Commit and push |
 | 8 | `/recommend` | Ranked follow-ups, decided with you |
-| 9 | `/create-pr` | A full re-verification of the whole branch, then a draft pull request to `main` |
+| 9 | `/create-pr` | A full re-verification of the whole branch, then a pull request to `main`, ready for review |
 
 Start with `/feature <what to build>` — it creates the plan file and opens step 1. After
 that, each step is opened by running its own command. A step never starts the next one on
