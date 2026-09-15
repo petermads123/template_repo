@@ -35,7 +35,22 @@ Mark honestly. `partially` is a real answer and a useful one; a table of nine `y
 produced without friction usually means the audit was performed on the plan rather than the
 code.
 
-## 3. Check the things criteria do not cover
+## 3. Re-check the earlier rounds
+
+Later rounds only. This round changed code that earlier rounds in the same folder depend
+on, and they were audited before it existed.
+
+Go back through every acceptance criterion from every earlier round and fill the **Earlier
+rounds still hold** table in section 6. Their tests passing is necessary but not
+sufficient: a criterion can stay green while the feature stops doing what the criterion
+describes, because the tests were written against an implementation this round replaced.
+Re-read the criterion and check it against the code as it stands now.
+
+A criterion from round 1 that this round broke is a regression, not a trade-off. It goes
+back to step 3 like any other unmet criterion — unless the user agrees to change it, which
+is a step 1 decision recorded in *this* round's Builds on section.
+
+## 4. Check the things criteria do not cover
 
 Then go looking, adversarially, for the ways the user would be disappointed on opening this:
 
@@ -49,7 +64,7 @@ Then go looking, adversarially, for the ways the user would be disappointed on o
 - **Structure** — run the `structure-auditor` subagent once more. Steps 3 and 5 both edit
   signatures, and this is the last chance to catch the drift before it is committed.
 
-## 4. Act on what you find
+## 5. Act on what you find
 
 - **Everything met, no drift** — say so plainly and move on. Do not manufacture findings to
   look thorough.

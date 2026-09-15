@@ -33,7 +33,7 @@ here, but everything in this file is in context every session.
 ```
 template_repo/          the package itself (rename this to <package_name>)
 tests/                  pytest suite, one test_<module>.py per module
-docs/plans/             one plan file per feature: the implementation pipeline's state
+docs/plans/             one folder per feature, one file per round: the pipeline's state
 .claude/                Claude Code configuration: rules, skills, agents, hooks
 .vscode/                editor config (Ruff as formatter, format on save)
 pyproject.toml          packaging, Ruff, mypy and pytest configuration
@@ -75,9 +75,22 @@ input, and a parametrized determinism check.
 
 ## Plans: `docs/plans/`
 
-One file per feature, created by `/feature` from `TEMPLATE.md` and carried through all nine
-steps. Each holds the concept and acceptance criteria, the plan, the verification and test
-logs, the concept-check audit, the recommendations and the pull request.
+One folder per feature, one numbered file per round inside it, created by `/feature` from
+`TEMPLATE.md` and carried through all nine steps:
+
+```
+docs/plans/
+  TEMPLATE.md                     copied for each new round; never itself active
+  csv-export/
+    01-csv-export.md              round 1
+    02-streaming-writer.md        round 2, opened from a step 8 recommendation
+```
+
+Each file holds the concept and acceptance criteria, the plan, the verification and test
+logs, the concept-check audit, the recommendations and the pull request. Every round of a
+feature shares one branch and one pull request; a later round's **Builds on** section names
+what the earlier rounds delivered, and its step 6 re-checks their acceptance criteria as a
+regression pass.
 
 The first line after the title is the workflow's state and is read by the hooks:
 
@@ -85,9 +98,10 @@ The first line after the title is the workflow's state and is read by the hooks:
 <!-- claude-plan step=3 status=active -->
 ```
 
-`step` is 1 to 9; `status` is `active`, `done`, `parked` or `template`. Exactly one plan
-should be `active` at a time. Plan files are committed — they are the record of why the
-code looks the way it does, and `/create-pr` builds the pull request body from them.
+`step` is 1 to 9; `status` is `active`, `done`, `parked` or `template`. Exactly one file
+across the whole repo should be `active` — opening a round stands its predecessor down to
+`done`. Plan files are committed: they are the record of why the code looks the way it is,
+and `/create-pr` builds the pull request body from every round in the folder.
 
 ## Claude configuration: `.claude/`
 
@@ -117,20 +131,22 @@ siblings because Python puts a script's own directory on `sys.path`. Stdlib only
 
 | Signature | Description |
 |---|---|
-| `Plan` | Frozen dataclass: `path`, `step`, `status`, `title`, `branch`, plus `step_name` and `gated` properties. |
+| `Plan` | Frozen dataclass: `path`, `step`, `status`, `title`, `branch`, `feature`, `round_number`, plus `step_name` and `gated` properties. |
 | `parse(path: Path) -> Plan \| None` | Parse one plan file, or None if it has no valid marker. |
-| `all_plans(project_dir: Path) -> list[Plan]` | Every parseable plan, most recently modified first. |
+| `all_plans(project_dir: Path) -> list[Plan]` | Every parseable plan in every feature folder, most recently modified first. |
 | `active_plan(project_dir: Path) -> Plan \| None` | The plan the pipeline is working through. |
+| `feature_rounds(project_dir: Path, feature: str) -> list[Plan]` | One feature's rounds, oldest first. |
 | `git_lines(project_dir: Path, args: list[str]) -> list[str]` | Run git, return output lines. |
 | `current_branch(project_dir: Path) -> str` | The checked-out branch, or `""`. |
-| `main() -> None` | Showcase: prints the plans found and the active one. |
+| `main() -> None` | Showcase: prints the plans found, the active one and its sibling rounds. |
 
 `GATE_FROM_STEP = 4` is the step at which the stop gate starts blocking.
 
 ### `.claude/hooks/session_brief.py`
 
-`SessionStart` hook. Injects the active plan's step into a new session's context, so work
-resumes without the user having to re-explain it. Silent when no plan is active. Stdlib only.
+`SessionStart` hook. Injects the active plan's step into a new session's context, plus what
+any earlier rounds of the same feature delivered, so work resumes without the user having
+to re-explain it. Silent when no plan is active. Stdlib only.
 
 | Signature | Description |
 |---|---|

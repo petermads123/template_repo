@@ -26,10 +26,11 @@ it either resumes what is in flight or starts something new. It does not do the 
 ## 1. Look before starting
 
 ```bash
-ls docs/plans/
+ls docs/plans/*/
 ```
 
-Parse each plan's marker — `<!-- claude-plan step=N status=... -->`.
+One folder per feature, one numbered file per round inside it. Parse each file's marker —
+`<!-- claude-plan step=N status=... -->`.
 
 **If a plan is already `active`**: report its slug, title, step and next step, then stop and
 ask whether to resume it or park it. Two active plans make the hooks guess which state the
@@ -43,14 +44,20 @@ test all mean the pipeline; nothing else does.
 ## 2. Create the plan file
 
 Pick a slug: kebab-case, a few words, what the feature *is* rather than what it does to the
-repo — `csv-export`, not `add-csv-module`.
+repo — `csv-export`, not `add-csv-module`. It names both the folder and the first round.
 
 ```bash
-cp docs/plans/TEMPLATE.md docs/plans/<slug>.md
+mkdir -p docs/plans/<slug>
+cp docs/plans/TEMPLATE.md docs/plans/<slug>/01-<slug>.md
 ```
 
-In the copy: set the title, fill the Slug and Started rows, delete the quoted instructions,
-and set the marker to
+The folder holds every round of this feature. Step 8 adds `02-<round-slug>.md` beside this
+one when a recommendation is taken up, and all of them share one branch and one pull
+request. Round 1 is a numbered file like any other — there is no flat-file special case.
+
+In the copy: set the title, fill the Feature, Round and Started rows, write "Nothing — this
+is the first round." under **Builds on**, delete the quoted instructions, and set the marker
+to
 
 ```
 <!-- claude-plan step=1 status=active -->
@@ -67,7 +74,8 @@ and asking for a yes.
 
 ## Resuming
 
-`/feature` with no argument, or in a fresh session, reports the state and stops. Any step
+`/feature` with no argument, or in a fresh session, reports the state and stops — including
+which round of which feature is in flight, and what the earlier rounds delivered. Any step
 can also be re-entered directly by its own skill: `/verify` after a fix, `/test` to add a
 case, `/concept-check` after a round of changes. Re-running a step is normal and cheap.
 Skipping one is neither.

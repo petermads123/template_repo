@@ -59,17 +59,41 @@ Present the list and ask for a decision on each. Three outcomes:
 - **`deferred`** — worth doing, not now. Record it; it stays in the plan file as the record.
 - **`rejected`** — record the reason. Next time this comes up, the reasoning is already
   there.
-- **`round 2`** — take it through the pipeline again.
+- **`next round`** — take it through the pipeline again, as a new round on this branch.
 
-For a round 2, append a new `### Round 2 — <title>` section under Rounds rather than
-editing sections 1 to 7, set the marker back to `<!-- claude-plan step=1 status=active -->`,
-and invoke `/conceptualize` for the follow-up. The original concept stays readable, and the
-existing branch and pull request carry both rounds.
+### Opening the next round
+
+A round is a new file in this feature's folder, not an edit to this one. The work already
+shipped in step 7 stays exactly as it was written and audited.
+
+```bash
+cp docs/plans/TEMPLATE.md docs/plans/<feature-slug>/0<N>-<round-slug>.md
+```
+
+Then, in order:
+
+1. In **this** file, mark step 8 `done` and set its marker to
+   `<!-- claude-plan step=8 status=done -->`. Exactly one file in the repo is `active`, so
+   this one has to stand down before the new one starts.
+2. In the **new** file, set the title, the Feature and Round rows, the same branch, and the
+   marker `<!-- claude-plan step=1 status=active -->`.
+3. Fill its **Builds on** section: what each earlier round delivered, the recommendation it
+   came from quoted in full, and what is already on the branch that it must not break.
+4. Invoke `/conceptualize` for the follow-up.
+
+The branch and the pull request carry every round. Step 6 of the new round re-checks this
+round's acceptance criteria as a regression pass, and step 9 builds the pull request body
+from every file in the folder.
+
+Multiple accepted recommendations become multiple rounds, run one at a time — not one round
+carrying several. Pick the one with the most value and open it; the rest stay `deferred` in
+this file until their turn.
 
 ## Stop here
 
 1. Mark step 8 `done` and set the marker to `<!-- claude-plan step=9 status=active -->`.
-   For a round 2, set it back to step 1 instead.
+   If a next round was opened, this file's marker becomes
+   `<!-- claude-plan step=8 status=done -->` instead and the new file carries the pipeline.
 2. Report: the ranked list with each decision.
 3. End the turn.
 

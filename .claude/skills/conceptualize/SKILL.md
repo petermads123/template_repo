@@ -17,6 +17,12 @@ Deciding them here quietly settles questions the concept has not asked yet.
 Read `STRUCTURE.md` and skim whatever it names as relevant. A concept that ignores what
 already exists produces a plan that duplicates it.
 
+**If this is a later round** — a second or third file in the feature's folder — read every
+earlier round in that folder first, then fill in the **Builds on** table: what each earlier
+round delivered, which recommendation this round came from, and what is already on the
+branch that this round must not break. A later round's concept is a change to something
+that already exists, so a concept written without reading those is being written blind.
+
 ## 2. Have the conversation
 
 Propose a first reading of what the user asked for — your understanding, not a restatement
@@ -53,6 +59,9 @@ Not observable, therefore not a criterion:
 
 Aim for three to eight. If there are twenty, the feature is several features and should be
 split. If there is one, the concept is probably too vague to plan.
+
+In a later round, these cover only what *this* round adds. The earlier rounds' criteria are
+not restated here — they stay where they were written and are re-checked in step 6.
 
 ## 4. Close the open questions
 

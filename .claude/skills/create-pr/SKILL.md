@@ -32,9 +32,14 @@ pytest
 **Any failure stops the skill.** Do not open a pull request on a red tree and do not offer
 to open one anyway. Fix it, then re-run the whole set from the top.
 
-Then confirm the plan file is complete: steps 1 to 8 marked `done`, section 6 with no unmet
-criteria, section 8 with a decision against every recommendation. An undecided
-recommendation means step 8 is not finished.
+Then confirm **every round in this feature's folder** is complete: steps 1 to 8 marked
+`done`, section 6 with no unmet criteria, section 8 with a decision against every
+recommendation. An undecided recommendation means step 8 is not finished.
+
+A folder with several rounds means several files, and all of them ship in this pull
+request. Only the newest should be `active`; an earlier one still marked `active` means a
+round was abandoned mid-pipeline rather than finished, and that is worth raising before
+publishing anything.
 
 Run the `structure-auditor` subagent one final time. `STRUCTURE.md` is what the next session
 reads instead of searching the repo, so it being wrong costs more than any other stale file.
@@ -64,37 +69,51 @@ Draft on purpose: nothing auto-merges, and the user gets a last look on GitHub.
 
 ## 5. Record and close the plan
 
-Write the URL into section 9, then set the marker to `<!-- claude-plan step=9 status=done -->`.
-That is what clears the session brief — leave it `active` and every future session opens
-believing this work is still in flight. Commit and push that final edit.
+Write the URL into section 9 of the newest round, then set that file's marker to
+`<!-- claude-plan step=9 status=done -->`. That is what clears the session brief — leave it
+`active` and every future session opens believing this work is still in flight. Commit and
+push that final edit.
+
+Earlier rounds in the folder are already `done`; they were stood down when their successor
+opened. Confirm it rather than assuming it.
 
 ## The body
 
-Built from the plan file, not from the diff. The diff is already on the page; what a
+Built from the plan files, not from the diff. The diff is already on the page; what a
 reviewer cannot see is why.
+
+**Every round in the folder goes in the body**, oldest first. A reviewer opening a
+three-round branch needs to see that it is three deliberate passes over one feature, not
+one change that kept growing.
 
 ```markdown
 ## What
-One paragraph from section 1: what this adds and why.
+One paragraph from round 1's section 1: what this adds and why.
+For a multi-round branch, one line per round after it: what that round added and which
+recommendation it came from.
 
 ## Acceptance criteria
-The table from section 6 — criterion, met, evidence.
+The table from section 6 of each round — criterion, met, evidence.
+Group by round when there is more than one.
 
 ## Changes
 - Bullet per meaningful change, file-scoped where useful.
 
 ## Verification
 - `ruff check .` / `ruff format --check .` / `mypy` / `pytest` — all pass
-- Test coverage of each intent, from section 5
+- Test coverage of each intent, from section 5 of each round
+- For a multi-round branch, the regression table from the newest round's section 6:
+  the earlier rounds' criteria still hold
 - Anything run by hand, with its actual result
 
 ## Follow-ups
-Deferred recommendations from section 8, with their reasons.
+Deferred recommendations from section 8 of every round, with their reasons. Drop any that
+a later round went on to implement.
 
 ## Notes
 Trade-offs, deliberate omissions, anything a reviewer should know.
 
-Plan: `docs/plans/<slug>.md`
+Plan: `docs/plans/<feature-slug>/` — one file per round.
 ```
 
 Omit a section rather than filling it with nothing.

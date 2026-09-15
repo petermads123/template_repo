@@ -1,7 +1,12 @@
 """Read the workflow state that lives in the active plan file.
 
-The nine-step pipeline keeps its state in `docs/plans/<slug>.md`, not in the
-conversation. Each plan file carries one machine-readable marker:
+The nine-step pipeline keeps its state on disk, not in the conversation. Each
+feature gets a folder named for its slug, holding one numbered file per round:
+
+    docs/plans/csv-export/01-csv-export.md        an earlier round, status=done
+    docs/plans/csv-export/02-streaming-writer.md  the round in flight, status=active
+
+Every file carries one machine-readable marker:
 
     <!-- claude-plan step=3 status=active -->
 
@@ -44,6 +49,7 @@ MARKER = re.compile(
     re.IGNORECASE,
 )
 BRANCH_ROW = re.compile(r"^\|\s*Branch\s*\|\s*([^|\s][^|]*?)\s*\|", re.MULTILINE)
+ROUND_PREFIX = re.compile(r"^(\d+)-")
 TITLE = re.compile(r"^#\s+(.+)$", re.MULTILINE)
 
 
@@ -57,6 +63,10 @@ class Plan:
         status: `active`, `done` or `parked`.
         title: The plan's first-level heading.
         branch: The branch the plan names, or an empty string if it names none.
+        feature: The slug of the folder this round belongs to. Empty for a file
+            sitting directly in the plans directory, such as the template.
+        round_number: Which round this is, from the filename's `NN-` prefix.
+            Zero when the filename carries no prefix.
     """
 
     path: Path
@@ -64,6 +74,8 @@ class Plan:
     status: str
     title: str
     branch: str
+    feature: str
+    round_number: int
 
     @property
     def step_name(self) -> str:
@@ -100,12 +112,16 @@ def parse(path: Path) -> Plan | None:
 
     branch = BRANCH_ROW.search(text)
     title = TITLE.search(text)
+    prefix = ROUND_PREFIX.match(path.stem)
+    parent = path.parent.name
     return Plan(
         path=path,
         step=step,
         status=marker.group(2).lower(),
         title=title.group(1).strip() if title else path.stem,
         branch=branch.group(1).strip().strip("`") if branch else "",
+        feature=parent if parent != PLAN_DIR.name else "",
+        round_number=int(prefix.group(1)) if prefix else 0,
     )
 
 
@@ -115,6 +131,9 @@ def all_plans(project_dir: Path) -> list[Plan]:
     Args:
         project_dir: Repository root.
 
+    Recurses into the per-feature folders, so every round of every feature is
+    included.
+
     Returns:
         Every parseable plan, most recently modified first.
     """
@@ -123,7 +142,7 @@ def all_plans(project_dir: Path) -> list[Plan]:
         return []
 
     plans: list[Plan] = []
-    for path in sorted(plan_dir.glob("*.md")):
+    for path in sorted(plan_dir.glob("**/*.md")):
         plan = parse(path)
         if plan is None:
             continue
@@ -194,11 +213,33 @@ def current_branch(project_dir: Path) -> str:
     return lines[0].strip() if lines else ""
 
 
+def feature_rounds(project_dir: Path, feature: str) -> list[Plan]:
+    """List every round of one feature, oldest first.
+
+    This is what a later round reads to know what earlier rounds already
+    delivered, and what `/create-pr` reads to describe the whole branch.
+
+    Args:
+        project_dir: Repository root.
+        feature: The feature's folder name, as carried on `Plan.feature`.
+
+    Returns:
+        The feature's rounds ordered by round number.
+    """
+    rounds = [plan for plan in all_plans(project_dir) if plan.feature == feature]
+    rounds.sort(key=lambda plan: plan.round_number)
+    return rounds
+
+
 def main() -> None:
     """Showcase this module's functionality."""
     project_dir = Path.cwd()
     print(f"plans found: {[str(plan.path) for plan in all_plans(project_dir)]}")
-    print(f"active: {active_plan(project_dir)}")
+    active = active_plan(project_dir)
+    print(f"active: {active}")
+    if active is not None:
+        siblings = feature_rounds(project_dir, active.feature)
+        print(f"rounds of {active.feature!r}: {[p.round_number for p in siblings]}")
     print(f"branch: {current_branch(project_dir)!r}")
     print(f"step 4 is gated: {GATE_FROM_STEP <= 4}")
 

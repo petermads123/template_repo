@@ -2,17 +2,24 @@
 
 <!-- claude-plan step=1 status=template -->
 
-> Copy this file to `docs/plans/<slug>.md`, change `status=template` to `status=active`,
-> and fill it in as the pipeline runs. Delete these quoted instructions from your copy.
+> Copy this file to `docs/plans/<feature-slug>/NN-<round-slug>.md`, change
+> `status=template` to `status=active`, and fill it in as the pipeline runs. Delete these
+> quoted instructions from your copy.
+>
+> One folder per feature, one numbered file per round. Round 1 is `01-<feature-slug>.md`;
+> a recommendation taken up in step 8 becomes `02-<its-own-slug>.md` in the same folder,
+> and so on. Every round of a feature shares one branch and one pull request.
 >
 > The marker line above is the workflow's state, read by `.claude/hooks/plan_state.py`:
 > `step` is the step currently in progress, `status` is `active`, `done`, `parked` or
-> `template`. Keep exactly one plan `active`. The stop gate is advisory through step 3
-> and blocking from step 4, so this marker decides how strict the repo is being.
+> `template`. Keep exactly one file `active` across the whole repo — when a new round
+> opens, the round before it becomes `done`. The stop gate is advisory through step 3 and
+> blocking from step 4, so this marker decides how strict the repo is being.
 
 | Field | Value |
 |---|---|
-| Slug | `<slug>` |
+| Feature | `<feature-slug>` (the folder) |
+| Round | `<N>` |
 | Branch | `<type>/<kebab-case-topic>` |
 | Started | `<YYYY-MM-DD>` |
 
@@ -31,6 +38,21 @@
 | 9 | Pull request | `/create-pr` | pending |
 
 Statuses: `pending`, `in progress`, `done`.
+
+## Builds on
+
+> Round 1 writes "Nothing — this is the first round." and moves on. A later round fills
+> this in before step 1 starts, because its concept is a change to something that already
+> exists and is already on the branch.
+
+| Round | File | What it delivered |
+|---|---|---|
+
+This round came from recommendation `<R#>` of round `<N>`, which read:
+
+> <the recommendation, quoted from that round's section 8>
+
+What is already on the branch that this round must not break:
 
 ---
 
@@ -155,6 +177,16 @@ Edge cases considered and deliberately skipped, with reasons:
 
 Drift found, and what was done about it:
 
+### Earlier rounds still hold
+
+> Later rounds only. Re-check every acceptance criterion from every earlier round in this
+> folder: this round changed code they depend on, and their tests passing is necessary but
+> not sufficient — a criterion can be satisfied by tests that no longer describe what the
+> feature does.
+
+| Round | # | Criterion | Still met | Evidence |
+|---|---|---|---|---|
+
 ---
 
 ## 7. Ship log
@@ -175,7 +207,8 @@ Drift found, and what was done about it:
 |---|---|---|---|---|
 | R1 | | | | |
 
-Decisions: `deferred`, `rejected`, or `round 2` (taken back through steps 1 to 7).
+Decisions: `deferred`, `rejected`, or `next round` — a new numbered file in this folder,
+taken back through steps 1 to 7 on the same branch.
 
 ---
 
@@ -185,15 +218,3 @@ Decisions: `deferred`, `rejected`, or `round 2` (taken back through steps 1 to 7
 |---|---|
 | URL | |
 | Opened as | draft |
-
----
-
-## Rounds
-
-> When a recommendation is taken up, append a new round here rather than editing the
-> sections above. The original concept stays readable, and step 6 can still check the
-> finished work against what was first agreed.
-
-### Round 2 — <title>
-
-Concept, plan and outcome for the follow-up, in the same shape as above.

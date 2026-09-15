@@ -17,7 +17,7 @@ import json
 import sys
 from pathlib import Path
 
-from plan_state import STEP_NAMES, Plan, all_plans, current_branch
+from plan_state import STEP_NAMES, Plan, all_plans, current_branch, feature_rounds
 
 # Which skill resumes each step, keyed by the step it produces.
 STEP_SKILLS: dict[int, str] = {
@@ -56,6 +56,19 @@ def brief(project_dir: Path, plan: Plan) -> str:
         lines.append(
             f"The step after it is {following} ({STEP_NAMES[following]}), "
             f"`{STEP_SKILLS[following]}`."
+        )
+
+    earlier = [
+        other
+        for other in feature_rounds(project_dir, plan.feature)
+        if other.round_number < plan.round_number
+    ]
+    if earlier:
+        shipped = ", ".join(f"`{other.path.name}` ({other.title})" for other in earlier)
+        lines.append(
+            f"\nThis is round {plan.round_number} of `{plan.feature}`. Earlier rounds "
+            f"are already on the branch: {shipped}. Read them before changing anything — "
+            "their acceptance criteria still have to hold."
         )
 
     checked_out = current_branch(project_dir)

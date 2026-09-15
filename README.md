@@ -29,7 +29,7 @@ Or in `dependencies` in `pyproject.toml`:
     updating `STRUCTURE.md` as you go.
 
 `docs/plans/` starts with only `TEMPLATE.md` in it. Leave that file alone — `/feature`
-copies it for each new piece of work.
+copies it into a new folder for each piece of work.
 
 Nothing else references the package name: `__init__.py` uses a relative import,
 `[tool.setuptools.packages.find]` excludes `tests*` rather than naming the package, and
@@ -119,8 +119,17 @@ map, loaded every session) and `STRUCTURE.md` (a map of what lives where, import
 ### The implementation pipeline
 
 Anything that is not cosmetic goes through nine steps, with a hard stop after each one so
-you decide when to move on. The state lives in `docs/plans/<slug>.md` rather than in the
-conversation, so a feature survives closing the session and coming back tomorrow.
+you decide when to move on. The state lives on disk rather than in the conversation, so a
+feature survives closing the session and coming back tomorrow — one folder per feature, one
+numbered file per round:
+
+```
+docs/plans/
+  TEMPLATE.md
+  csv-export/
+    01-csv-export.md          round 1, shipped
+    02-streaming-writer.md    round 2, in flight
+```
 
 | Step | Command | Produces |
 |---|---|---|
@@ -142,8 +151,10 @@ Two things are worth knowing about the shape of it. **Step 6 audits against step
 step 2**: a plan can drift from its concept a little at each step while passing every check
 along the way, and this is where that gets caught. And **step 8 is where new scope belongs**
 — ideas that turn up during steps 1 to 7 are a distraction, but with the finished feature in
-front of you they are a decision. A recommendation you accept goes back through the pipeline
-as a second round in the same plan file.
+front of you they are a decision. A recommendation you accept opens a new numbered file in
+the same folder and goes back through steps 1 to 7 on the same branch, so one pull request
+can carry several deliberate passes over one feature. Step 6 of a later round re-checks the
+earlier rounds' acceptance criteria, so a follow-up cannot quietly regress what it builds on.
 
 | Other commands | Use for |
 |---|---|

@@ -37,7 +37,8 @@ Read it. Two things to catch here and nowhere else:
 - **Files that should not be committed** — scratch scripts, sample data, anything under a
   temp directory, `.claude/.skip-gate`. Leave them out rather than committing and reverting.
 - **The plan file** — it *should* be committed. It is the record of why this code looks the
-  way it does, and step 9 builds the pull request body from it.
+  way it does, and step 9 builds the pull request body from it. On a later round that means
+  this round's file; the earlier ones went in with their own commits and are untouched.
 
 ## 3. Commit
 

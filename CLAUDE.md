@@ -8,8 +8,9 @@ update it in the same change whenever a module or public signature changes.
 ## The implementation pipeline
 
 Anything that is not cosmetic goes through nine steps. State lives in
-`docs/plans/<slug>.md`, not in the conversation, so work survives a context reset or a new
-session.
+`docs/plans/<feature-slug>/NN-<round-slug>.md`, not in the conversation, so work survives a
+context reset or a new session. One folder per feature, one numbered file per round; a
+recommendation accepted at step 8 opens the next round on the same branch.
 
 | # | Step | Skill | Produces |
 |---|---|---|---|
@@ -23,8 +24,11 @@ session.
 | 8 | Recommend | `/recommend` | Ranked follow-ups, decided with the user |
 | 9 | Pull request | `/create-pr` | Draft PR to `main` |
 
-`/feature <what to build>` starts the pipeline and creates the plan file. In a session that
-is already mid-pipeline it reports the step instead.
+`/feature <what to build>` starts the pipeline and creates the plan folder and its first
+round. In a session that is already mid-pipeline it reports the step instead.
+
+Exactly one plan file across the repo carries `status=active`. When step 8 opens the next
+round, the round before it becomes `done` and the new file takes over.
 
 ### The gate between steps is the point
 
