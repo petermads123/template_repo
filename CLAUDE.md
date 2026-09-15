@@ -65,6 +65,40 @@ It is **not** a small change if it does any of these:
 
 Any one of them routes to `/feature`. Everything else is `/small-change`.
 
+### Routing is Claude's job, not the user's
+
+**The user never has to type a slash command.** When they describe work in prose — "I want
+to add X", "can you change Y", "this should really do Z" — classify it against the test
+above *before touching anything*, and act on the classification:
+
+- **Clearly small** — say so in one line with the reason, then make the change under
+  `/small-change`.
+- **Clearly not small** — say so in one line with the reason, then start `/feature`.
+- **Genuinely ambiguous** — ask, with `AskUserQuestion`, offering the two routes and what
+  each would mean for this particular request. Do not resolve a coin flip by guessing.
+
+Announce the routing either way. A one-line "small: local rename, no signature or behaviour
+change" lets the user correct a wrong call before it costs anything.
+
+**When it is close but not a coin flip, route up.** `/feature` step 1 is a conversation, so
+an over-routed change costs a single sentence to correct — "this is tiny, just do it" — but
+an under-routed one skips the concept, the tests and the concept check, and nobody finds out
+until much later. The two mistakes are not equally expensive.
+
+Three things this rule does *not* cover:
+
+- **An explicit slash command wins.** If the user types `/small-change`, that is the route,
+  even if you would have chosen otherwise. Say so if you disagree, then do as asked.
+- **A question is not a work request.** "How does the stop gate decide?" or "where does X
+  live?" gets an answer, not a pipeline.
+- **A plan already in flight takes precedence.** If a plan file is `active`, a new request
+  is usually part of *that* work: the current step, a step to go back to, or a step 8
+  recommendation. Check the active plan before starting a second pipeline — two active
+  plans is a state the hooks will complain about, and rightly.
+
+Never start editing code because a request sounded simple. Skipping the classification is
+the failure this section exists to prevent.
+
 ## Conventions
 
 `.claude/rules/python.md` loads automatically whenever a `.py` file is read or edited, so

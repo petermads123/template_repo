@@ -147,6 +147,18 @@ Start with `/feature <what to build>` — it creates the plan file and opens ste
 that, each step is opened by running its own command. A step never starts the next one on
 its own.
 
+**You do not have to type the commands.** Describe the work in prose — "I want to add CSV
+export", "rename that variable" — and Claude classifies it against the small-or-large test
+before doing anything: a local rename with no signature or behaviour change is small, and
+anything that adds a file, changes a public signature, changes behaviour or needs a test is
+not. It says which way it routed and why in one line, so a wrong call costs you a sentence
+to correct, and asks only when the request is genuinely borderline. When it is close, it
+routes up to the pipeline, because step 1 is a conversation you can redirect — whereas a
+feature handled as a small change quietly skips the concept, the tests and the audit.
+
+A slash command still wins if you type one, and a question stays a question: asking how
+something works gets an answer, not a pipeline.
+
 Step 9 is not a formality. It is the only point where the branch is verified as a whole:
 steps 4 and 7 each checked one round at one moment, so on a multi-round branch nothing has
 yet proved that round 2 left round 1 working. It re-runs the full suite, every module
