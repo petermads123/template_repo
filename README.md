@@ -163,7 +163,8 @@ something works gets an answer, not a pipeline.
 Each step also picks its own model. Concept, planning and recommendations run on Opus
 because they are judgment; implementation, verification, tests, the concept check and the
 pull request run on Sonnet at max effort because the thinking has already been done and
-written down. The override lasts one step and reverts, so your own `/model` setting is left
+written down. `/small-change` runs on Opus too — deciding a change is small enough to skip
+the pipeline is the one judgment made without the pipeline to catch it. The override lasts one step and reverts, so your own `/model` setting is left
 alone. `CLAUDE.md` has the table.
 
 Step 9 is not a formality. It is the only point where the branch is verified as a whole:

@@ -2,8 +2,8 @@
 name: small-change
 description: Make a small, low-risk edit — renaming a local variable, rewording a docstring or message, adjusting plot styling or formatting. Use for cosmetic changes that do not alter behavior, add or remove files, change a public signature, or need a new test. Applies whether the user names the skill or just describes such a change in prose. Anything that does any of those routes to the feature pipeline instead.
 argument-hint: [what to change]
-model: sonnet
-effort: max
+model: opus
+effort: high
 ---
 
 # Small change
@@ -27,6 +27,12 @@ needs.
 Borderline cases worth naming out loud: renaming a *public* name is not small, because it
 changes a signature and `STRUCTURE.md`. Renaming a local variable is. Rewording a docstring
 is small; changing what it documents means the behavior changed and it is not.
+
+This skill runs on `opus` at `high` — the only Sonnet-free path outside the pipeline's
+judgment steps. That is deliberate: step 1 below is the single highest-stakes call in the
+whole setup, because it is the one decision made with none of the pipeline's safety nets
+behind it. Everything downstream of a wrong "yes, that's small" is skipped rather than
+caught.
 
 ## 2. Know that the gate is strict here
 

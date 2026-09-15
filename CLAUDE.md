@@ -51,8 +51,9 @@ reverts on the next prompt.
 | 10 Review | `opus` | `medium` | Most check-ins find nothing; the judgment is fix-or-new-round |
 
 `/feature` carries step 1's settings because it opens step 1 in the same turn, and a model
-override applies for the rest of the turn it is set in. `/small-change` runs `sonnet` at
-`max` too.
+override applies for the rest of the turn it is set in. `/small-change` runs `opus` at
+`high`: bypassing the pipeline is a judgment call made without any of its safety nets, so
+the step that decides whether a change really is small gets the clever model.
 
 `max` is the top effort level; every Sonnet step uses it. Aliases rather than pinned IDs, so
 a newer Opus or Sonnet is picked up without editing twelve files. `ultracode` is a
