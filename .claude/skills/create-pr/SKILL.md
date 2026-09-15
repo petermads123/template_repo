@@ -133,15 +133,21 @@ can look at it.
 This also means section 3 is the only gate between the work and a published pull request.
 Treat it that way — an unanswered confirmation is not a yes, and neither is silence.
 
-## 5. Record and close the plan
+## 5. Record, then hand off to step 10
 
 Write the URL into section 9 of the newest round, then set that file's marker to
-`<!-- claude-plan step=9 status=done -->`. That is what clears the session brief — leave it
-`active` and every future session opens believing this work is still in flight. Commit and
-push that final edit.
+`<!-- claude-plan step=10 status=active -->`. Commit and push that edit.
+
+**The plan stays active.** Opening a pull request is not finishing the work — the work is
+finished when it merges or closes, and step 10 is the stretch in between. Marking it `done`
+here would clear the session brief while a live pull request still needs watching.
 
 Earlier rounds in the folder are already `done`; they were stood down when their successor
 opened. Confirm it rather than assuming it.
+
+Then invoke `/watch-pr` to arm the hourly check. That is the one place in the pipeline where
+a step starts the next one without being asked: the alternative is a published pull request
+that nobody is watching because the user did not know to say so.
 
 ## The body
 

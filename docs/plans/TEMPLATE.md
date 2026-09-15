@@ -36,6 +36,7 @@
 | 7 | Ship | `/ship` | pending |
 | 8 | Recommend | `/recommend` | pending |
 | 9 | Pull request | `/create-pr` | pending |
+| 10 | Review | `/watch-pr` | pending |
 
 Statuses: `pending`, `in progress`, `done`.
 
@@ -218,3 +219,17 @@ taken back through steps 1 to 7 on the same branch.
 |---|---|
 | URL | |
 | Opened as | ready for review |
+
+---
+
+## 10. Review log
+
+> Written in step 10, one row per review thread. The record of how the pull request got
+> from opened to merged — the part nobody can reconstruct from the diff later.
+>
+> Quiet check-ins are not recorded. Nineteen rows of "nothing had changed" is noise.
+
+| Thread | Who asked for what | Outcome |
+|---|---|---|
+
+Outcomes: `fixed and pushed`, `replied, left open`, or `round N`.

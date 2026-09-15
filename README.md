@@ -118,7 +118,7 @@ map, loaded every session) and `STRUCTURE.md` (a map of what lives where, import
 
 ### The implementation pipeline
 
-Anything that is not cosmetic goes through nine steps, with a hard stop after each one so
+Anything that is not cosmetic goes through ten steps, with a hard stop after each one so
 you decide when to move on. The state lives on disk rather than in the conversation, so a
 feature survives closing the session and coming back tomorrow — one folder per feature, one
 numbered file per round:
@@ -142,6 +142,7 @@ docs/plans/
 | 7 | `/ship` | Commit and push |
 | 8 | `/recommend` | Ranked follow-ups, decided with you |
 | 9 | `/create-pr` | A full re-verification of the whole branch, then a pull request to `main`, ready for review |
+| 10 | `/watch-pr` | An hourly check of the open PR, acting on comments, until it merges or closes |
 
 Start with `/feature <what to build>` — it creates the plan file and opens step 1. After
 that, each step is opened by running its own command. A step never starts the next one on

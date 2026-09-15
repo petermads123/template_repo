@@ -30,6 +30,7 @@ STEP_SKILLS: dict[int, str] = {
     7: "/ship",
     8: "/recommend",
     9: "/create-pr",
+    10: "/watch-pr",
 }
 
 
@@ -47,11 +48,11 @@ def brief(project_dir: Path, plan: Plan) -> str:
         "## Workflow state",
         "",
         f"An implementation pipeline is in flight: `{plan.path}` — {plan.title}",
-        f"It is on **step {plan.step} of 9 — {plan.step_name}**, "
+        f"It is on **step {plan.step} of {max(STEP_SKILLS)} — {plan.step_name}**, "
         f"resumed with `{STEP_SKILLS[plan.step]}`.",
     ]
 
-    if plan.step < 9:
+    if plan.step < max(STEP_SKILLS):
         following = plan.step + 1
         lines.append(
             f"The step after it is {following} ({STEP_NAMES[following]}), "

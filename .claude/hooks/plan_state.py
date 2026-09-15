@@ -42,6 +42,7 @@ STEP_NAMES: dict[int, str] = {
     7: "Ship",
     8: "Recommend",
     9: "Pull request",
+    10: "Review",
 }
 
 MARKER = re.compile(
@@ -59,7 +60,7 @@ class Plan:
 
     Attributes:
         path: Path to the plan file, relative to the repository root.
-        step: The step the pipeline is on, 1 through 9.
+        step: The step the pipeline is on, 1 through 10.
         status: `active`, `done` or `parked`.
         title: The plan's first-level heading.
         branch: The branch the plan names, or an empty string if it names none.
@@ -107,7 +108,7 @@ def parse(path: Path) -> Plan | None:
         return None
 
     step = int(marker.group(1))
-    if not 1 <= step <= 9:
+    if not 1 <= step <= len(STEP_NAMES):
         return None
 
     branch = BRANCH_ROW.search(text)

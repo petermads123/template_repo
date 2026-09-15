@@ -7,7 +7,7 @@ update it in the same change whenever a module or public signature changes.
 
 ## The implementation pipeline
 
-Anything that is not cosmetic goes through nine steps. State lives in
+Anything that is not cosmetic goes through ten steps. State lives in
 `docs/plans/<feature-slug>/NN-<round-slug>.md`, not in the conversation, so work survives a
 context reset or a new session. One folder per feature, one numbered file per round; a
 recommendation accepted at step 8 opens the next round on the same branch.
@@ -23,6 +23,7 @@ recommendation accepted at step 8 opens the next round on the same branch.
 | 7 | Ship | `/ship` | Commit and push |
 | 8 | Recommend | `/recommend` | Ranked follow-ups, decided with the user |
 | 9 | Pull request | `/create-pr` | Whole-branch re-verification, then a PR to `main`, ready for review |
+| 10 | Review | `/watch-pr` | Hourly check until the PR merges or closes |
 
 `/feature <what to build>` starts the pipeline and creates the plan folder and its first
 round. In a session that is already mid-pipeline it reports the step instead.
@@ -47,6 +48,7 @@ reverts on the next prompt.
 | 7 Ship | `sonnet` | `high` | Commit and push; procedural |
 | 8 Recommend | `opus` | `xhigh` | Judging what is worth building next |
 | 9 Pull request | `sonnet` | `xhigh` | Verification and writing, both well-specified |
+| 10 Review | `opus` | `medium` | Most check-ins find nothing; the judgment is fix-or-new-round |
 
 `/feature` carries step 1's settings because it opens step 1 in the same turn, and a model
 override applies for the rest of the turn it is set in. `/small-change` runs `sonnet` at
@@ -55,6 +57,21 @@ override applies for the rest of the turn it is set in. `/small-change` runs `so
 Aliases rather than pinned IDs, so a newer Opus or Sonnet is picked up without editing
 eleven files. `ultracode` is a session-level effort setting and not valid here; `xhigh` is
 the closest a skill can pin.
+
+### Step 10 runs until the pull request closes
+
+Opening the pull request is not finishing the work. Step 10 re-checks it about once an hour,
+acts on review comments and CI, and ends only when the pull request merges or closes — so
+the plan file stays `active` through it.
+
+It is the one place a step starts the next one unasked: `/create-pr` invokes `/watch-pr`,
+because the alternative is a published pull request nobody is watching. It is also the one
+step that mostly does nothing, and a quiet check-in re-arms silently rather than reporting.
+
+Its judgment call is whether a review comment is a fix or a new round. The same small-or-
+large test decides, and the same rule applies: **when it is close, route up.** An
+over-routed comment costs a conversation; an under-routed one puts unplanned, untested
+behaviour into a pull request a reviewer has already read.
 
 ### The gate between steps is the point
 

@@ -82,7 +82,7 @@ found anywhere else.
 ## Plans: `docs/plans/`
 
 One folder per feature, one numbered file per round inside it, created by `/feature` from
-`TEMPLATE.md` and carried through all nine steps:
+`TEMPLATE.md` and carried through all ten steps:
 
 ```
 docs/plans/
@@ -104,7 +104,8 @@ The first line after the title is the workflow's state and is read by the hooks:
 <!-- claude-plan step=3 status=active -->
 ```
 
-`step` is 1 to 9; `status` is `active`, `done`, `parked` or `template`. Exactly one file
+`step` is 1 to 10; `status` is `active`, `done`, `parked` or `template`. A plan stays
+`active` through step 10 and is marked `done` only when the pull request merges or closes. Exactly one file
 across the whole repo should be `active` — opening a round stands its predecessor down to
 `done`. Plan files are committed: they are the record of why the code looks the way it is,
 and `/create-pr` builds the pull request body from every round in the folder.
@@ -126,6 +127,7 @@ and `/create-pr` builds the pull request body from every round in the folder.
 | `skills/ship/` | `/ship` — step 7, commit and push |
 | `skills/recommend/` | `/recommend` — step 8, ranked follow-ups |
 | `skills/create-pr/` | `/create-pr` — step 9, pull request ready for review |
+| `skills/watch-pr/` | `/watch-pr` — step 10, hourly review watch until merge or close |
 | `skills/small-change/` | `/small-change` — cosmetic edits, outside the pipeline |
 | `agents/test-designer.md` | Read-only subagent that finds edge cases (feeds step 5) |
 | `agents/structure-auditor.md` | Read-only subagent that reconciles this file (feeds steps 4 and 6) |
