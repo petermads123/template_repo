@@ -72,6 +72,22 @@ untangling nested literals.
 - Two or three cases: the normal one first, then something that teaches — an edge, a
   default, an input that reveals behaviour worth knowing.
 - Label each print when there is more than one case, so the output says which is which.
+- **When an argument only accepts a fixed set of values, list them in a comment on the same
+  line.** The reader sees the options without opening the docstring, and swaps one in by
+  editing the string:
+
+  ```python
+  resolution = "daily"  # "daily", "weekly", "monthly"
+  fill = "forward"      # "forward", "backward", "none"
+  ```
+
+  It applies to enum members too: `period = Period.DAILY  # DAILY, WEEKLY, MONTHLY`.
+
+  List the ones worth knowing rather than exhaustively. If there are twenty, name the three
+  that matter and point at the rest: `# "daily", "weekly", "monthly", ... see RESOLUTIONS`.
+
+  Booleans do not need it — `strict = True  # True, False` tells the reader nothing the
+  type has not already told them.
 
 **Bad** — the arguments are buried in the call. This is the most common failure, and it
 looks fine until you try to change something:

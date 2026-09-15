@@ -34,7 +34,8 @@ a `main()` showcase and `__main__` guard on every module, private helpers prefix
 
 The showcase has a required shape, and it is the part most often written carelessly: bind
 every argument to a named variable, call on its own line, name the result, print it. Not
-`print(f(1, 2))`. It is the first thing anyone reads to learn how the module is used, so
+`print(f(1, 2))`. Where an argument takes one of a fixed set of values, list them in a
+comment on the same line: `resolution = "daily"  # "daily", "weekly", "monthly"`. It is the first thing anyone reads to learn how the module is used, so
 write it as the worked example it is.
 
 Match the Public API table exactly — signature, parameter names, defaults, return type.
