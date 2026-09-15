@@ -22,7 +22,7 @@ recommendation accepted at step 8 opens the next round on the same branch.
 | 6 | Concept check | `/concept-check` | Audit against step 1, not step 2 |
 | 7 | Ship | `/ship` | Commit and push |
 | 8 | Recommend | `/recommend` | Ranked follow-ups, decided with the user |
-| 9 | Pull request | `/create-pr` | Draft PR to `main` |
+| 9 | Pull request | `/create-pr` | Whole-branch re-verification, then a draft PR to `main` |
 
 `/feature <what to build>` starts the pipeline and creates the plan folder and its first
 round. In a session that is already mid-pipeline it reports the step instead.

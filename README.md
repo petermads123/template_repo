@@ -141,11 +141,16 @@ docs/plans/
 | 6 | `/concept-check` | An audit against step 1, criterion by criterion |
 | 7 | `/ship` | Commit and push |
 | 8 | `/recommend` | Ranked follow-ups, decided with you |
-| 9 | `/create-pr` | A draft pull request to `main` |
+| 9 | `/create-pr` | A full re-verification of the whole branch, then a draft pull request to `main` |
 
 Start with `/feature <what to build>` — it creates the plan file and opens step 1. After
 that, each step is opened by running its own command. A step never starts the next one on
 its own.
+
+Step 9 is not a formality. It is the only point where the branch is verified as a whole:
+steps 4 and 7 each checked one round at one moment, so on a multi-round branch nothing has
+yet proved that round 2 left round 1 working. It re-runs the full suite, every module
+showcase and every round's plan against a clean tree and a current `main`.
 
 Two things are worth knowing about the shape of it. **Step 6 audits against step 1, not
 step 2**: a plan can drift from its concept a little at each step while passing every check
