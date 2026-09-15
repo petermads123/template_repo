@@ -60,8 +60,8 @@ Example module, present to demonstrate the conventions. Replace it with real cod
 
 | Signature | Description |
 |---|---|
-| `greet(name: str = "World") -> str` | Build a greeting for `name`. |
-| `main() -> None` | Showcase: a named greeting, the default, and a non-ASCII name, each with its input bound to a variable first. |
+| `greet(name: str = "World", style: str = "friendly") -> str` | Build a greeting for `name` in one of the styles `"friendly"`, `"formal"` or `"casual"`. Raises `ValueError` on an unknown style. |
+| `main() -> None` | Showcase: two styles and a non-ASCII default, with every input bound to a named variable and the accepted styles listed in a same-line comment. |
 
 Runnable standalone: `python -m template_repo.hello_world`.
 
@@ -71,7 +71,9 @@ Runnable standalone: `python -m template_repo.hello_world`.
 
 Covers `greet`. Demonstrates the edge-case standard from `.claude/rules/python.md`: default
 value, explicit value, empty string, non-ASCII input, whitespace preservation, a very long
-input, and a parametrized determinism check.
+input, a parametrized determinism check, every style in a parametrized table, and the
+malformed-input cases the `Raises:` branch introduces — unknown style, wrong case, empty
+string and `None`, the last with a narrowed `# type: ignore[arg-type]` and its reason.
 
 All tests live here and nowhere else — `testpaths = ["tests"]` in `pyproject.toml` means
 `pytest` collects nothing outside this directory, and the stop gate blocks on a test file

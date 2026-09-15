@@ -1,38 +1,56 @@
 """Example module. Replace with real code."""
 
+# Private, so it stays out of STRUCTURE.md: the styles are reachable through
+# greet(), and listing an implementation detail there is what makes it rot.
+_GREETINGS = {
+    "friendly": "Hello, {name}!",
+    "formal": "Good day, {name}.",
+    "casual": "Hey {name}!",
+}
 
-def greet(name: str = "World") -> str:
+
+def greet(name: str = "World", style: str = "friendly") -> str:
     """Build a greeting.
 
     Args:
         name: Who to greet.
+        style: Which wording to use. One of "friendly", "formal" or "casual".
 
     Returns:
         The greeting.
+
+    Raises:
+        ValueError: If `style` is not one of the known styles.
     """
-    return f"Hello, {name}!"
+    if style not in _GREETINGS:
+        known = ", ".join(repr(known_style) for known_style in sorted(_GREETINGS))
+        raise ValueError(f"style must be one of {known}, got {style!r}")
+    return _GREETINGS[style].format(name=name)
 
 
 def main() -> None:
     """Showcase this module's functionality."""
-    # The normal case: greet someone by name.
+    # The normal case: a name and a style.
     name = "Peter"
+    style = "friendly"  # "friendly", "formal", "casual"
 
-    greeting = greet(name)
+    greeting = greet(name, style)
 
-    print(f"named:     {greeting}")
+    print(f"friendly:  {greeting}")
 
-    # No argument, so the default applies.
-    default_greeting = greet()
+    # The same name, a different style.
+    style = "formal"
 
-    print(f"default:   {default_greeting}")
+    greeting = greet(name, style)
 
-    # Non-ASCII input, returned exactly as given.
+    print(f"formal:    {greeting}")
+
+    # The default style, and non-ASCII text returned exactly as given.
     name = "Ærø"
 
     greeting = greet(name)
 
-    print(f"non-ASCII: {greeting}")
+    print(f"default:   {greeting}")
 
 
 if __name__ == "__main__":
