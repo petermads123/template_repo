@@ -61,7 +61,7 @@ Example module, present to demonstrate the conventions. Replace it with real cod
 | Signature | Description |
 |---|---|
 | `greet(name: str = "World") -> str` | Build a greeting for `name`. |
-| `main() -> None` | Showcase: prints a default, a named and a non-ASCII greeting. |
+| `main() -> None` | Showcase: a named greeting, the default, and a non-ASCII name, each with its input bound to a variable first. |
 
 Runnable standalone: `python -m template_repo.hello_world`.
 
@@ -72,6 +72,10 @@ Runnable standalone: `python -m template_repo.hello_world`.
 Covers `greet`. Demonstrates the edge-case standard from `.claude/rules/python.md`: default
 value, explicit value, empty string, non-ASCII input, whitespace preservation, a very long
 input, and a parametrized determinism check.
+
+All tests live here and nowhere else — `testpaths = ["tests"]` in `pyproject.toml` means
+`pytest` collects nothing outside this directory, and the stop gate blocks on a test file
+found anywhere else.
 
 ## Plans: `docs/plans/`
 
@@ -183,7 +187,8 @@ writes or edits, and reports unfixable issues back via exit code 2. Stdlib only.
 
 `Stop` hook. Reads the active plan's step to decide how strict to be: advisory through step
 3, blocking from step 4 and whenever no plan is active. When it blocks it runs ruff, mypy
-and pytest and cross-checks `STRUCTURE.md` against the modules on disk. Bypass with
+and pytest, cross-checks `STRUCTURE.md` against the modules on disk, and reports any test
+file sitting outside `tests/` where `pytest` would silently never collect it. Bypass with
 `.claude/.skip-gate`. Stdlib only.
 
 | Signature | Description |
@@ -193,6 +198,7 @@ and pytest and cross-checks `STRUCTURE.md` against the modules on disk. Bypass w
 | `changed_python_files(project_dir: Path) -> set[str]` | Python files changed in the tree or on this branch. |
 | `tracked_python_files(project_dir: Path) -> set[str]` | All non-ignored Python files. |
 | `structure_problems(project_dir: Path) -> list[str]` | File-level drift between this file and disk. |
+| `stray_test_files(project_dir: Path) -> list[str]` | Test files outside `tests/`, which pytest never collects. |
 | `gate_failures(project_dir: Path) -> list[str]` | Run the verification set, collect failures. |
 | `advisory_notes(project_dir: Path, plan: Plan, changed: set[str]) -> list[str]` | Non-blocking observations for steps 1 to 3. |
 | `notice(message: str) -> None` | Show the user a message without blocking. |

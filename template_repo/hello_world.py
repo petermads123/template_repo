@@ -15,9 +15,24 @@ def greet(name: str = "World") -> str:
 
 def main() -> None:
     """Showcase this module's functionality."""
-    print(greet())
-    print(greet("Peter"))
-    print(greet("Ærø"))
+    # The normal case: greet someone by name.
+    name = "Peter"
+
+    greeting = greet(name)
+
+    print(f"named:     {greeting}")
+
+    # No argument, so the default applies.
+    default_greeting = greet()
+
+    print(f"default:   {default_greeting}")
+
+    # Non-ASCII input, returned exactly as given.
+    name = "Ærø"
+
+    greeting = greet(name)
+
+    print(f"non-ASCII: {greeting}")
 
 
 if __name__ == "__main__":

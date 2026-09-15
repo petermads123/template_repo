@@ -63,8 +63,12 @@ Each new module's `main()` showcase has to actually work:
 python -m <package>.<module>
 ```
 
-Read the output, not just the exit code. A showcase that prints nothing a reader could
-learn from is not a showcase; fix it here. Expect a `RuntimeWarning` when the module is
+Read the output, not just the exit code, and check the showcase is in the form
+`.claude/rules/python.md` requires: every argument bound to a named variable, the call on
+its own line, the result named, then printed. A showcase that prints nothing a reader could
+learn from is not a showcase, and one with its arguments inline is not in the required
+form — the whole point is that someone can change an input and re-run without untangling
+the call. Fix either here. Expect a `RuntimeWarning` when the module is
 also re-exported from `__init__.py` — that is normal and is explained in the rules.
 
 ## 5. Record it

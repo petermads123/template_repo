@@ -6,7 +6,7 @@ This hook therefore reads the active plan file and scales its strictness:
 
 - **No active plan** (a `/small-change`, or ad-hoc work): strict, as before.
   Any turn that touched Python must leave ruff, mypy, pytest and STRUCTURE.md
-  in order.
+  in order, with every test file somewhere pytest will actually collect it.
 - **Steps 1 to 3**: advisory. Nothing is run; the turn ends freely, with a note
   saying when the gate starts biting. Python changing during steps 1 or 2 is
   itself worth a note, since those steps are meant to produce a plan, not code.
@@ -30,6 +30,9 @@ from pathlib import Path
 from plan_state import GATE_FROM_STEP, Plan, active_plan, current_branch, git_lines
 
 TOOL_TIMEOUT_SECONDS = 300
+
+# Must match `testpaths` in pyproject.toml: pytest collects nothing outside it.
+TEST_DIR = "tests"
 
 # Paths mentioned in STRUCTURE.md that look like this are prose, not real files.
 PLACEHOLDER = re.compile(r"[<>*]")
@@ -158,6 +161,30 @@ def structure_problems(project_dir: Path) -> list[str]:
     return problems
 
 
+def stray_test_files(project_dir: Path) -> list[str]:
+    """Find test files pytest will never collect.
+
+    `testpaths` in pyproject.toml scopes collection to one directory, so a test
+    file written anywhere else is skipped in silence: `pytest` collects none of
+    it and still exits zero. That is the worst failure mode a test can have, so
+    it is reported as loudly as a failing one.
+
+    Args:
+        project_dir: Repository root.
+
+    Returns:
+        Human-readable problem descriptions, empty if every test is collectable.
+    """
+    prefix = f"{TEST_DIR}/"
+    return [
+        f"`{path}` looks like a test but is outside `{TEST_DIR}/`, so `pytest` "
+        f"never collects it. Move it into `{TEST_DIR}/`."
+        for path in sorted(tracked_python_files(project_dir))
+        if (Path(path).name.startswith("test_") or Path(path).stem.endswith("_test"))
+        and not path.startswith(prefix)
+    ]
+
+
 def gate_failures(project_dir: Path) -> list[str]:
     """Run ruff, mypy and pytest, collecting failures.
 
@@ -252,7 +279,11 @@ def enforce(project_dir: Path) -> None:
     Args:
         project_dir: Repository root.
     """
-    problems = gate_failures(project_dir) + structure_problems(project_dir)
+    problems = (
+        gate_failures(project_dir)
+        + structure_problems(project_dir)
+        + stray_test_files(project_dir)
+    )
     if problems:
         block(
             "The tree is not ready to hand back. Fix these, then stop again:\n\n"

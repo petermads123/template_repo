@@ -32,6 +32,11 @@ Follow the implementation guide in order. `.claude/rules/python.md` is already i
 whenever a `.py` file is open, and it is not optional: full annotations, Google docstrings,
 a `main()` showcase and `__main__` guard on every module, private helpers prefixed with `_`.
 
+The showcase has a required shape, and it is the part most often written carelessly: bind
+every argument to a named variable, call on its own line, name the result, print it. Not
+`print(f(1, 2))`. It is the first thing anyone reads to learn how the module is used, so
+write it as the worked example it is.
+
 Match the Public API table exactly — signature, parameter names, defaults, return type.
 Step 4 compares them literally.
 

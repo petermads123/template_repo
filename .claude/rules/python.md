@@ -38,22 +38,49 @@ if __name__ == "__main__":
     main()
 ```
 
-- For a **library module**, `main()` is a **showcase, not a test**: a handful of
-  representative calls that print their results so a reader can see what the module does.
-  No assertions, no exhaustive cases.
+- For a **library module**, `main()` is a **showcase, not a test**: a worked example of
+  how the module is used, in the form below, printed so a reader can see what it does. No
+  assertions, no exhaustive cases.
 - For an **executable script** (anything under `.claude/hooks/`, or a module whose whole
   purpose is to be run), `main()` is simply the entry point. The guard is the same; the
   showcase rule does not apply, because there is nothing to showcase.
 - A library module's `main()` must run standalone: `python -m <package>.<module>`.
 - **Exempt**: `__init__.py`, everything under `tests/`, and `conftest.py`.
 
-**Good** — representative calls, printed, including one interesting edge:
+### The showcase form
+
+A showcase is a worked example a reader can follow top to bottom and **edit in place**.
+Bind every argument to a named variable, call on its own line, bind the result, print it:
+
+```python
+def main() -> None:
+    """Showcase this module's functionality."""
+    samples = [1, 2, 3, 4]
+    window = 2
+
+    means = rolling_mean(samples, window)
+
+    print(f"rolling mean over {window}: {means}")
+```
+
+Three phases separated by blank lines — **inputs**, **call**, **output**. The reader sees
+what goes in without parsing a call, and can change `window` to `5` and re-run without
+untangling nested literals.
+
+- One named variable per argument, each holding a literal. No literals inside the call.
+- The result gets a name too, even when it is printed on the next line.
+- Two or three cases: the normal one first, then something that teaches — an edge, a
+  default, an input that reveals behaviour worth knowing.
+- Label each print when there is more than one case, so the output says which is which.
+
+**Bad** — the arguments are buried in the call. This is the most common failure, and it
+looks fine until you try to change something:
 
 ```python
 def main() -> None:
     """Showcase this module's functionality."""
     print(rolling_mean([1, 2, 3, 4], window=2))
-    print(rolling_mean([1, 2], window=5))  # fewer samples than the window
+    print(rolling_mean([1, 2], window=5))
 ```
 
 **Bad** — a test suite wearing a showcase costume. Assertions belong in `tests/`:
@@ -64,13 +91,17 @@ def main() -> None:
     assert rolling_mean([1, 2, 3, 4], 2) == [1.5, 2.5, 3.5]
 ```
 
-**Also bad** — proves nothing a reader can see:
+**Bad** — proves nothing a reader can see:
 
 ```python
 def main() -> None:
     """Showcase this module's functionality."""
     rolling_mean([1, 2, 3], 2)
 ```
+
+The same shape works for a class: build the arguments, construct it, call the method,
+print the result. The question the showcase answers is *how would I use this?*, and a
+constructor with five inline literals answers it no better than a function call does.
 
 The test: could someone run `python -m package.module` and understand what the module does
 from the output alone? If not, the showcase is not doing its job. `template_repo/hello_world.py`

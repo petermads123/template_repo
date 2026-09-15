@@ -60,7 +60,9 @@ Then go looking, adversarially, for the ways the user would be disappointed on o
 - **Surface** — is there public API a reader would expect from the concept that does not
   exist, or API that exists that the concept never asked for?
 - **Showcase** — run `python -m <package>.<module>`. Would someone who read only the
-  concept recognise this output as the feature they agreed to?
+  concept recognise this output as the feature they agreed to? And does the showcase read
+  as a worked example — named inputs, one call, a named result — so a reader learns how to
+  use the feature rather than just that it runs?
 - **Structure** — run the `structure-auditor` subagent once more. Steps 3 and 5 both edit
   signatures, and this is the last chance to catch the drift before it is committed.
 
