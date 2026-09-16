@@ -56,6 +56,42 @@ root cause, and never skip or disable a test to get green.
 | A nit, rename, clearer message, added test, one-function change | Fix it, push, reply, resolve the thread |
 | Something you are confident is wrong or already handled | Reply explaining why, leave it open for the reviewer |
 | A change of behaviour, a new capability, a different design | **A new round** — see below |
+| Anything you cannot confidently place in one of those three | **Leave it open and tell the user.** Name the thread and say what you are unsure about. |
+
+That last row is not a failure. A review comment you cannot classify is exactly the thing a
+person should read, and guessing at it is worse than saying so.
+
+### Bot reviews
+
+Copilot and other review bots follow the same table with two differences that matter.
+
+**A bot finding is a claim to verify, not a request to obey.** Read the code it points at
+before doing anything. Bots produce confident false positives at a rate humans do not — they
+miss context the surrounding code makes obvious, flag deliberate choices as mistakes, and
+occasionally invent a rule the repo does not hold. Verifying is the work; the comment is
+only the prompt for it.
+
+**Every bot thread must reach a terminal state.** Where the ruleset sets
+`required_review_thread_resolution`, an unresolved thread blocks the merge forever, and a
+bot will never come back to resolve its own. "Leave it open for the reviewer" therefore does
+not apply to a bot — there is no reviewer to leave it for. Each one ends in exactly one of:
+
+| Verdict | Do |
+|---|---|
+| Correct, and in scope | Fix it, push, reply naming the commit, resolve |
+| Correct, but a change of behaviour or design | Open a round, reply saying where it went, resolve |
+| Wrong | Reply with the **specific** reason it is wrong, resolve, **and list it in the report to the user** |
+| You cannot tell | Leave it open, and tell the user which thread and why |
+
+**A dismissed bot finding is always reported.** This is the one place where the incentives
+point the wrong way: the ruleset makes resolution a precondition of merging, so "resolve it"
+is the cheapest action available and the one that makes the green appear. That is exactly
+why it cannot be silent. Resolving a thread you did not understand, to get a merge through,
+is the same failure as deleting a test that fails — and it is easier to do, because nobody
+is watching a bot's thread.
+
+Never resolve a bot thread without a reply saying what was decided. The reply is not for the
+bot; it is the record a person reads later when the bug the bot actually found turns up.
 
 **Nothing** — re-arm and stop, silently. Do not message the user, do not comment on the
 pull request, and do not narrate a quiet check-in. Most check-ins are this one.

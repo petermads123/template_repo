@@ -111,7 +111,15 @@ step that mostly does nothing, and a quiet check-in re-arms silently rather than
 Its judgment call is whether a review comment is a fix or a new round. The same small-or-
 large test decides, and the same rule applies: **when it is close, route up.** An
 over-routed comment costs a conversation; an under-routed one puts unplanned, untested
-behaviour into a pull request a reviewer has already read.
+behaviour into a pull request a reviewer has already read. A comment that fits neither is
+left open and handed to the user — guessing at a comment you cannot place is worse than
+saying you cannot place it.
+
+A bot's finding, Copilot's included, is a claim to verify against the code rather than a
+request to obey. Because thread resolution gates the merge and a bot never resolves its own
+thread, every bot thread must end resolved — which makes "resolve it" the cheapest way to
+green. So **a dismissed bot finding is always reported to the user**, with the reason, in
+the same breath as the merge.
 
 ### The gate between steps is the point
 
