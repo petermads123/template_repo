@@ -82,21 +82,26 @@ First ask, because the answer picks a different ruleset rather than tweaking a n
 
 | Answer | File | What it does |
 |---|---|---|
-| Just me | `main_protect.solo.json` | Protects `main` from deletion and force-push, and requires a pull request. No review requirements at all. |
-| Others too | `main_protect.collab.json` | The same, plus one required approval, stale reviews dismissed on push, last-push approval, review threads resolved, and a Copilot review on each push. |
+| Just me | `main_protect.solo.json` | Deletion and force-push blocked, a pull request required, review threads must be resolved, and Copilot reviews each push. **No human approval required.** |
+| Others too | `main_protect.collab.json` | The same, plus one required approval, stale reviews dismissed on push, and last-push approval. |
 
 Both live in `.claude/skills/repo-setup/`.
 
-**The solo ruleset deliberately requires no reviews.** Every review requirement needs a
-second party, and in a solo repo there is not one: GitHub refuses to let an author approve
-their own pull request, so a required approval or a required last-push approval cannot be
-satisfied at all, and a required Copilot review gates merging on a bot that may never post.
-A ruleset nobody can satisfy does not protect `main` — it just means every merge happens by
-admin bypass, which protects nothing. The pull request itself is still required, so the
-"never commit to `main`" rule still holds; only the review gates are gone.
+**The difference is exactly the rules that need a second human.** In a solo repo there is
+not one: GitHub refuses to let an author approve their own pull request, so
+`required_approving_review_count` above zero and `require_last_push_approval` are both
+unsatisfiable, and a ruleset nobody can satisfy does not protect `main` — every merge goes
+through admin bypass instead, which protects nothing.
 
-If the user wants Copilot's review in a solo repo, add it back as a non-required check
-rather than a ruleset rule, and say why.
+Everything that does *not* need a second human stays in the solo variant, because it still
+earns its place:
+
+- **Copilot's review** is the only review a solo repo gets. It is an automation rule — it
+  requests the review, it does not gate the merge on one — so it costs nothing and
+  occasionally catches something.
+- **Thread resolution** is satisfiable alone: you resolve your own threads, including
+  Copilot's. It means a Copilot comment cannot be merged past without someone looking at it,
+  which is the point.
 
 Apply it if this environment can — a rulesets API call, `gh api`, an MCP tool. **If it
 cannot, do not pretend.** Show the JSON, write it somewhere they can grab it, and give the

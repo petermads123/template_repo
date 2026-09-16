@@ -102,8 +102,11 @@ is actually mergeable. **All five** must hold:
    since, the approval describes code nobody approved. Re-request review and do not merge.
 3. **CI is green** on the current head, where the repo has CI at all.
 4. **No merge conflict** with the base.
-5. **No open review thread is waiting on Claude.** A thread you answered and they have not
-   replied to is fine; one asking you a question is not.
+5. **Review threads are resolved.** Two separate things here: no thread is waiting on an
+   answer from Claude, *and* — where the repo's ruleset sets
+   `required_review_thread_resolution` — every thread is actually marked resolved, because
+   GitHub will refuse the merge otherwise. Resolve the ones you addressed; leave open any
+   where the commenter is still owed an answer, and say the merge is waiting on them.
 
 Then merge with the repo's configured default method, and afterwards:
 
