@@ -239,8 +239,10 @@ pytest
   unfixable errors come back.
 - **Before a turn ends**, `.claude/hooks/stop_gate.py` decides how strict to be from the
   active plan's step. Steps 1 to 3 are advisory. From step 4, and whenever no plan is
-  active, it blocks if ruff, mypy or pytest fail or `STRUCTURE.md` does not mention a
-  module that exists on disk. Create `.claude/.skip-gate` to bypass it deliberately.
+  active, it blocks if ruff, mypy or pytest fail, if `STRUCTURE.md` does not mention a
+  module that exists on disk, if a test file sits outside `tests/` where `pytest` would
+  never collect it, or if a package directory under `src/` has no `__init__.py`. Create
+  `.claude/.skip-gate` to bypass it deliberately.
 
 Hooks are read at session start. If you change anything under `.claude/hooks/` or
 `.claude/settings.json`, Claude Code must be restarted before it takes effect. Skills and

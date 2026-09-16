@@ -232,4 +232,14 @@ taken back through steps 1 to 7 on the same branch.
 | Thread | Who asked for what | Outcome |
 |---|---|---|
 
-Outcomes: `fixed and pushed`, `replied, left open`, or `round N`.
+Outcomes: `fixed and pushed`, `replied, left open`, `round N`, or — for a bot finding —
+`dismissed: <reason>`. Every dismissal is also reported to the user, never only recorded here.
+
+### Outcome
+
+| Field | Value |
+|---|---|
+| Merged or closed | |
+| Merge commit | |
+| Instructed by | who said to merge, and where |
+| Bot findings dismissed | each one, with its reason |

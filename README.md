@@ -164,12 +164,17 @@ docs/plans/
 | 9 | `/create-pr` | A full re-verification of the whole branch, then a pull request to `main`, ready for review |
 | 10 | `/watch-pr` | An hourly check of the open PR, acting on comments, until it merges or closes |
 
-Step 9 requests your review on the PR it opens, and step 10 may complete the merge once you
-have approved — but only with the approval un-stale, CI green, no conflict and no thread
-waiting on Claude. Note that **GitHub lets nobody request a review from, or approve, their
-own pull request**: in a solo repo, where Claude pushes under your token, every PR is
-authored by you, so the review route is unavailable and the merge signal is instead an
-explicit "merge it" comment from you. `CLAUDE.md` names the approver.
+Step 9 requests your review on the PR it opens. **Claude never merges on its own judgment,
+and never on an approval alone** — a PR reaches `main` either because you pressed the button
+or because you explicitly told Claude to. An approval says the change is wanted, not that it
+should ship now. Once told, the instruction still waives nothing: it must not be stale
+(anything pushed since means you would be merging code you have not seen), CI green, no
+conflict, and every review thread resolved.
+
+Note that **GitHub lets nobody request a review from, or approve, their own pull request**.
+In a solo repo, where Claude pushes under your token, every PR is authored by you — so the
+review route is unavailable, step 9 assigns you instead, and the merge signal is an explicit
+"merge it" from you. `CLAUDE.md` names the approver.
 
 Start with `/feature <what to build>` — it creates the plan file and opens step 1. After
 that, each step is opened by running its own command. A step never starts the next one on

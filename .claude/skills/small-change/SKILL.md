@@ -8,7 +8,7 @@ effort: high
 
 # Small change
 
-The escape hatch from the nine-step pipeline. A tight loop for cosmetic work: no plan file,
+The escape hatch from the ten-step pipeline. A tight loop for cosmetic work: no plan file,
 no branch ceremony, no pull request.
 
 ## 1. Check it is actually small

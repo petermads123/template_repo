@@ -154,7 +154,8 @@ through this checklist and include the ones that apply:
 | Failure | every branch documented under `Raises:` |
 
 Use `@pytest.mark.parametrize` when the same assertion holds across many inputs. A test
-name should say what it proves: `test_greet_preserves_unicode`, not `test_greet_2`.
+name should say what it proves: `test_rolling_mean_returns_empty_for_no_samples`, not
+`test_rolling_mean_2`.
 
 Never weaken a test to make it pass and never delete an inconvenient case. Both turn a real
 finding into a silent one.

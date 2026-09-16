@@ -60,7 +60,9 @@ pythonpath = ["src"]
 [tool.mypy]
 # Named explicitly because mypy does not respect .gitignore and would otherwise
 # descend into .venv. Directories rather than package names, so renaming the
-# package needs no change here.
-files = ["src", "tests"]
+# package needs no change here. The hooks are included because they are real
+# annotated modules whose signatures STRUCTURE.md documents, so they should be
+# held to the same standard as the package.
+files = ["src", "tests", ".claude/hooks"]
 ignore_missing_imports = true
 follow_untyped_imports = true

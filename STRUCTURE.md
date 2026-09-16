@@ -20,6 +20,10 @@ The stop gate (`.claude/hooks/stop_gate.py`) cross-checks the module paths named
 against the `.py` files on disk and blocks on a mismatch. It only sees file-level drift —
 signature drift is on you, or run the `structure-auditor` subagent.
 
+That covers `src/`, `tests/` and `.claude/hooks/`. The hooks are documented here with full
+signature tables and are type-checked like the package (`[tool.mypy] files` names all
+three), so they are held to the same standard despite not being installable.
+
 ## Growth
 
 While the package is flat, keep everything here. Once it has subpackages, keep the tree and

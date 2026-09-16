@@ -1,6 +1,6 @@
 ---
 name: feature
-description: Start or resume the nine-step implementation pipeline for a feature, module, behavior change or anything needing a design decision. Creates the plan file that carries the work from concept to pull request, or reports which step an in-flight plan is on. Use for any change that is not purely cosmetic, whether the user names the skill or just describes the work in prose.
+description: Start or resume the ten-step implementation pipeline for a feature, module, behavior change or anything needing a design decision. Creates the plan file that carries the work from concept to pull request, or reports which step an in-flight plan is on. Use for any change that is not purely cosmetic, whether the user names the skill or just describes the work in prose.
 argument-hint: [what to build]
 model: opus
 effort: xhigh
@@ -8,7 +8,7 @@ effort: xhigh
 
 # Feature pipeline
 
-Nine steps, one plan file, a hard stop after every step. This skill is the entry point:
+Ten steps, one plan file, a hard stop after every step. This skill is the entry point:
 it either resumes what is in flight or starts something new. It does not do the work.
 
 ## The pipeline
@@ -23,7 +23,8 @@ it either resumes what is in flight or starts something new. It does not do the 
 | 6 | Concept check | `/concept-check` | Audit against step 1, not step 2 |
 | 7 | Ship | `/ship` | Commit and push |
 | 8 | Recommend | `/recommend` | Ranked follow-ups |
-| 9 | Pull request | `/create-pr` | Draft PR to `main` |
+| 9 | Pull request | `/create-pr` | PR to `main`, ready for review |
+| 10 | Review | `/watch-pr` | Hourly check until the PR merges or closes |
 
 ## 1. Look before starting
 
