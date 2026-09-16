@@ -122,8 +122,21 @@ has answered.
 
 ```bash
 git push -u origin <branch>
-gh pr create --title "<title>" --body "<body>"
+gh pr create --title "<title>" --body "<body>" --reviewer <approver>
 ```
+
+`<approver>` is the reviewer named in `CLAUDE.md`. Two things can go wrong with it, and both
+are expected rather than errors:
+
+- **The approver is the pull request's own author.** GitHub refuses with *"Review cannot be
+  requested from pull request author"*. Drop the flag, open the pull request without it, and
+  say so — the pull request is already in their own list, so nothing is lost. This is the
+  normal case in a solo repo, where Claude pushes under the owner's own token.
+- **The approver is not a collaborator.** Same handling: open the pull request, say the
+  request could not be made, and name who would need to be added.
+
+Never let a failed reviewer request stop the pull request being opened. It is a routing
+convenience, not a gate.
 
 **Not a draft.** Everything ahead of a reviewer has already happened: the branch was
 verified whole in section 2, audited against its concept in step 6, and the user said yes

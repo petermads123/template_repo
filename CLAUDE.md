@@ -60,6 +60,28 @@ a newer Opus or Sonnet is picked up without editing twelve files. `ultracode` is
 session-level effort setting and not valid in frontmatter, where the levels are `low`,
 `medium`, `high`, `xhigh` and `max`.
 
+### Review and merge
+
+| Fact | Value |
+|---|---|
+| Approver | `petermads123` |
+| Merge method | the repository's configured default |
+
+Step 9 requests a review from the approver when it opens the pull request. Step 10 may
+**complete the merge**, but only when all five hold: an approval from the approver, that
+approval not stale (nothing pushed since), CI green where there is CI, no merge conflict,
+and no review thread waiting on Claude.
+
+Never approve anything yourself, and never merge without the approval. An approval says the
+change is wanted, not that a failing gate may be bypassed.
+
+**GitHub will not let anyone request a review from, or approve, their own pull request.** In
+a solo repo every pull request Claude opens is authored by the person who would approve it,
+so the review route is unavailable and waiting for an approval that cannot exist would wedge
+the pipeline. There the merge signal is an unambiguous instruction from the approver in a
+pull request comment — "merge it", "approved, go ahead". Read it narrowly: "looks good" on
+one thread is feedback, not authorisation to merge. When unsure, ask.
+
 ### Step 10 runs until the pull request closes
 
 Opening the pull request is not finishing the work. Step 10 re-checks it about once an hour,

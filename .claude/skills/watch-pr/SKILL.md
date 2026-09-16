@@ -91,10 +91,53 @@ from the diff.
 
 Quiet check-ins are not recorded. A log of "nothing had changed" nineteen times is noise.
 
-## 6. Stop conditions
+## 6. Merge when the approver has approved
 
-- **Merged or closed** — set the marker to `<!-- claude-plan step=10 status=done -->`,
-  cancel the recurring check, and say so once. The pipeline is finished.
+Claude may complete the merge, but only on the approver's say-so and only into a state that
+is actually mergeable. **All five** must hold:
+
+1. **An approval exists** from the approver named in `CLAUDE.md` — a review with state
+   `APPROVED`, or, where GitHub will not accept one, the fallback below.
+2. **The approval is not stale.** A review approves a *commit*. If anything has been pushed
+   since, the approval describes code nobody approved. Re-request review and do not merge.
+3. **CI is green** on the current head, where the repo has CI at all.
+4. **No merge conflict** with the base.
+5. **No open review thread is waiting on Claude.** A thread you answered and they have not
+   replied to is fine; one asking you a question is not.
+
+Then merge with the repo's configured default method, and afterwards:
+
+- delete the branch if the repo does that,
+- mark the plan `<!-- claude-plan step=10 status=done -->` and record the merge in section 10,
+- cancel the recurring check,
+- say so once, naming the merge commit.
+
+**Never approve anything yourself, and never merge without the approval.** The approval is
+the whole authorisation; without it Claude is merging on its own judgment, which is the one
+thing this step is not for. A failing gate is never bypassed to honour an approval either —
+an approval says *the change is wanted*, not *ship it broken*.
+
+### When the approver cannot leave a review
+
+GitHub refuses both a review request and an approval from the pull request's own author. In
+a solo repo — where Claude pushes under the owner's token, so every pull request is authored
+by the person who would approve it — the review route is simply unavailable, and waiting for
+an approval that cannot exist would wedge the pipeline.
+
+There, the merge signal is an **unambiguous instruction in a comment from the approver on
+the pull request**: "merge it", "approved, go ahead". Conditions 2 to 5 still apply in full,
+and staleness is measured from the comment rather than a review.
+
+Read that narrowly. "Looks good" on one thread is feedback, not authorisation to merge the
+whole pull request, and neither is silence, a thumbs-up, or an approval of some earlier
+round. If you are not certain the comment authorises the merge, ask — the cost of asking is
+one message and the cost of being wrong is an unwanted merge to `main`.
+
+## 7. Stop conditions
+
+- **Merged or closed** — whether Claude merged it or someone else did, set the marker to
+  `<!-- claude-plan step=10 status=done -->`, cancel the recurring check, and say so once.
+  The pipeline is finished.
 - **The user says stop** — unsubscribe, cancel the check, and stop. Immediately, no
   argument.
 
