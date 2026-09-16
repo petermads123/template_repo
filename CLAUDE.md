@@ -87,6 +87,10 @@ and no review thread waiting on Claude.
 Never approve anything yourself, and never merge without the approval. An approval says the
 change is wanted, not that a failing gate may be bypassed.
 
+Where a review request is refused, step 9 **assigns** the approver instead — GitHub permits
+assigning an author even though it refuses to make them a reviewer. It gates nothing, but it
+puts the pull request in their *Assigned* queue rather than only in *Created*.
+
 **GitHub will not let anyone request a review from, or approve, their own pull request.** In
 a solo repo every pull request Claude opens is authored by the person who would approve it,
 so the review route is unavailable and waiting for an approval that cannot exist would wedge
