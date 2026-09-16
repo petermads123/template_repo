@@ -16,28 +16,48 @@ Or in `dependencies` in `pyproject.toml`:
 
 ## Creating a new repo from this template
 
-1. Rename the folder `template_repo/` to `<package_name>`.
+**Open Claude Code and let it run `/repo-setup`.** It is referenced from `CLAUDE.md`, so the
+first conversation in a fresh clone starts with it. It asks what the repo is for, writes that
+into this README, renames the package to match the repo, updates every file that names it,
+offers the branch ruleset, and then deletes its own reference from `CLAUDE.md` so it never
+runs again.
+
+What it does, for when you would rather do it by hand:
+
+1. Rename `src/template_repo/` to `src/<package_name>/`.
 2. `pyproject.toml`: set `[project] name` to `<package_name>`.
 3. `pyproject.toml`: set `[project] description`.
-4. `pyproject.toml`: set `[tool.mypy] files` to `["<package_name>", "tests"]`.
-5. `README.md`: update the title, the description and the two install URLs above.
-6. `pyproject.toml`: add runtime dependencies to `[project] dependencies`.
-7. `tests/test_hello_world.py`: change the import to `from <package_name> import greet`.
-8. `STRUCTURE.md`: update the tree and the module paths to the new package name.
-9. `README.md`: this checklist mentions the package name too.
-10. Replace `<package_name>/hello_world.py` and `tests/test_hello_world.py` with real code,
-    updating `STRUCTURE.md` as you go.
+4. `README.md`: update the title, the description and the two install URLs above.
+5. `pyproject.toml`: add runtime dependencies to `[project] dependencies`.
+6. `tests/test_hello_world.py`: change the import to `from <package_name> import greet`.
+7. `STRUCTURE.md`: update the tree and the module paths to the new package name.
+8. `CLAUDE.md`: set the approver in the Review and merge table.
+9. Replace `src/<package_name>/hello_world.py` and `tests/test_hello_world.py` with real
+   code, updating `STRUCTURE.md` as you go.
+10. Remove the `/repo-setup` reference from `CLAUDE.md`.
 
 `docs/plans/` starts with only `TEMPLATE.md` in it. Leave that file alone — `/feature`
 copies it into a new folder for each piece of work.
 
-Nothing else references the package name: `__init__.py` uses a relative import,
-`[tool.setuptools.packages.find]` excludes `tests*` rather than naming the package, and
-everything under `.claude/` is package-name agnostic.
+Little else references the package name: `__init__.py` uses a relative import,
+`[tool.setuptools.packages.find]` points at `src` rather than naming the package,
+`[tool.mypy] files` names directories, and everything under `.claude/` is package-name
+agnostic.
+
+### Why `src/`
+
+Everything installable lives under `src/`, so nothing else in the repo — `tests/`, `docs/`,
+a stray script — can be picked up as a package by accident, and an import in a test resolves
+against the installed package rather than against whatever happens to sit in the working
+directory.
+
+The trade-off: the repo root is not on `sys.path`, so `python -m <package>.<module>` only
+works once you have run `pip install -e ".[dev]"`. `pytest` is unaffected — `pythonpath`
+in `pyproject.toml` points it at `src`.
 
 Avoid naming the package folder `lib`, `build`, `dist` or `sdist`: the `.gitignore`
 inherited from GitHub's Python template ignores those, so the folder would be silently
-untracked. `docs` is not ignored, but it is already taken by `docs/plans/`.
+untracked even under `src/`.
 
 ## Development
 

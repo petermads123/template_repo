@@ -31,7 +31,8 @@ here, but everything in this file is in context every session.
 ## Tree
 
 ```
-template_repo/          the package itself (rename this to <package_name>)
+src/                    everything installable; nothing outside it is packaged
+  template_repo/        the package itself (rename this to <package_name>)
 tests/                  pytest suite, one test_<module>.py per module
 docs/plans/             one folder per feature, one file per round: the pipeline's state
 .claude/                Claude Code configuration: rules, skills, agents, hooks
@@ -42,9 +43,9 @@ CLAUDE.md               routing map for Claude
 STRUCTURE.md            this file
 ```
 
-## Package: `template_repo/`
+## Package: `src/template_repo/`
 
-### `template_repo/__init__.py`
+### `src/template_repo/__init__.py`
 
 Package entry point. Re-exports the public API so callers can `from template_repo import X`
 rather than reaching into modules. Uses relative imports so it survives renaming the
@@ -54,7 +55,7 @@ package folder.
 |---|---|
 | `greet` | `template_repo.hello_world` |
 
-### `template_repo/hello_world.py`
+### `src/template_repo/hello_world.py`
 
 Example module, present to demonstrate the conventions. Replace it with real code.
 
@@ -63,7 +64,10 @@ Example module, present to demonstrate the conventions. Replace it with real cod
 | `greet(name: str = "World", style: str = "friendly") -> str` | Build a greeting for `name` in one of the styles `"friendly"`, `"formal"` or `"casual"`. Raises `ValueError` on an unknown style. |
 | `main() -> None` | Showcase: two styles and a non-ASCII default, with every input bound to a named variable and the accepted styles listed in a same-line comment. |
 
-Runnable standalone: `python -m template_repo.hello_world`.
+Runnable standalone: `python -m template_repo.hello_world`, once the package is installed
+(`pip install -e ".[dev]"`). Under a `src/` layout the repo root is not on `sys.path`, so
+without the install it fails with `No module named template_repo` — an un-set-up
+environment, not a broken module.
 
 ## Tests: `tests/`
 
@@ -117,6 +121,7 @@ and `/create-pr` builds the pull request body from every round in the folder.
 | `settings.json` | Registers the four hooks; pre-approves ruff/mypy/pytest and read-only git |
 | — | Every skill pins `model` and `effort` in its frontmatter; the table in `CLAUDE.md` says which and why |
 | `rules/python.md` | Coding conventions, auto-loaded for `**/*.py` |
+| `skills/repo-setup/` | `/repo-setup` — one-time setup of a repo made from this template; carries `main_protect.json` |
 | `skills/feature/` | `/feature` — starts or resumes the pipeline |
 | `skills/conceptualize/` | `/conceptualize` — step 1, agree the concept |
 | `skills/plan/` | `/plan` — step 2, design it |

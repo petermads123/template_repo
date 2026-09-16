@@ -5,6 +5,18 @@
 `STRUCTURE.md` above is the map of what lives where. Read it before searching the repo, and
 update it in the same change whenever a module or public signature changes.
 
+<!-- repo-setup:start — /repo-setup deletes this whole block when setup is done -->
+## This repo has not been set up yet
+
+It was created from a template and still carries the template's package name. **Before
+anything else in the first conversation, invoke `/repo-setup`.** It asks what the repo is
+for, writes that into the README, renames the package to match the repository, offers the
+branch ruleset, and then deletes this block so it never runs again.
+
+If the user arrives with a task instead, say setup comes first and takes a couple of
+minutes — a rename afterwards touches imports, tests and every file that names the package.
+<!-- repo-setup:end -->
+
 ## The implementation pipeline
 
 Anything that is not cosmetic goes through ten steps. State lives in

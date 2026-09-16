@@ -120,8 +120,13 @@ print the result. The question the showcase answers is *how would I use this?*, 
 constructor with five inline literals answers it no better than a function call does.
 
 The test: could someone run `python -m package.module` and understand what the module does
-from the output alone? If not, the showcase is not doing its job. `template_repo/hello_world.py`
-is the worked example in this repo.
+from the output alone? If not, the showcase is not doing its job.
+`src/template_repo/hello_world.py` is the worked example in this repo.
+
+Because the package lives under `src/`, `python -m` only resolves once the package is
+installed — `pip install -e ".[dev]"`, which the setup guide does anyway. On a fresh clone
+with no install it fails with `No module named ...`, which means the environment is not set
+up rather than the module being broken.
 
 If a module is also re-exported from `__init__.py`, `python -m` prints a `RuntimeWarning`
 about the module already being in `sys.modules`. That is expected and harmless — it is the
