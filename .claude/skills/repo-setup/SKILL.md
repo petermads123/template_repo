@@ -76,27 +76,31 @@ remote URL, unless the user names someone else.
 
 ## 4. Offer the branch ruleset
 
-First ask, because the answer changes the ruleset:
+First ask, because the answer picks a different ruleset rather than tweaking a number:
 
 > Do other people work in this repo, or is it just you?
 
-- **Collaboration** — set `required_approving_review_count` to `1`.
-- **Solo** — set it to `0`.
+| Answer | File | What it does |
+|---|---|---|
+| Just me | `main_protect.solo.json` | Protects `main` from deletion and force-push, and requires a pull request. No review requirements at all. |
+| Others too | `main_protect.collab.json` | The same, plus one required approval, stale reviews dismissed on push, last-push approval, review threads resolved, and a Copilot review on each push. |
 
-The template is `.claude/skills/repo-setup/main_protect.json`. It protects `main` against
-deletion and force-push, requires a pull request, dismisses stale reviews on push, requires
-review threads to be resolved, and asks Copilot for a review on each push.
+Both live in `.claude/skills/repo-setup/`.
+
+**The solo ruleset deliberately requires no reviews.** Every review requirement needs a
+second party, and in a solo repo there is not one: GitHub refuses to let an author approve
+their own pull request, so a required approval or a required last-push approval cannot be
+satisfied at all, and a required Copilot review gates merging on a bot that may never post.
+A ruleset nobody can satisfy does not protect `main` — it just means every merge happens by
+admin bypass, which protects nothing. The pull request itself is still required, so the
+"never commit to `main`" rule still holds; only the review gates are gone.
+
+If the user wants Copilot's review in a solo repo, add it back as a non-required check
+rather than a ruleset rule, and say why.
 
 Apply it if this environment can — a rulesets API call, `gh api`, an MCP tool. **If it
-cannot, do not pretend.** Write the filled-in JSON out, show it, and tell the user exactly
-where it goes: *Settings → Rules → Rulesets → New ruleset → Import a ruleset*.
-
-One thing to flag either way, because it decides whether step 10 can ever merge:
-`require_last_push_approval` is `true`, which means the most recent push must be approved by
-someone other than whoever pushed it. In a solo repo nobody else exists to approve it, and
-GitHub will not let an author approve their own pull request — so merging needs either a
-bypass actor or that rule turned off. Say this plainly and let the user decide; do not
-quietly change it for them.
+cannot, do not pretend.** Show the JSON, write it somewhere they can grab it, and give the
+exact path: *Settings → Rules → Rulesets → New ruleset → Import a ruleset*.
 
 ## 5. Remove yourself from the routing map
 

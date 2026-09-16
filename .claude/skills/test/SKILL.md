@@ -52,6 +52,67 @@ Every intent in the plan's Test intents table gets at least one test, and every 
 criterion ends up covered by at least one test. Record which tests cover which intent in
 section 5 — that table is what step 6 reads as evidence.
 
+### What a compliant test file looks like
+
+For the `rolling_mean` module in `/implement`:
+
+```python
+import pytest
+
+from my_package.statistics import rolling_mean
+
+
+def test_rolling_mean_averages_each_window() -> None:
+    assert rolling_mean([1, 2, 3, 4], "daily") == [1.0, 2.0, 3.0, 4.0]
+
+
+def test_rolling_mean_returns_empty_for_no_samples() -> None:
+    assert rolling_mean([], "daily") == []
+
+
+def test_rolling_mean_returns_empty_when_window_exceeds_samples() -> None:
+    assert rolling_mean([1, 2], "weekly") == []
+
+
+@pytest.mark.parametrize("resolution", ["daily", "weekly", "monthly"])
+def test_rolling_mean_accepts_every_resolution(resolution: str) -> None:
+    rolling_mean([1, 2, 3], resolution)
+
+
+def test_rolling_mean_rejects_an_unknown_resolution() -> None:
+    with pytest.raises(ValueError, match="resolution must be one of"):
+        rolling_mean([1, 2, 3], "hourly")
+
+
+def test_rolling_mean_error_names_the_offending_resolution() -> None:
+    with pytest.raises(ValueError, match="hourly"):
+        rolling_mean([1, 2, 3], "hourly")
+
+
+def test_rolling_mean_rejects_a_none_resolution() -> None:
+    with pytest.raises(ValueError):
+        rolling_mean([1, 2, 3], None)  # type: ignore[arg-type]  # untyped callers
+
+
+def test_rolling_mean_does_not_mutate_its_input() -> None:
+    samples = [1, 2, 3]
+    rolling_mean(samples, "daily")
+    assert samples == [1, 2, 3]
+
+
+def test_rolling_mean_is_idempotent() -> None:
+    assert rolling_mean([1, 2, 3], "daily") == rolling_mean([1, 2, 3], "daily")
+```
+
+Read what that covers against the checklist: the happy path, empty input, a boundary where
+the window exceeds the samples, every value of the choice argument, two failure branches
+including one that proves the message names the value, a malformed type with a narrowed
+`# type: ignore` and its reason on the same line, purity and idempotency. Nine tests for one
+function is not excessive — it is what "past the happy path" costs.
+
+The package's own `tests/test_hello_world.py` is **not** the reference: it covers a
+placeholder script and gets deleted with it.
+
 ## 3. Fix what the tests expose
 
 A failing test means one of three things. Say which:

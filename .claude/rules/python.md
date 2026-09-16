@@ -22,6 +22,9 @@ These are non-negotiable.
 - Google-convention docstrings on every public module, class and function, with `Args:`,
   `Returns:` and `Raises:` where they apply. Ruff's `D` rules enforce this.
 - Private helpers start with `_` and stay out of `STRUCTURE.md`.
+- Every package directory under `src/` has an `__init__.py`, including every subpackage. A
+  directory of modules without one is not a package: it will not install, and imports from
+  it resolve only by accident of the working directory.
 - Error messages name the offending value: `f"window must be positive, got {window}"`.
 
 ## Every module has a `main()`
@@ -120,8 +123,8 @@ print the result. The question the showcase answers is *how would I use this?*, 
 constructor with five inline literals answers it no better than a function call does.
 
 The test: could someone run `python -m package.module` and understand what the module does
-from the output alone? If not, the showcase is not doing its job.
-`src/template_repo/hello_world.py` is the worked example in this repo.
+from the output alone? If not, the showcase is not doing its job. `/implement` carries a
+full worked module and `/test` a full worked test file — this rule is the short form.
 
 Because the package lives under `src/`, `python -m` only resolves once the package is
 installed — `pip install -e ".[dev]"`, which the setup guide does anyway. On a fresh clone

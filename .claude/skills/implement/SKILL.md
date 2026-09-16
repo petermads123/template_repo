@@ -43,6 +43,69 @@ write it as the worked example it is.
 Match the Public API table exactly — signature, parameter names, defaults, return type.
 Step 4 compares them literally.
 
+### What a compliant module looks like
+
+```python
+"""Compute running statistics over a stream of samples."""
+
+from collections.abc import Iterable
+
+_RESOLUTIONS = {"daily": 1, "weekly": 7, "monthly": 30}
+
+
+def rolling_mean(samples: Iterable[float], resolution: str = "daily") -> list[float]:
+    """Compute the rolling mean of a sample stream.
+
+    Args:
+        samples: The values to average over.
+        resolution: Window size by name. One of "daily", "weekly" or "monthly".
+
+    Returns:
+        One mean per complete window, in order. Empty if there are fewer
+        samples than the window.
+
+    Raises:
+        ValueError: If `resolution` is not a known resolution.
+    """
+    if resolution not in _RESOLUTIONS:
+        known = ", ".join(repr(name) for name in sorted(_RESOLUTIONS))
+        raise ValueError(f"resolution must be one of {known}, got {resolution!r}")
+    window = _RESOLUTIONS[resolution]
+    values = list(samples)
+    return [
+        sum(values[i : i + window]) / window for i in range(len(values) - window + 1)
+    ]
+
+
+def main() -> None:
+    """Showcase this module's functionality."""
+    samples = [1, 2, 3, 4]
+    resolution = "daily"  # "daily", "weekly", "monthly"
+
+    means = rolling_mean(samples, resolution)
+
+    print(f"{resolution}: {means}")
+
+    # Fewer samples than the window, so no complete window and no results.
+    resolution = "weekly"
+
+    means = rolling_mean(samples, resolution)
+
+    print(f"{resolution}: {means}")
+
+
+if __name__ == "__main__":
+    main()
+```
+
+Everything the conventions ask for is in there: module docstring, full annotations, Google
+sections including `Raises:`, an error message naming the offending value, a private
+constant kept out of `STRUCTURE.md`, and a showcase whose inputs are named, whose choice
+argument lists its values, and whose second case teaches something the first does not.
+
+The package's own files are **not** the reference — `src/<package>/hello_world.py` is a
+placeholder to delete, not an example to copy.
+
 Do not hand-format. `.claude/hooks/lint_py.py` runs `ruff format` and `ruff check --fix` on
 every file you write, and reports back only what it could not fix.
 

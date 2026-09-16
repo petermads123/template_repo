@@ -47,22 +47,26 @@ STRUCTURE.md            this file
 
 ### `src/template_repo/__init__.py`
 
-Package entry point. Re-exports the public API so callers can `from template_repo import X`
-rather than reaching into modules. Uses relative imports so it survives renaming the
-package folder.
+Package entry point. Re-export the public API here so callers can
+`from template_repo import X` rather than reaching into modules, using relative imports so
+it survives renaming the package folder. Nothing is exported yet — the placeholder script
+has no public API.
 
-| Public name | Source |
-|---|---|
-| `greet` | `template_repo.hello_world` |
+Every package directory under `src/`, including every subpackage added later, needs one of
+these. The stop gate blocks on a directory of modules without it: it is not a package, so
+it will not install.
 
 ### `src/template_repo/hello_world.py`
 
-Example module, present to demonstrate the conventions. Replace it with real code.
+Placeholder so the package is not empty. Delete the whole file when real code arrives.
 
 | Signature | Description |
 |---|---|
-| `greet(name: str = "World", style: str = "friendly") -> str` | Build a greeting for `name` in one of the styles `"friendly"`, `"formal"` or `"casual"`. Raises `ValueError` on an unknown style. |
-| `main() -> None` | Showcase: two styles and a non-ASCII default, with every input bound to a named variable and the accepted styles listed in a same-line comment. |
+| `main() -> None` | Print `Hello, World!`. |
+
+It is deliberately trivial and is **not** the conventions reference — `/implement` carries
+the worked module and `/test` the worked test file, so the examples do not disappear with
+the placeholder.
 
 Runnable standalone: `python -m template_repo.hello_world`, once the package is installed
 (`pip install -e ".[dev]"`). Under a `src/` layout the repo root is not on `sys.path`, so
@@ -73,11 +77,9 @@ environment, not a broken module.
 
 ### `tests/test_hello_world.py`
 
-Covers `greet`. Demonstrates the edge-case standard from `.claude/rules/python.md`: default
-value, explicit value, empty string, non-ASCII input, whitespace preservation, a very long
-input, a parametrized determinism check, every style in a parametrized table, and the
-malformed-input cases the `Raises:` branch introduces — unknown style, wrong case, empty
-string and `None`, the last with a narrowed `# type: ignore[arg-type]` and its reason.
+Covers the placeholder script's `main` via `capsys`: the exact output, that it is one line,
+that nothing goes to stderr, and that a second call prints the same thing. Deleted along
+with the script it covers. The edge-case standard is demonstrated in `/test`, not here.
 
 All tests live here and nowhere else — `testpaths = ["tests"]` in `pyproject.toml` means
 `pytest` collects nothing outside this directory, and the stop gate blocks on a test file
@@ -121,7 +123,7 @@ and `/create-pr` builds the pull request body from every round in the folder.
 | `settings.json` | Registers the four hooks; pre-approves ruff/mypy/pytest and read-only git |
 | — | Every skill pins `model` and `effort` in its frontmatter; the table in `CLAUDE.md` says which and why |
 | `rules/python.md` | Coding conventions, auto-loaded for `**/*.py` |
-| `skills/repo-setup/` | `/repo-setup` — one-time setup of a repo made from this template; carries `main_protect.json` |
+| `skills/repo-setup/` | `/repo-setup` — one-time setup of a repo made from this template; carries `main_protect.solo.json` and `main_protect.collab.json` |
 | `skills/feature/` | `/feature` — starts or resumes the pipeline |
 | `skills/conceptualize/` | `/conceptualize` — step 1, agree the concept |
 | `skills/plan/` | `/plan` — step 2, design it |
@@ -197,8 +199,9 @@ writes or edits, and reports unfixable issues back via exit code 2. Stdlib only.
 
 `Stop` hook. Reads the active plan's step to decide how strict to be: advisory through step
 3, blocking from step 4 and whenever no plan is active. When it blocks it runs ruff, mypy
-and pytest, cross-checks `STRUCTURE.md` against the modules on disk, and reports any test
-file sitting outside `tests/` where `pytest` would silently never collect it. Bypass with
+and pytest, cross-checks `STRUCTURE.md` against the modules on disk, reports any test file
+sitting outside `tests/` where `pytest` would silently never collect it, and reports any
+package directory under `src/` missing its `__init__.py`. Bypass with
 `.claude/.skip-gate`. Stdlib only.
 
 | Signature | Description |
@@ -209,6 +212,7 @@ file sitting outside `tests/` where `pytest` would silently never collect it. By
 | `tracked_python_files(project_dir: Path) -> set[str]` | All non-ignored Python files. |
 | `structure_problems(project_dir: Path) -> list[str]` | File-level drift between this file and disk. |
 | `stray_test_files(project_dir: Path) -> list[str]` | Test files outside `tests/`, which pytest never collects. |
+| `missing_init_files(project_dir: Path) -> list[str]` | Package directories under `src/` with no `__init__.py`. |
 | `gate_failures(project_dir: Path) -> list[str]` | Run the verification set, collect failures. |
 | `advisory_notes(project_dir: Path, plan: Plan, changed: set[str]) -> list[str]` | Non-blocking observations for steps 1 to 3. |
 | `notice(message: str) -> None` | Show the user a message without blocking. |

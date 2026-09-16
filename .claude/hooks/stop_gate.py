@@ -34,6 +34,9 @@ TOOL_TIMEOUT_SECONDS = 300
 # Must match `testpaths` in pyproject.toml: pytest collects nothing outside it.
 TEST_DIR = "tests"
 
+# Must match `where` under [tool.setuptools.packages.find]: the installable root.
+SRC_DIR = "src"
+
 # Paths mentioned in STRUCTURE.md that look like this are prose, not real files.
 PLACEHOLDER = re.compile(r"[<>*]")
 PATH_IN_TEXT = re.compile(r"[\w./-]+\.py")
@@ -185,6 +188,32 @@ def stray_test_files(project_dir: Path) -> list[str]:
     ]
 
 
+def missing_init_files(project_dir: Path) -> list[str]:
+    """Find package directories under the source root with no `__init__.py`.
+
+    A directory of modules without one is not a package: setuptools will not
+    install it, and imports from it resolve only by accident of the working
+    directory. Under a `src/` layout that accident stops happening, so the
+    failure surfaces at install time rather than here unless it is checked.
+
+    Args:
+        project_dir: Repository root.
+
+    Returns:
+        Human-readable problem descriptions, empty if every package has one.
+    """
+    tracked = tracked_python_files(project_dir)
+    prefix = f"{SRC_DIR}/"
+
+    packages = {str(Path(path).parent) for path in tracked if path.startswith(prefix)}
+    return [
+        f"`{package}/` holds modules but no `__init__.py`, so it is not a package "
+        "and will not install."
+        for package in sorted(packages)
+        if f"{package}/__init__.py" not in tracked
+    ]
+
+
 def gate_failures(project_dir: Path) -> list[str]:
     """Run ruff, mypy and pytest, collecting failures.
 
@@ -283,6 +312,7 @@ def enforce(project_dir: Path) -> None:
         gate_failures(project_dir)
         + structure_problems(project_dir)
         + stray_test_files(project_dir)
+        + missing_init_files(project_dir)
     )
     if problems:
         block(
