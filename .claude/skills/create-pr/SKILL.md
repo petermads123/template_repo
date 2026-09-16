@@ -1,13 +1,14 @@
 ---
 name: create-pr
-description: Open a pull request for the current branch after verifying the tree is clean. Runs the full test suite plus ruff and mypy, checks STRUCTURE.md is in sync, then confirms with the user before pushing and opening a draft PR. Use when work is finished and ready for review.
-allowed-tools: Bash(ruff:*), Bash(mypy:*), Bash(pytest:*), Bash(git status:*), Bash(git log:*), Bash(git diff:*), Bash(git branch:*)
+description: Step 9 of the feature pipeline. Verify the whole branch in one pass — clean tree, current base, the full test suite, every module showcase and every round's plan — then confirm with the user and open a pull request to main, ready for review. Use when the work is shipped, the recommendations are decided, and the branch is ready for review.
+argument-hint: [slug, if more than one plan exists]
+model: sonnet
+effort: max
 ---
 
-# Create a pull request
+# Step 9 — Pull request
 
-Gates first, confirmation second, push last. Nothing leaves the machine before the user
-says so.
+The last step. Gates first, confirmation second, publication last.
 
 ## 1. Refuse on `main`
 
@@ -15,16 +16,39 @@ says so.
 git branch --show-current
 ```
 
-If it is `main`, stop. The remote has a `main_protect` ruleset, so the push would be
-rejected anyway. Tell the user to move the work to a branch and offer the command:
+If it is `main`, stop. There is nothing to open a pull request from, and the branch guard
+has been refusing commits all along, so this means the work was never branched.
+
+## 2. Verify the whole branch, not just the last round
+
+Nothing before this step has verified the branch as a whole. Step 4 checked one round at
+the moment it was written, and step 7 checked the tree at the moment it was committed —
+neither knows what a later round did to the code an earlier one shipped. This is the only
+place the finished branch is proved green in one pass, so run all of it, in this order.
+
+### 2a. Commit first, so the gates test what ships
 
 ```bash
-git checkout -b feat/<topic>
+git status --short
 ```
 
-## 2. Run the gates
+**It must be empty before any gate runs.** Gates run against the working tree, so on a
+dirty tree they prove something about code that is not in the pull request. Commit what
+belongs and remove what does not, then continue. Do not run the suite first and reconcile
+afterwards — that is the failure this ordering exists to prevent.
 
-All four. Report the actual output, not a summary:
+### 2b. Catch up with the base
+
+```bash
+git fetch origin main
+git log --oneline HEAD..origin/main
+```
+
+If `main` has moved since the branch started, green here is not green merged. Merge it in,
+resolve anything it conflicts with, and **start section 2 again from the top** — a merge
+can break the suite as easily as a commit can.
+
+### 2c. The four gates, whole suite
 
 ```powershell
 ruff check .
@@ -33,59 +57,161 @@ mypy
 pytest
 ```
 
-**Any failure stops the skill.** Do not open a PR on a red tree, do not offer to open one
-anyway, and do not fix the failures silently and carry on — report what failed, fix it if
-the fix is obvious, then re-run the whole gate from the top.
+`pytest` with no filters, no `-k`, no deselects, no single test file: the point is the whole
+suite, including every test every round added. Report the actual pass count.
 
-## 3. Check STRUCTURE.md
+**Any failure stops the skill.** Do not open a pull request on a red tree and do not offer
+to open one anyway. Fix it, then re-run section 2 from the top.
 
-Compare the `.py` files on disk against the module paths named in `STRUCTURE.md`. Anything
-present on disk but missing from the file, or named in the file but gone from disk, stops
-the skill until it is fixed. Also skim the signature tables for the modules this branch
-touched — the stop gate cannot see signature drift, so this is the only place it gets
-caught.
+### 2d. Every module the branch touched, run standalone
 
-## 4. Confirm before publishing
+```bash
+git diff --name-only main...HEAD -- "*.py"
+```
+
+Run `python -m <package>.<module>` for every module in that list that has a `main()`
+showcase — not just the ones the newest round added. A round that edits a module an earlier
+round shipped can leave its showcase printing something stale or crashing outright, and
+nothing since step 4 of that earlier round has run it.
+
+Read the output, not just the exit code.
+
+### 2e. Plan completeness, every round
+
+Take the Public API table from **every** round in the folder and confirm each signature
+still exists as written. A later round that changed an earlier round's signature should
+have corrected that round's table at the time; if it did not, the earlier plan now
+advertises an API the code no longer has. Fix the table, and say which round drifted.
+
+Then run the `structure-auditor` subagent one final time. `STRUCTURE.md` is what the next
+session reads instead of searching the repo, so it being wrong costs more than any other
+stale file.
+
+### 2f. Every round finished
+
+Confirm **every round in this feature's folder**: steps 1 to 8 marked `done`, section 6
+with no unmet criteria, section 8 with a decision against every recommendation. An
+undecided recommendation means step 8 is not finished.
+
+On a multi-round branch, also confirm the newest round's **Earlier rounds still hold**
+regression table is filled in. An empty one means step 6 skipped the regression pass, and
+the earlier rounds' criteria have not been checked against the code as it now stands.
+
+Only the newest file should be `active`; an earlier one still marked `active` means a round
+was abandoned mid-pipeline rather than finished, and that is worth raising before
+publishing anything.
+
+## 3. Confirm before publishing
 
 Show the user, and wait for an explicit yes:
 
-- the branch name, and whether it matches the `type/kebab-case` convention (mention a
-  mismatch, do not block on it)
-- `git log main..HEAD --oneline` — the commits that will become the PR
-- `git status --short` — anything uncommitted that will *not* be included
-- the proposed PR title and body
+- the branch name, and whether it matches `type/kebab-case` (mention a mismatch, do not
+  block on it),
+- `git log main..HEAD --oneline` — the commits that become the pull request,
+- the result of every check in section 2, including the pass count,
+- the proposed title and the full body.
 
-**This repository is public. Pushing is publishing.** Do not push, do not create the PR,
-and do not run any command with a side effect on the remote until the user has answered.
+The tree was already required to be clean in 2a, so there should be nothing uncommitted to
+report. If there is, something was written after the gates ran: go back to section 2.
 
-## 5. Push and open a draft
+**This repository is public. Opening a pull request is publishing.** Do not push, do not
+create the pull request, and do not run anything with a remote side effect until the user
+has answered.
 
-Only after confirmation:
+## 4. Open it, ready for review
 
 ```bash
 git push -u origin <branch>
-gh pr create --draft --title "<title>" --body "<body>"
+gh pr create --title "<title>" --body "<body>" --reviewer <approver>
 ```
 
-Draft on purpose — nothing auto-merges and the user gets a final look on GitHub.
+`<approver>` is the reviewer named in `CLAUDE.md`. Two things can go wrong with it, and both
+are expected rather than errors:
 
-Return the PR URL as a markdown link.
+- **The approver is the pull request's own author.** GitHub refuses with *"Review cannot be
+  requested from pull request author"*. This is the normal case in a solo repo, where Claude
+  pushes under the owner's own token.
+- **The approver is not a collaborator.** Say the request could not be made and name who
+  would need to be added.
 
-## PR body shape
+**When the review request is refused, assign them instead:**
+
+```bash
+gh pr edit <number> --add-assignee <approver>
+```
+
+GitHub allows assigning an author even though it refuses to make them a reviewer, so the
+pull request still lands in their *Assigned* queue rather than only in *Created*. It is not
+a review request and does not gate anything, but it is the closest thing that works, and
+"waiting on me" is a more useful signal than nothing. Say which of the two happened.
+
+Never let a failed reviewer request stop the pull request being opened. It is routing, not a
+gate.
+
+**Not a draft.** Everything ahead of a reviewer has already happened: the branch was
+verified whole in section 2, audited against its concept in step 6, and the user said yes
+in section 3. A draft would understate that and leave them a button to press before anyone
+can look at it.
+
+This also means section 3 is the only gate between the work and a published pull request.
+Treat it that way — an unanswered confirmation is not a yes, and neither is silence.
+
+## 5. Record, then hand off to step 10
+
+Write the URL into section 9 of the newest round, then set that file's marker to
+`<!-- claude-plan step=10 status=active -->`. Commit and push that edit.
+
+**The plan stays active.** Opening a pull request is not finishing the work — the work is
+finished when it merges or closes, and step 10 is the stretch in between. Marking it `done`
+here would clear the session brief while a live pull request still needs watching.
+
+Earlier rounds in the folder are already `done`; they were stood down when their successor
+opened. Confirm it rather than assuming it.
+
+Then invoke `/watch-pr` to arm the hourly check. That is the one place in the pipeline where
+a step starts the next one without being asked: the alternative is a published pull request
+that nobody is watching because the user did not know to say so.
+
+## The body
+
+Built from the plan files, not from the diff. The diff is already on the page; what a
+reviewer cannot see is why.
+
+**Every round in the folder goes in the body**, oldest first. A reviewer opening a
+three-round branch needs to see that it is three deliberate passes over one feature, not
+one change that kept growing.
 
 ```markdown
 ## What
-One paragraph: what this changes and why.
+One paragraph from round 1's section 1: what this adds and why.
+For a multi-round branch, one line per round after it: what that round added and which
+recommendation it came from.
+
+## Acceptance criteria
+The table from section 6 of each round — criterion, met, evidence.
+Group by round when there is more than one.
 
 ## Changes
 - Bullet per meaningful change, file-scoped where useful.
 
 ## Verification
-- `ruff check .` / `ruff format --check .` / `mypy` / `pytest` — all pass
-- Anything run by hand, with the actual result
+- `ruff check .` / `ruff format --check .` / `mypy` / `pytest` — all pass, N tests
+- Every module showcase on the branch re-run standalone
+- Test coverage of each intent, from section 5 of each round
+- For a multi-round branch, the regression table from the newest round's section 6:
+  the earlier rounds' criteria still hold
+- Anything run by hand, with its actual result
+
+## Follow-ups
+Deferred recommendations from section 8 of every round, with their reasons. Drop any that
+a later round went on to implement.
 
 ## Notes
-Anything a reviewer should know: trade-offs, deliberate omissions, follow-ups.
+Trade-offs, deliberate omissions, anything a reviewer should know.
+
+Plan: `docs/plans/<feature-slug>/` — one file per round.
 ```
 
 Omit a section rather than filling it with nothing.
+
+Return the pull request URL as a markdown link.

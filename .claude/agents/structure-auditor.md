@@ -15,7 +15,11 @@ see: **signature drift**, where the file names the right module but describes it
 ## Method
 
 1. Read `STRUCTURE.md` in full.
-2. Glob every `.py` file in the package and `tests/`, excluding `.venv`.
+2. Glob every `.py` file `STRUCTURE.md` is responsible for, excluding `.venv`:
+   - `src/**/*.py` — the package and every subpackage,
+   - `tests/**/*.py`,
+   - `.claude/hooks/*.py` — documented there too, with full signature tables, and the
+     easiest set to forget because they are not the package.
 3. For each module, read it and compare against its `STRUCTURE.md` entry:
    - Is the module listed at all?
    - Does every public name in the code appear in the entry's table?

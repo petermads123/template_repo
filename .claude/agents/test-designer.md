@@ -21,7 +21,8 @@ apply, and say why in one clause rather than silently dropping them.
 | Empty | empty string, empty collection, zero |
 | Boundaries | first, last, and one either side of every limit in the code |
 | Numbers | negative, very large, float precision, division by zero |
-| Optional | `None` wherever the type allows it, omitted defaults |
+| Missing | `None` wherever the type allows it, omitted defaults, absent keys |
+| Malformed | wrong type, wrong shape, unparseable text, truncated input |
 | Text | non-ASCII, leading/trailing whitespace, very long strings |
 | Purity | does it mutate its arguments? |
 | Idempotency | does calling twice give the same answer? |

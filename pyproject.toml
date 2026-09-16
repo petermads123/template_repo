@@ -24,10 +24,10 @@ dev = [
 ]
 
 [tool.setuptools.packages.find]
-where = ["."]
-# Excluding rather than including means renaming the package folder needs no
-# change here.
-exclude = ["tests*"]
+# src layout: everything installable lives under src/, so nothing else in the
+# repo can be picked up as a package by accident. Renaming the package folder
+# needs no change here.
+where = ["src"]
 
 # --- Ruff Configuration ---
 [tool.ruff]
@@ -52,11 +52,17 @@ convention = "google"
 [tool.pytest.ini_options]
 testpaths = ["tests"]
 addopts = "-v"
+# Import the package from src/, so `pytest` works on a fresh clone before
+# `pip install -e ".[dev]"` has been run.
+pythonpath = ["src"]
 
 # --- Mypy configuration ---
 [tool.mypy]
 # Named explicitly because mypy does not respect .gitignore and would otherwise
-# descend into .venv. Update the package name when renaming.
-files = ["template_repo", "tests"]
+# descend into .venv. Directories rather than package names, so renaming the
+# package needs no change here. The hooks are included because they are real
+# annotated modules whose signatures STRUCTURE.md documents, so they should be
+# held to the same standard as the package.
+files = ["src", "tests", ".claude/hooks"]
 ignore_missing_imports = true
 follow_untyped_imports = true

@@ -1,33 +1,25 @@
 import pytest
 
-from template_repo import greet
+from template_repo.hello_world import main
 
 
-def test_greet_defaults_to_world() -> None:
-    assert greet() == "Hello, World!"
+def test_main_prints_hello_world(capsys: pytest.CaptureFixture[str]) -> None:
+    main()
+    assert capsys.readouterr().out == "Hello, World!\n"
 
 
-def test_greet_uses_given_name() -> None:
-    assert greet("Peter") == "Hello, Peter!"
+def test_main_prints_exactly_one_line(capsys: pytest.CaptureFixture[str]) -> None:
+    main()
+    assert capsys.readouterr().out.count("\n") == 1
 
 
-def test_greet_accepts_empty_string() -> None:
-    assert greet("") == "Hello, !"
+def test_main_writes_nothing_to_stderr(capsys: pytest.CaptureFixture[str]) -> None:
+    main()
+    assert capsys.readouterr().err == ""
 
 
-def test_greet_preserves_unicode() -> None:
-    assert greet("Ærø") == "Hello, Ærø!"
-
-
-def test_greet_preserves_surrounding_whitespace() -> None:
-    assert greet("  Peter  ") == "Hello,   Peter  !"
-
-
-def test_greet_handles_long_input() -> None:
-    name = "a" * 10_000
-    assert greet(name) == f"Hello, {name}!"
-
-
-@pytest.mark.parametrize("name", ["Peter", "", "Ærø", "123"])
-def test_greet_is_deterministic(name: str) -> None:
-    assert greet(name) == greet(name)
+def test_main_is_repeatable(capsys: pytest.CaptureFixture[str]) -> None:
+    main()
+    first = capsys.readouterr().out
+    main()
+    assert capsys.readouterr().out == first
