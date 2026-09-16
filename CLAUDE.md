@@ -79,13 +79,18 @@ session-level effort setting and not valid in frontmatter, where the levels are 
 | Approver | `petermads123` |
 | Merge method | the repository's configured default |
 
-Step 9 requests a review from the approver when it opens the pull request. Step 10 may
-**complete the merge**, but only when all five hold: an approval from the approver, that
-approval not stale (nothing pushed since), CI green where there is CI, no merge conflict,
-and no review thread waiting on Claude.
+Step 9 requests a review from the approver when it opens the pull request.
 
-Never approve anything yourself, and never merge without the approval. An approval says the
-change is wanted, not that a failing gate may be bypassed.
+**Claude never merges on its own judgment, and never on an approval alone.** A pull request
+reaches `main` either because the approver pressed the button themselves, or because they
+explicitly told Claude to merge it. An approval says the change is wanted; it does not say
+ship it now, and it does not start a merge. Neither does a green tree or every precondition
+being satisfied at once — those make a merge permissible, never due.
+
+Once told, the instruction authorises the merge but waives nothing: it must not be stale
+(anything pushed since means they are approving code they have not seen), CI green where
+there is CI, no merge conflict, and every review thread resolved where the ruleset demands
+it. If one fails, say which and wait. Never approve anything yourself.
 
 Where a review request is refused, step 9 **assigns** the approver instead — GitHub permits
 assigning an author even though it refuses to make them a reviewer. It gates nothing, but it
