@@ -25,6 +25,22 @@ hole this hook exists to close. Anywhere else, unreadable input is allowed: the
 guard catches slips, and one that blocks legitimate work is worse than one that
 misses an exotic invocation.
 
+Inside a segment the command's name is found where a shell would find it, after
+the prefix of variable assignments and redirections, with backticks stripped and
+the executable matched without regard to case. A short list of wrapper programs
+is stepped over too. That list is deliberately incomplete: a wrapper nobody
+listed is a miss, which is safe, whereas scanning a segment for any `git` token
+would refuse `echo git commit` — the failure this module treats as worse. Only
+options are skipped after a wrapper, never a bare word, so an option that takes
+a value hides what follows it.
+
+A push's destination is read with the same care: the arguments are walked rather
+than filtered, so an option's value is never mistaken for the remote, and every
+ref is reduced to the branch it names. A switch whose target only the running
+shell can resolve leaves the branch unknown rather than unchanged, and a
+`commit` or `push` that meets an unknown branch is refused with a message saying
+so rather than the one about `main`.
+
 Stdlib only: `jq` is not available on this machine and hook commands default to
 Git Bash on Windows, so the usual shell recipe does not work here.
 """
@@ -410,9 +426,11 @@ def switch_target(subcommand: str, args: tuple[str, ...]) -> str:
         args: The arguments following it.
 
     Returns:
-        The branch name, or an empty string when the invocation does not move
-        HEAD to a named branch — `git checkout -- file` restores a file, and
-        every other subcommand leaves the branch alone.
+        The branch name, reduced by `_branch_name`; an empty string when the
+        invocation does not move HEAD to a named branch, as `git checkout --
+        file` restores a file and every other subcommand leaves the branch
+        alone; or `UNRESOLVED` when the target is one only the running shell
+        can resolve, such as `-` or `@{-1}`.
     """
     if subcommand not in SWITCH_SUBCOMMANDS:
         return ""
