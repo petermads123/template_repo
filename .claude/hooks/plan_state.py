@@ -1,6 +1,6 @@
 """Read the workflow state that lives in the active plan file.
 
-The nine-step pipeline keeps its state on disk, not in the conversation. Each
+The ten-step pipeline keeps its state on disk, not in the conversation. Each
 feature gets a folder named for its slug, holding one numbered file per round:
 
     docs/plans/csv-export/01-csv-export.md        an earlier round, status=done
@@ -61,7 +61,7 @@ class Plan:
     Attributes:
         path: Path to the plan file, relative to the repository root.
         step: The step the pipeline is on, 1 through 10.
-        status: `active`, `done` or `parked`.
+        status: `active`, `done`, `parked` or `template`.
         title: The plan's first-level heading.
         branch: The branch the plan names, or an empty string if it names none.
         feature: The slug of the folder this round belongs to. Empty for a file

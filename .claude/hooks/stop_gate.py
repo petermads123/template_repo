@@ -1,6 +1,6 @@
 """Stop hook: refuse to end the turn on a broken tree, once the step warrants it.
 
-The nine-step pipeline reaches step 3 with code written but no tests yet, so a
+The ten-step pipeline reaches step 3 with code written but no tests yet, so a
 gate that demanded green on every turn would collapse steps 3 to 5 into one.
 This hook therefore reads the active plan file and scales its strictness:
 
@@ -10,7 +10,7 @@ This hook therefore reads the active plan file and scales its strictness:
 - **Steps 1 to 3**: advisory. Nothing is run; the turn ends freely, with a note
   saying when the gate starts biting. Python changing during steps 1 or 2 is
   itself worth a note, since those steps are meant to produce a plan, not code.
-- **Steps 4 to 9**: strict, same as no plan. Step 4 is where the pipeline
+- **Steps 4 to 10**: strict, same as no plan. Step 4 is where the pipeline
   promises a green tree, and nothing after it is allowed to take that back.
 
 Stdlib only: `jq` is not available on this machine and hook commands default to

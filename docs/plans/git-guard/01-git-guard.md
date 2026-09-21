@@ -1,6 +1,6 @@
 # Git guard: quote-aware command parsing
 
-<!-- claude-plan step=8 status=active -->
+<!-- claude-plan step=8 status=done -->
 
 | Field | Value |
 |---|---|
@@ -20,7 +20,7 @@
 | 5 | Test | `/test` | done |
 | 6 | Concept check | `/concept-check` | done |
 | 7 | Ship | `/ship` | done |
-| 8 | Recommend | `/recommend` | pending |
+| 8 | Recommend | `/recommend` | done |
 | 9 | Pull request | `/create-pr` | pending |
 | 10 | Review | `/watch-pr` | pending |
 
@@ -650,15 +650,29 @@ and nothing about the user beyond the authorship already in the git history.
 
 ## 8. Recommendations
 
-> Written in step 8. Follow-up work this change makes possible or desirable. Not bugs —
-> a bug found here goes back to step 3 before shipping.
+Ranked by value to the product. Every remaining hole here was pre-existing and out of
+section 1's scope; nothing actually broken is on this list, because everything the round
+broke was fixed before step 7.
 
 | # | Recommendation | Why it helps | Effort | Decision |
 |---|---|---|---|---|
-| R1 | | | | |
+| R1 | Find the git invocation inside a segment instead of assuming `tokens[0]` | Closes five of the nine remaining holes at once — `GIT_EDITOR=true git commit`, `sudo git push`, backticks, a leading redirection, and `GIT` in capitals on a case-insensitive filesystem. The difference between a guard that catches slips and one that catches slips unless you typed `sudo`. | medium | `next round` |
+| R2 | Teach `push_targets_main` the refspec shapes it does not know | Three mechanical holes: a push option that takes a value is read as the remote, so `git push -o ci.skip origin` slips through on `main`; `@` is git's alias for `HEAD` and only the literal is matched; `refs/heads/main` is not recognised as `main` when it is a *switch* target. | small | `next round` |
+| R3 | Decide the policy for a switch that cannot be resolved statically | `git checkout -` is treated as no switch at all, which is right when `-` goes somewhere safe and wrong when it goes to `main`. Not mechanical — it needs a decision about which way to fail, which is why it belongs in a concept rather than a patch. | small | `next round` |
+| R4 | Pin the toolchain | This round hit it: a Ruff release added formatting of Python inside Markdown and turned the gate red on `.claude/rules/python.md`, prose nobody had edited. An unpinned linter makes the gate fail for reasons unrelated to the change in front of it. | small | **done in this round** |
+| R5 | Correct the stale prose the auditor found | Three hook docstrings called this a "nine-step pipeline" and `stop_gate` said the gate covers "steps 4 to 9"; `Plan.status` was documented as three values when `template` is a fourth the code reads. | small | **done in this round** |
 
-Decisions: `deferred`, `rejected`, or `next round` — a new numbered file in this folder,
-taken back through steps 1 to 7 on the same branch.
+R1, R2 and R3 were taken together as round 2 rather than one at a time: they are one idea
+seen three ways — the guard recognising the command wherever it sits and whatever it
+actually targets — so a single concept can carry them and step 6 can audit them as one.
+
+R4 and R5 were done here at the user's direction rather than deferred, as `/small-change`
+edits outside the pipeline. Both widen this branch's diff with work unrelated to the
+feature, which was the argument for deferring them; the argument for doing them is that both
+are one-line-scale, both were already proven necessary by this round, and neither needs a
+concept. `pyproject.toml` now pins `ruff>=0.16,<0.17`, `mypy>=2.3,<3` and `pytest>=9.1,<10`,
+and the four stale sentences in `plan_state.py`, `session_brief.py` and `stop_gate.py` read
+correctly.
 
 ---
 

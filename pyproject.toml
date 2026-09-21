@@ -17,10 +17,15 @@ dependencies = []
 
 # Optional groups (e.g. dev dependencies)
 [project.optional-dependencies]
+# Pinned to a minor series rather than left open. A Ruff release added
+# formatting of Python inside Markdown code blocks and turned the gate red on
+# prose nobody had edited; an unpinned linter makes the stop gate fail for
+# reasons unrelated to the change in front of it. Widen deliberately, not by
+# accident.
 dev = [
-  "pytest",
-  "ruff",
-  "mypy",
+  "pytest>=9.1,<10",
+  "ruff>=0.16,<0.17",
+  "mypy>=2.3,<3",
 ]
 
 [tool.setuptools.packages.find]
