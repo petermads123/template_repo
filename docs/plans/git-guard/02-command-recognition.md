@@ -1,6 +1,6 @@
 # Git guard: recognising the command
 
-<!-- claude-plan step=8 status=active -->
+<!-- claude-plan step=9 status=active -->
 
 | Field | Value |
 |---|---|
@@ -20,7 +20,7 @@
 | 5 | Test | `/test` | done |
 | 6 | Concept check | `/concept-check` | done |
 | 7 | Ship | `/ship` | done |
-| 8 | Recommend | `/recommend` | pending |
+| 8 | Recommend | `/recommend` | done |
 | 9 | Pull request | `/create-pr` | pending |
 | 10 | Review | `/watch-pr` | pending |
 
@@ -551,11 +551,15 @@ construction; this is what that costs, made visible instead of left to be found.
 
 | Commit | Subject |
 |---|---|
-| `f0b6c1e` | Write round 2's concept: recognising the command |
-| `4c19c33` | Close step 1 of round 2: concept confirmed |
-| *(steps 2-4)* | Round 2 steps 2-4: plan, implement and verify command recognition |
-| *(step 5)* | Round 2 step 5: 70 tests, and a bug the probe found first |
-| *(this one)* | Close round 2: concept check passes, ship the round |
+| `7cdc282` | Write round 2's concept: recognising the command |
+| `ba55702` | Close step 1 of round 2: concept confirmed |
+| `5b01090` | Round 2 steps 2-4: plan, implement and verify command recognition |
+| `32d0c7e` | Round 2 step 5: 70 tests, and a bug the probe found first |
+| `cd64955` | Close round 2: concept check passes, ship the round |
+
+The five hashes above were written from `git log` after the fact. An earlier draft of this
+table carried invented ones; they are the kind of detail that reads as authoritative and is
+never checked, so they are worth getting from the tool rather than from memory.
 
 The round was again committed step by step rather than in one commit here, for the reason
 round 1 recorded: a user-level stop hook refuses to end a turn on an uncommitted tree, and
@@ -573,15 +577,23 @@ beyond the authorship already in the history.
 
 ## 8. Recommendations
 
-> Written in step 8. Follow-up work this change makes possible or desirable. Not bugs —
-> a bug found here goes back to step 3 before shipping.
-
 | # | Recommendation | Why it helps | Effort | Decision |
 |---|---|---|---|---|
-| R1 | | | | |
+| R6 | Decide what the guard does when it cannot name the current branch at all | The ninth hole from round 1, deliberately left out of this concept. `current_branch` returns `""` for two different situations and the guard treats them alike. On a detached HEAD, allowing a commit is *correct* — it cannot land on `main`. When git fails, is absent, or the directory is not a repository, `""` means "no idea", and every comparison against `PROTECTED` silently fails to match, which is the fail-open shape of the original defect reached by another road. Worth a concept because the fix is to tell the two apart, not to refuse on `""`. | small | `deferred` |
+| R7 | Teach the wrapper step which options take values | Closes `sudo -u me git push`, the miss this round documented and tested. Needs a per-wrapper option grammar, which is why it was not done inline. | medium | `deferred` |
+| R8 | Make `PROTECTED` follow the repository's default branch | This is a template. A repo created from it whose default branch is not `main` inherits a guard that protects nothing, silently. Out of scope in both rounds; the most valuable of the three for the template's actual purpose. | medium | `deferred` |
 
-Decisions: `deferred`, `rejected`, or `next round` — a new numbered file in this folder,
-taken back through steps 1 to 7 on the same branch.
+All three deferred rather than taken as round 3. The branch already carries two rounds,
+fifteen commits and 291 tests; a third round before review would make a pull request nobody
+can read in one sitting, and R6 and R8 are both concept-sized questions that deserve their
+own conversation rather than being appended to a review that is already overdue.
+
+R6 is the one to open first. It is small, and half of it is the same class of defect as the
+one that started this branch — a comparison that fails to match and therefore allows. Only
+half: a probe confirms `git commit -m "m"` and a bare `git push` are allowed when the branch
+reads as `""`, which is right on a detached HEAD and wrong when git simply could not answer.
+The first draft of this entry called the whole thing a hole, which was a tidier story than
+the truth.
 
 ---
 
