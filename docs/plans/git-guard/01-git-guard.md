@@ -1,6 +1,6 @@
 # Git guard: quote-aware command parsing
 
-<!-- claude-plan step=4 status=active -->
+<!-- claude-plan step=5 status=active -->
 
 | Field | Value |
 |---|---|
@@ -16,7 +16,7 @@
 | 1 | Conceptualize | `/conceptualize` | done |
 | 2 | Plan | `/plan` | done |
 | 3 | Implement | `/implement` | done |
-| 4 | Verify | `/verify` | pending |
+| 4 | Verify | `/verify` | done |
 | 5 | Test | `/test` | pending |
 | 6 | Concept check | `/concept-check` | pending |
 | 7 | Ship | `/ship` | pending |
@@ -291,16 +291,85 @@ table exactly.
 
 ## 4. Verification log
 
-> Written in step 4: the static half. Command output, not a summary of it.
-
 | Check | Result |
 |---|---|
-| `ruff check .` | |
-| `ruff format --check .` | |
-| `mypy` | |
-| Plan completeness | every signature in the Public API table exists as written |
-| `STRUCTURE.md` | in sync |
-| `python -m <package>.<module>` | |
+| `ruff check .` | `All checks passed!` |
+| `ruff format --check .` | `30 files already formatted` |
+| `mypy` | `Success: no issues found in 8 source files` |
+| `pytest` | `4 passed in 0.01s` — the existing suite; the new one is step 5 |
+| Plan completeness | every signature in the Public API table exists as written (table below) |
+| `STRUCTURE.md` | in sync; auditor run, two edits applied |
+| Hook run standalone | refuses on `main`, allows when the command branches first (below) |
+
+One failure was fixed during step 3 and is recorded here for completeness: Ruff's `D301`
+on a docstring containing a backslash escape. Reworded the sentence to avoid the escape
+rather than adding an `r` prefix to a docstring that has no other reason to be raw. No
+suppressions were added anywhere in this change — no `# noqa`, no `# type: ignore`.
+
+### Plan completeness
+
+Signatures read back out of the imported module with `inspect`, not by eye.
+
+| Planned | Found | Verdict |
+|---|---|---|
+| `Segment` — frozen, `tokens: tuple[str, ...]`, `separator: str` | `frozen=True fields=(tokens: tuple[str, ...], separator: str)` | match |
+| `segments(command: str) -> list[Segment] \| None` | identical | match |
+| `git_subcommand(tokens: tuple[str, ...]) -> tuple[str, tuple[str, ...]]` | identical | match |
+| `push_targets_main(args: tuple[str, ...], branch: str) -> bool` | identical | match |
+| `switch_target(subcommand: str, args: tuple[str, ...]) -> str` | identical | match |
+| `violation(command: str, branch: str) -> str` | identical | match |
+| `main() -> None` | identical | match |
+
+Public names defined in the module: exactly those seven. Nothing missing, nothing
+unplanned. `_is_newline` and `_join` are private and correctly absent from both the table
+and `STRUCTURE.md`.
+
+### STRUCTURE.md audit
+
+The `structure-auditor` subagent found no signature drift anywhere in the repo — all five
+hooks, both package modules and the test file are present and accurate, and no entry names
+a file that no longer exists. Two edits returned and applied:
+
+1. The "Keeping this file current" paragraph said the hooks are held to the package's
+   standard by mypy alone. It now also names the pytest `pythonpath` entry, which is what
+   makes `import guard_git` resolve from the suite — the thing a reader needs before
+   writing step 5's tests.
+2. The `Segment` row now says the separator is `""` for the first invocation, matching the
+   detail the `Plan` row carries in `plan_state`'s table.
+
+It also noted, for step 5 rather than here, that each new test file will need its own entry
+under `## Tests:` or `stop_gate.structure_problems` will block.
+
+### Standalone run
+
+`guard_git.py` is an executable script, not a library module, so `main()` is its entry
+point and the showcase form in `.claude/rules/python.md` does not apply — the rule exempts
+"anything under `.claude/hooks/`". It was therefore exercised the way it actually runs: a
+JSON payload on stdin, against a throwaway repository checked out on `main`.
+
+```
+$ echo '{"tool_input":{"command":"git commit -m \"Add parser; drop the old one\""},
+         "cwd":"<throwaway repo on main>"}' | python .claude/hooks/guard_git.py
+Refused: this would commit to `main`, which this repo never commits to directly.
+Move the work onto a branch first, keeping the changes:
+    git checkout -b <type>/<kebab-case-topic>
+Prefixes: feat, fix, refactor, docs, test, chore.
+exit=2
+
+$ echo '{"tool_input":{"command":"git checkout -b feat/x && git commit -m \"ok\""},
+         "cwd":"<throwaway repo on main>"}' | python .claude/hooks/guard_git.py
+exit=0
+```
+
+The first is the bypass this round closes, refused through the real entry point rather than
+through `violation()` alone. The second is the false positive it removes.
+
+### Behaviour probe
+
+Not the test suite — that is step 5 — but 29 cases were run across A1 to A5 while
+implementing, covering every bypass, the branch-switch rules for `&&`, `;`, `||` and
+newline, the unreadable-input cases, and every push refspec shape. All 29 behaved as
+specified. They become real tests in step 5 rather than staying a one-off script.
 
 ---
 

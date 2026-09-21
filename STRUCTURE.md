@@ -21,8 +21,10 @@ against the `.py` files on disk and blocks on a mismatch. It only sees file-leve
 signature drift is on you, or run the `structure-auditor` subagent.
 
 That covers `src/`, `tests/` and `.claude/hooks/`. The hooks are documented here with full
-signature tables and are type-checked like the package (`[tool.mypy] files` names all
-three), so they are held to the same standard despite not being installable.
+signature tables, type-checked like the package (`[tool.mypy] files` names all three) and
+importable from the suite (`[tool.pytest.ini_options] pythonpath` names `src` and
+`.claude/hooks`, so a test imports a hook by module name the same way a sibling hook does
+at runtime), so they are held to the same standard despite not being installable.
 
 ## Growth
 
@@ -200,7 +202,7 @@ when it names `commit` or `push` on `main`, and allowed anywhere else. Stdlib on
 
 | Signature | Description |
 |---|---|
-| `Segment` | Frozen dataclass: `tokens` and the `separator` that preceded them. |
+| `Segment` | Frozen dataclass: `tokens` and the `separator` that preceded them (`""` for the first). |
 | `segments(command: str) -> list[Segment] \| None` | Split a command into invocations, or None if it cannot be read. |
 | `git_subcommand(tokens: tuple[str, ...]) -> tuple[str, tuple[str, ...]]` | Identify the git subcommand and its arguments. |
 | `push_targets_main(args: tuple[str, ...], branch: str) -> bool` | Whether a push would update `main`. |
