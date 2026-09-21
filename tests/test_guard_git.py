@@ -7,6 +7,7 @@ import guard_git
 import pytest
 from guard_git import (
     PROTECTED,
+    UNRESOLVED,
     Segment,
     git_subcommand,
     push_targets_main,
@@ -579,3 +580,219 @@ def test_main_tolerates_a_byte_order_mark(
         guard_git.main()
 
     assert exit_info.value.code == 2
+
+
+# =============================================================================
+# Round 2: recognising the command
+# =============================================================================
+
+
+# --- U1: a variable-assignment prefix ----------------------------------------
+
+
+@pytest.mark.parametrize(
+    "command",
+    [
+        'GIT_EDITOR=true git commit -m "m"',
+        'GIT_EDITOR=true EDITOR=vi git commit -m "m"',
+        'EMPTY= git commit -m "m"',
+        'MSG="a; b" git commit -m "m"',
+    ],
+)
+def test_violation_finds_a_commit_behind_an_assignment(command: str) -> None:
+    assert refused(command, PROTECTED)
+
+
+def test_violation_finds_a_push_behind_an_assignment() -> None:
+    assert refused("GIT_SSH_COMMAND=ssh git push origin main", OTHER)
+
+
+def test_violation_allows_an_assignment_prefixing_something_harmless() -> None:
+    assert not refused("GIT_EDITOR=true git status", PROTECTED)
+
+
+# --- U2: a redirection prefix ------------------------------------------------
+
+
+@pytest.mark.parametrize(
+    "command",
+    [
+        '>log git commit -m "m"',
+        '> log git commit -m "m"',
+        '>>log git commit -m "m"',
+        '2>&1 git commit -m "m"',
+        '<in git commit -m "m"',
+    ],
+)
+def test_violation_finds_a_commit_behind_a_redirection(command: str) -> None:
+    assert refused(command, PROTECTED)
+
+
+def test_violation_finds_a_commit_behind_both_prefixes() -> None:
+    assert refused('GIT_EDITOR=true >log git commit -m "m"', PROTECTED)
+
+
+# --- U3: command substitution ------------------------------------------------
+
+
+def test_violation_finds_a_push_inside_backticks() -> None:
+    assert refused("`git push origin main`", OTHER)
+
+
+def test_violation_finds_a_commit_inside_backticks() -> None:
+    assert refused('`git commit -m "m"`', PROTECTED)
+
+
+def test_violation_finds_a_push_inside_a_dollar_substitution() -> None:
+    assert refused("$(git push origin main)", OTHER)
+
+
+# --- U4: wrapper programs ----------------------------------------------------
+
+
+@pytest.mark.parametrize("wrapper", ["sudo", "env", "time", "nohup", "doas"])
+def test_violation_finds_a_push_under_each_wrapper(wrapper: str) -> None:
+    assert refused(f"{wrapper} git push origin main", OTHER)
+
+
+@pytest.mark.parametrize("wrapper", ["sudo", "env", "time", "nohup", "doas"])
+def test_violation_finds_a_commit_under_each_wrapper(wrapper: str) -> None:
+    assert refused(f'{wrapper} git commit -m "m"', PROTECTED)
+
+
+def test_violation_steps_over_a_wrappers_own_flags() -> None:
+    assert refused('sudo -n git commit -m "m"', PROTECTED)
+
+
+def test_violation_misses_a_command_behind_a_wrapper_option_value() -> None:
+    # Documented limit, not an oversight: only options are skipped after a
+    # wrapper, never a bare word, because skipping a bare word is how a scan
+    # walks onto a `git` that is an argument. `me` is read as the command name.
+    # If this ever starts refusing, that is a decision to take deliberately.
+    assert not refused("sudo -u me git push origin main", OTHER)
+
+
+def test_violation_allows_a_wrapper_running_something_else() -> None:
+    assert not refused("sudo apt install git", PROTECTED)
+
+
+# --- U5: how git is spelled --------------------------------------------------
+
+
+@pytest.mark.parametrize(
+    "executable", ["GIT", "Git", "git.EXE", "Git.exe", "/usr/bin/GIT"]
+)
+def test_violation_matches_the_executable_without_regard_to_case(
+    executable: str,
+) -> None:
+    assert refused(f'{executable} commit -m "m"', PROTECTED)
+
+
+# --- U6: refspec shapes ------------------------------------------------------
+
+
+@pytest.mark.parametrize(
+    "option", ["-o", "--push-option", "--repo", "--receive-pack", "--exec"]
+)
+def test_violation_does_not_read_a_push_option_value_as_the_remote(
+    option: str,
+) -> None:
+    assert refused(f"git push {option} value origin", PROTECTED)
+
+
+def test_push_targets_main_skips_an_option_value() -> None:
+    assert push_targets_main(("-o", "ci.skip", "origin"), PROTECTED) is True
+
+
+@pytest.mark.parametrize("alias", ["@", "HEAD"])
+def test_push_targets_main_follows_both_spellings_of_head(alias: str) -> None:
+    assert push_targets_main(("origin", alias), PROTECTED) is True
+    assert push_targets_main(("origin", alias), OTHER) is False
+
+
+def test_violation_refuses_a_push_to_the_head_alias() -> None:
+    assert refused("git push origin @", PROTECTED)
+
+
+@pytest.mark.parametrize(
+    "target", ["main", "refs/heads/main", "+refs/heads/main", "+main"]
+)
+def test_switch_target_reduces_a_ref_to_its_branch(target: str) -> None:
+    assert switch_target("checkout", (target,)) == PROTECTED
+
+
+def test_violation_refuses_a_commit_after_switching_to_main_by_full_ref() -> None:
+    assert refused('git checkout refs/heads/main && git commit -m "m"', OTHER)
+
+
+# --- U7: a switch that cannot be resolved ------------------------------------
+
+
+@pytest.mark.parametrize("target", ["-", "@{-1}"])
+def test_switch_target_reports_an_unresolvable_target(target: str) -> None:
+    assert switch_target("checkout", (target,)) == UNRESOLVED
+    assert switch_target("switch", (target,)) == UNRESOLVED
+
+
+@pytest.mark.parametrize("branch", [PROTECTED, OTHER])
+def test_violation_refuses_a_commit_after_an_unresolvable_switch(branch: str) -> None:
+    assert refused('git checkout - && git commit -m "m"', branch)
+
+
+def test_violation_refuses_a_push_after_an_unresolvable_switch() -> None:
+    assert refused("git switch - && git push", OTHER)
+
+
+def test_violation_says_the_branch_is_undetermined_rather_than_main() -> None:
+    reason = violation('git checkout - && git commit -m "m"', OTHER)
+
+    assert "cannot be determined" in reason
+    assert "would commit to" not in reason
+
+
+def test_violation_allows_a_harmless_command_after_an_unresolvable_switch() -> None:
+    assert not refused("git checkout - && git status", OTHER)
+
+
+def test_violation_does_not_carry_an_unresolvable_switch_across_a_weak_join() -> None:
+    # `;` does not guarantee the switch ran, so the branch is the real one.
+    assert not refused('git checkout - ; git commit -m "m"', OTHER)
+
+
+# --- U8: the false positives this round must not introduce -------------------
+
+
+@pytest.mark.parametrize(
+    "command",
+    [
+        "echo git commit",
+        "echo git push origin main",
+        "grep push log.txt",
+        "git log --grep=commit",
+        "sudo apt install git",
+        "time ls",
+        "cat commit.txt",
+        "./scripts/git-commit-helper.sh",
+        "git commit --dry-run --short",
+    ],
+)
+def test_violation_allows_what_is_not_a_git_invocation(command: str) -> None:
+    assert not refused(command, OTHER)
+
+
+@pytest.mark.parametrize(
+    "command",
+    [
+        "echo git commit",
+        "grep push log.txt",
+        "git log --grep=commit",
+        "sudo apt install git",
+        "time ls",
+    ],
+)
+def test_violation_allows_those_same_commands_on_main(command: str) -> None:
+    assert not refused(command, PROTECTED)
+
+
+def test_violation_allows_a_commit_message_naming_git_and_sudo() -> None:
+    assert not refused('git commit -m "run sudo git push by hand"', OTHER)

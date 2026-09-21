@@ -1,6 +1,6 @@
 # Git guard: recognising the command
 
-<!-- claude-plan step=5 status=active -->
+<!-- claude-plan step=6 status=active -->
 
 | Field | Value |
 |---|---|
@@ -17,7 +17,7 @@
 | 2 | Plan | `/plan` | done |
 | 3 | Implement | `/implement` | done |
 | 4 | Verify | `/verify` | done |
-| 5 | Test | `/test` | pending |
+| 5 | Test | `/test` | done |
 | 6 | Concept check | `/concept-check` | pending |
 | 7 | Ship | `/ship` | pending |
 | 8 | Recommend | `/recommend` | pending |
@@ -416,12 +416,60 @@ would fail if this round had reached for the easy implementation.
 
 ## 5. Test log
 
-> Written in step 5: the dynamic half.
+291 tests, all passing. 70 are new in this round; the other 221 are round 1's, unchanged and
+unbroken — not one had to be adjusted for the stricter guard, which is the first evidence
+for B8.
 
 | Intent | Test names | Result |
 |---|---|---|
+| U1 — assignment prefix | `test_violation_finds_a_commit_behind_an_assignment` (4 cases, including an empty value and a value containing `;`), `test_violation_finds_a_push_behind_an_assignment`, `test_violation_allows_an_assignment_prefixing_something_harmless` | pass |
+| U2 — redirection prefix | `test_violation_finds_a_commit_behind_a_redirection` (5 cases: `>log`, `> log`, `>>log`, `2>&1`, `<in`), `test_violation_finds_a_commit_behind_both_prefixes` | pass |
+| U3 — substitution | `test_violation_finds_a_push_inside_backticks`, `test_violation_finds_a_commit_inside_backticks`, `test_violation_finds_a_push_inside_a_dollar_substitution` | pass |
+| U4 — wrappers | `test_violation_finds_a_push_under_each_wrapper` and `..._a_commit_under_each_wrapper` (5 wrappers each), `test_violation_steps_over_a_wrappers_own_flags`, `test_violation_misses_a_command_behind_a_wrapper_option_value`, `test_violation_allows_a_wrapper_running_something_else` | pass |
+| U5 — spelling | `test_violation_matches_the_executable_without_regard_to_case` (5 spellings) | pass |
+| U6 — refspecs | `test_violation_does_not_read_a_push_option_value_as_the_remote` (5 options), `test_push_targets_main_skips_an_option_value`, `test_push_targets_main_follows_both_spellings_of_head`, `test_violation_refuses_a_push_to_the_head_alias`, `test_switch_target_reduces_a_ref_to_its_branch` (4 ref shapes), `test_violation_refuses_a_commit_after_switching_to_main_by_full_ref` | pass |
+| U7 — unresolvable switch | `test_switch_target_reports_an_unresolvable_target` (2 targets x 2 subcommands), `test_violation_refuses_a_commit_after_an_unresolvable_switch` (both branches), `test_violation_refuses_a_push_after_an_unresolvable_switch`, `test_violation_says_the_branch_is_undetermined_rather_than_main`, `test_violation_allows_a_harmless_command_after_an_unresolvable_switch`, `test_violation_does_not_carry_an_unresolvable_switch_across_a_weak_join` | pass |
+| U8 — no false positives | `test_violation_allows_what_is_not_a_git_invocation` (9 cases), `test_violation_allows_those_same_commands_on_main` (5 cases), `test_violation_allows_a_commit_message_naming_git_and_sudo` | pass |
+| U9 — differential | Not a pytest test; see below | pass |
 
-Edge cases considered and deliberately skipped, with reasons:
+### U9, and why it is not a test
+
+U9 compares this module against the previous revision of itself, which a test cannot do
+without vendoring a copy that would then rot. It was run as a verification activity, the way
+round 1 evidenced A5, in two passes:
+
+| Corpus | Comparisons | Round 1 refused, round 2 allows | Round 1 allowed, round 2 refuses |
+|---|---|---|---|
+| Round 1's generated corpus, re-run | 1,512 | **0** | 0 |
+| Round 2's shapes — every prefix, wrapper and wrapping crossed with eight cores | 878 | **0** | 152 |
+
+The first pass returning zero in *both* columns is the point worth reading carefully: it
+says this round changed nothing about the commands round 1 was built to judge. It also says
+that corpus proves nothing about what this round added, which is why the second exists. Run
+alone, the first would have been half a test wearing the costume of a whole one.
+
+The 152 are the eight holes closed, multiplied out across prefixes and wrappings.
+
+### One bug the probe found before the tests did
+
+`` `git push origin main` `` found the command — the backtick was stripped from
+`` `git `` — and then read the refspec as ``main` ``, which is not `main`, and allowed the
+push. Recorded in section 3. It is the same shape of error round 1 made: a check that stops
+at "the command was recognised" passes while the command still gets through.
+
+### Edge cases considered and deliberately skipped
+
+- **A wrapper option that takes a value.** `sudo -u me git push origin main` is allowed, and
+  there is a test asserting it, named so the limit is legible. Only options are skipped
+  after a wrapper, never a bare word, because skipping bare words is exactly how a scan
+  walks onto a `git` that is an argument. Fixing it means knowing every wrapper's option
+  grammar; the failure direction is a miss, not a false refusal.
+- **Nested interpreters and substitution as a value.** Out of scope in section 1, unchanged.
+- **Exotic file descriptor redirections.** `2>&1` is covered because the probe showed how it
+  lexes. Forms like `{fd}>file` are not; they are bash-only and lex differently.
+- **`git checkout -` resolved for real.** Reading the reflog would answer it correctly and
+  would make a pure function do I/O against a repository that may not be the one the command
+  runs in. Refusing is the honest answer.
 
 ---
 

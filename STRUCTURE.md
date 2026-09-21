@@ -109,6 +109,16 @@ before the rewrite. `main` is exercised end to end against a throwaway repositor
 `main` refused with exit 2 and the reason on stderr, a commit allowed after branching and off
 `main`, payloads that are not a git command, an unparseable payload, and a byte-order mark.
 
+Round 2's cases follow: a commit or push hidden behind variable assignments, behind each
+redirection form including `2>&1`, inside backticks and `$( )`, and under each of the five
+wrapper programs; the executable in five spellings and cases; each push option whose value
+would otherwise be read as the remote; `@` and `refs/heads/main` reduced to the branches
+they name; an unresolvable switch refusing from either branch with its own message; and the
+commands that must stay allowed — `echo git commit`, `grep push log.txt`,
+`sudo apt install git`, `time ls`, and a commit message naming both `sudo` and `git push`.
+One test asserts a documented miss rather than a fix: `sudo -u me git push` is allowed,
+because only options are skipped after a wrapper and never a bare word.
+
 ### `tests/test_plan_state.py`
 
 Covers `.claude/hooks/plan_state.py`. `parse` against a complete marker, a file with none,
