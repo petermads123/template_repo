@@ -1,12 +1,12 @@
 # Git guard: quote-aware command parsing
 
-<!-- claude-plan step=2 status=active -->
+<!-- claude-plan step=3 status=active -->
 
 | Field | Value |
 |---|---|
 | Feature | `git-guard` (the folder) |
 | Round | `1` |
-| Branch | _set in step 3_ |
+| Branch | `claude/setup-recommendations-qoyxhf` |
 | Started | `2026-09-21` |
 
 ## Progress
@@ -14,7 +14,7 @@
 | # | Step | Skill | Status |
 |---|---|---|---|
 | 1 | Conceptualize | `/conceptualize` | done |
-| 2 | Plan | `/plan` | pending |
+| 2 | Plan | `/plan` | done |
 | 3 | Implement | `/implement` | pending |
 | 4 | Verify | `/verify` | pending |
 | 5 | Test | `/test` | pending |
@@ -58,9 +58,9 @@ remote ruleset rejects a push afterwards; a local commit on `main` has to be unp
 hand. Today the guard is bypassed by ordinary punctuation:
 
 ```python
-violation('git commit -m "Add parser; drop the old one"', "main")   # -> "" (ALLOWED)
-violation('git commit -m "Handle a|b correctly"', "main")           # -> "" (ALLOWED)
-violation('git commit -m "Fix && polish"', "main")                  # -> "" (ALLOWED)
+violation('git commit -m "Add parser; drop the old one"', "main")  # -> "" (ALLOWED)
+violation('git commit -m "Handle a|b correctly"', "main")  # -> "" (ALLOWED)
+violation('git commit -m "Fix && polish"', "main")  # -> "" (ALLOWED)
 ```
 
 A second defect points the other way: `git checkout -b feat/x && git commit -m "..."` is
@@ -142,44 +142,120 @@ None. Two were raised and settled during this step:
 
 ## 2. Plan
 
-> Written in step 2. Concrete enough that step 3 is transcription, not invention.
-
 ### Approach
 
-One paragraph on the chosen approach, and one on what was rejected and why.
+Tokenize first, split second. `shlex.shlex(command, posix=True, punctuation_chars=True)`
+with `whitespace_split = True` is a shell-aware lexer: it respects quoting, and it emits
+`&&`, `||`, `;`, `|` and `&` as their own tokens even when they are glued to a word. The
+parser therefore stops manufacturing the unparseable fragments it currently chokes on, and
+`git commit -m "a";git push` — flagged in `docs/BACKLOG.md` §1 as a case needing to be
+pinned down — parses correctly with no special handling. Splitting the token stream on
+those separator tokens gives one invocation per segment, each tagged with the separator
+that preceded it, which is what criterion A3 needs to decide whether a branch switch can be
+trusted. `violation()` then walks the segments carrying an effective branch forward across
+`&&` and resetting it on every other separator.
+
+Rejected — **keep `segments()` returning `list[list[str]]`** and merely swap the regex for
+the lexer. It is the smallest possible diff and it fixes A1, A4 and A5, but it throws away
+which separator joined two invocations, so A2 and A3 cannot be expressed at all. The
+rejection cost is one dataclass.
+
+Rejected — **extract shell parsing into a new `.claude/hooks/shell_parse.py`** shared by
+all hooks. Cleaner long-term shape, but `lint_py.py` and `session_brief.py` parse no shell,
+so it would be a module with one consumer. Worth revisiting the day a second hook needs it;
+today it is structure for its own sake.
 
 ### Modules
 
 | Path | New or changed | Purpose |
 |---|---|---|
+| `.claude/hooks/guard_git.py` | changed | Quote-aware parsing, branch-switch tracking, and refusal of unreadable commit/push on `main`. |
+| `pyproject.toml` | changed | `[tool.pytest.ini_options] pythonpath` gains `.claude/hooks`, so the suite imports the hooks the same way a sibling hook does at runtime. |
+| `STRUCTURE.md` | changed | The `guard_git.py` signature table, which step 4 checks literally. |
+| `.claude/hooks/plan_state.py` | unchanged | Covered by tests in step 5; no production change. |
+| `.claude/hooks/stop_gate.py` | unchanged | Covered by tests in step 5; no production change. |
+
+Test files are step 5's output, not step 3's, and are listed under Test intents below.
 
 ### Public API
 
-> Every public class and function, with its full signature as it will be written.
-> `Covers` links back to the acceptance criteria above.
-
 | Signature | Module | Purpose | Covers |
 |---|---|---|---|
+| `Segment` | `guard_git` | Frozen dataclass: `tokens: tuple[str, ...]`, `separator: str` — one invocation and the separator that preceded it (`""` for the first). | A3 |
+| `segments(command: str) -> list[Segment] \| None` | `guard_git` | Split a command into invocations, or `None` when it cannot be lexed. | A1, A4 |
+| `git_subcommand(tokens: tuple[str, ...]) -> tuple[str, tuple[str, ...]]` | `guard_git` | Identify the git subcommand and its arguments. | A5 |
+| `push_targets_main(args: tuple[str, ...], branch: str) -> bool` | `guard_git` | Whether a push would update `main`. | A5 |
+| `switch_target(subcommand: str, args: tuple[str, ...]) -> str` | `guard_git` | The branch a `checkout`/`switch` moves to, or `""`. | A2 |
+| `violation(command: str, branch: str) -> str` | `guard_git` | The reason to refuse, or `""` to allow. | A1-A5 |
+| `main() -> None` | `guard_git` | Entry point: allow or refuse the command. | A5 |
+
+`git_subcommand` and `push_targets_main` change parameter type from `list[str]` to
+`tuple[str, ...]` so the whole parsing path is immutable and `Segment` can stay frozen in
+substance rather than only in name. Both are documented in `STRUCTURE.md` and both changes
+must land there in the same edit.
 
 ### Implementation guide
 
-Ordered. Each entry small enough to finish and check.
-
-1.
-2.
+1. Add the `Segment` frozen dataclass and the separator constants: the set of separator
+   tokens (`&&`, `||`, `;`, `|`, `&`) and the single guaranteeing one (`&&`).
+2. Replace `SEPARATORS`-based splitting in `segments()` with the `shlex` lexer, returning
+   `None` on `ValueError` instead of dropping fragments.
+3. Handle newline boundaries inside `segments()`. `punctuation_chars` treats `\n` as plain
+   whitespace, so `git checkout -b x\ngit commit` would otherwise collapse into one
+   invocation and the commit would never be examined — a regression against today. Detect
+   a boundary by comparing the lexer's `lineno` before and after each token against the
+   count of newlines inside the token itself; a newline outside a token starts a new
+   segment with a non-guaranteeing separator. A newline *inside* a quoted commit message
+   must not split.
+4. Retype `git_subcommand` and `push_targets_main` to `tuple[str, ...]`.
+5. Add `switch_target`: the first non-option positional of `checkout`/`switch`, honouring
+   `-b`/`-B`/`-c`/`-C` and stopping at `--`.
+6. Rewrite `violation()`: `None` from `segments()` refuses when the raw command mentions
+   `commit` or `push` and `branch == PROTECTED`, otherwise allows; then walk the segments
+   carrying an effective branch forward across `&&` only, resetting to the real branch on
+   every other separator, applying `switch_target` after each segment is judged.
+7. Add the refusal text for the unreadable case, saying what could not be read.
+8. Update the `guard_git.py` signature table in `STRUCTURE.md`.
+9. Add `.claude/hooks` to `pythonpath` in `pyproject.toml`.
 
 ### Test intents
 
-> High-level: what a test must prove, not how it is written. Step 5 turns each of these
-> into concrete cases, including the edge cases.
-
 | # | Must prove | Covers |
 |---|---|---|
-| T1 | | |
+| T1 | A commit on `main` is refused when its message contains `;`, `\|`, `&&` or a newline — the four cases that are allowed through today. | A1 |
+| T2 | `git checkout -b feat/x && git commit` is allowed on `main`; `git checkout main && git commit` is refused from a feature branch. | A2 |
+| T3 | A switch joined by `;`, `\|\|`, `&` or a newline does not take effect: the later commit is judged against the branch actually checked out. | A3 |
+| T4 | An unlexable command naming `commit`/`push` on `main` is refused and the message says it could not be read; the same input on a feature branch is allowed; an unlexable command naming neither is allowed on `main`. | A4 |
+| T5 | Every refusal that holds today still holds: `git commit` on `main`; `git push` bare, `origin main`, `HEAD:main`, `refs/heads/main`, `+main`, `--all`, `--mirror`; `git -C path commit`; and all of them allowed on a feature branch, with non-git commands ignored everywhere. | A5 |
+| T6 | `guard_git`, `plan_state` and `stop_gate` import as modules under a plain `pytest` from the repo root. | A6 |
+| T7 | `plan_state`'s public surface behaves: `parse` on a valid marker, a missing marker, an out-of-range step, a file with no Branch row and no title; `all_plans` ordering and recursion; `active_plan` when none, one or several are active; `feature_rounds` ordering; `git_lines` and `current_branch` against a real temporary repo, including detached HEAD and a non-repo directory; `Plan.step_name` and `.gated` at the boundary step. | A7 |
+| T8 | `stop_gate`'s file-level checks behave against temporary trees: `venv_tool` for both layouts and neither; `capture` returning output and honouring its timeout; `changed_python_files` and `tracked_python_files`; `structure_problems` in both directions; `stray_test_files`; `missing_init_files`; `advisory_notes` for each note it can emit; `notice` and `block` exiting zero with the right JSON; and `gate_failures` driven through a monkeypatched `venv_tool`/`capture` rather than real executables. | A7 |
+| T9 | The full suite, `ruff check .`, `ruff format --check .` and `mypy` are green, and `STRUCTURE.md` names every file added. | A8 |
 
 ### Risks
 
-What could make this harder than it looks, and the plan if it does.
+**Fake executables do not port.** `gate_failures` runs whatever `venv_tool` finds, and
+building real stub executables would need a shell script on POSIX and an `.exe` on Windows,
+which this repo targets first. T8 therefore monkeypatches `venv_tool` and `capture` instead
+of creating executables, and `venv_tool` itself is tested by touching files and never
+running them.
+
+**Recursion.** Testing `gate_failures` for real would run `pytest` inside `pytest`. The
+monkeypatch above is what prevents it; this is why A7 carries its exception clause.
+
+**Git-dependent tests.** `plan_state` and `stop_gate` shell out to `git`, so their tests
+need throwaway repositories built in `tmp_path` with `git init` and an initial commit. If
+git is absent the helpers return empty rather than raising, which those tests must assert
+rather than accidentally rely on.
+
+**`punctuation_chars` widens what counts as punctuation.** `<`, `>`, `(` and `)` also
+become tokens, so a redirection such as `git log > out.txt` now splits mid-invocation.
+Harmless — the subcommand is still `log` — but worth a case in T5 so the behaviour is
+recorded rather than discovered.
+
+**A public signature change.** `git_subcommand` and `push_targets_main` change parameter
+type. Step 4 checks the code against the Public API table character by character, so
+`STRUCTURE.md` and the table must agree exactly.
 
 ---
 

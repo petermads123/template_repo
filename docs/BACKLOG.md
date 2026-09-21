@@ -28,9 +28,9 @@ Run from the repo root with `.claude/hooks` importable:
 ```python
 from guard_git import violation, segments
 
-violation('git commit -m "Add parser; drop the old one"', "main")   # -> "" (ALLOWED)
-violation('git commit -m "Handle a|b correctly"', "main")           # -> "" (ALLOWED)
-violation('git commit -m "Fix && polish"', "main")                  # -> "" (ALLOWED)
+violation('git commit -m "Add parser; drop the old one"', "main")  # -> "" (ALLOWED)
+violation('git commit -m "Handle a|b correctly"', "main")  # -> "" (ALLOWED)
+violation('git commit -m "Fix && polish"', "main")  # -> "" (ALLOWED)
 ```
 
 All three commit to `main` with the hook installed and enabled. For comparison,
