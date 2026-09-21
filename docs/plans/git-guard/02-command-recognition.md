@@ -69,35 +69,117 @@ What is already on the branch that this round must not break:
 
 ## 1. Concept
 
-> Written in step 1, agreed with the user before step 2 starts. Prose, not code.
-
 ### What this is
+
+Round 1 taught the guard to read a command the way a shell reads it. This round teaches it
+to find, inside that reading, *which* invocation is git and *what* that invocation actually
+targets.
+
+Three things change. The guard skips the prefix a shell skips before a command's name —
+variable assignments, redirections, and the backticks or `$( )` that wrap a substitution —
+and matches the executable without regard to case. It steps over a short list of wrapper
+programs that exec their argument: `sudo`, `env`, `time`, `nohup`, `doas`. And it learns the
+refspec shapes it does not yet know: a push option that takes a value, `@` as git's alias
+for `HEAD`, and `refs/heads/main` named as a switch target. Alongside those, a branch switch
+whose target cannot be resolved statically — `git checkout -` — makes the branch *unknown*
+rather than unchanged, and a commit or push that follows it is refused.
 
 ### Why it is worth building
 
+Round 1 closed the parsing defect and left nine holes it had inherited. Eight of them are
+these. All are live on the branch today:
+
+```
+GIT_EDITOR=true git commit -m "m"       on main        -> ALLOWED
+sudo git push origin main               on feat/topic  -> ALLOWED
+`git push origin main`                  on feat/topic  -> ALLOWED
+>log git commit -m "m"                  on main        -> ALLOWED
+GIT commit -m "m"                       on main        -> ALLOWED
+git push -o ci.skip origin              on main        -> ALLOWED
+git checkout refs/heads/main && git commit -m "m"      -> ALLOWED
+git checkout - && git commit -m "m"                    -> ALLOWED
+```
+
+The first is the one that matters most: setting an environment variable before a git command
+is ordinary practice, not evasion, and it turns the guard off completely.
+
+**The design aims at the grammar, not at an adversary, and this is deliberate.** The
+module's docstring says the guard exists to catch slips, and that one which blocks
+legitimate work is worse than one which misses an exotic invocation. Skipping assignments
+and redirections is not a heuristic — it is parsing the prefix a shell itself skips, and it
+cannot produce a false positive. The wrapper list is the one pragmatic exception: incomplete
+by construction, but its failure mode is missing a wrapper nobody listed, never refusing
+something legitimate. Anyone determined to evade a local hook can edit the hook; raising
+strictness past the grammar buys nothing against that and costs false positives.
+
 ### Inputs and outputs
+
+Unchanged at the boundary. `guard_git.py` still reads a JSON payload on stdin
+(`tool_input.command`, `cwd`) and answers by exit code — `0` allows, `2` blocks and prints
+the reason to stderr — and `violation(command: str, branch: str) -> str` is still the pure
+function the tests drive. What changes is which invocations that function recognises, and
+one new shape of refusal message: a command whose branch could not be determined.
 
 ### How it connects to the rest of the repo
 
-Which existing modules it calls, which call it, what it does not touch.
+- `.claude/hooks/guard_git.py` is the only module whose behaviour changes.
+- `.claude/hooks/plan_state.py` and `.claude/hooks/stop_gate.py` do **not** change. Round 1
+  said the same and then changed `stop_gate.py` by one line when its own tests found a
+  defect; that was recorded as drift and accepted by the user as a step 1 decision. The same
+  rule applies here: if this round's tests find a defect in a module this section says is
+  untouched, it goes back to the user as a concept decision rather than being absorbed.
+- `tests/test_guard_git.py` grows. The other two test files do not.
+- `STRUCTURE.md`: the `guard_git.py` prose and, if step 2 changes a public signature, its
+  table.
+- `.claude/settings.json` is untouched, so the hook's registration is unchanged.
 
 ### Explicitly out of scope
 
+- **Nested interpreters.** `bash -c "git commit -m x"`, `ssh host git commit`,
+  `xargs git commit`. The outer command is a program that takes a command as *data*;
+  following it means parsing arbitrary nested shells, which is where a guard for slips
+  turns into a sandbox.
+- **Evaluating command substitution.** Backticks and `$( )` are stripped where they wrap an
+  invocation so the invocation inside is seen. What the substitution would evaluate to, and
+  substitutions used as an argument value such as `git push origin $(cat branch.txt)`, stay
+  out.
+- **Wrappers beyond the list.** It is `sudo`, `env`, `time`, `nohup`, `doas` and nothing
+  else. Extending it later is a one-line change and does not need a round.
+- **Git aliases.** Still out, for round 1's reason: resolving them means reading git config.
+- **Making `PROTECTED` configurable**, and protecting anything other than `main`.
+- **The ninth hole from round 1 is not here.** `git push origin HEAD` when `HEAD` is
+  detached, and similar cases where the guard's own `current_branch` returns `""`, are a
+  different question about what the guard does when it cannot name the current branch at
+  all.
+
 ### Acceptance criteria
 
-> Numbered, observable, and phrased so that step 6 can mark each one met or not met.
-> These are the contract. Step 2 plans against them, step 5 tests them, step 6 audits
-> against them. If a criterion cannot be observed from outside the code, rewrite it.
+> Lettered `B` rather than `A` so that step 6 and `/create-pr` can tell them apart from
+> round 1's `A1`-`A9`, which are re-checked here as a regression pass rather than restated.
 
 | # | The finished feature... |
 |---|---|
-| A1 | |
-| A2 | |
+| B1 | Refuses a commit or push preceded only by variable assignments — `GIT_EDITOR=true git commit -m "m"` on `main`. |
+| B2 | Refuses one preceded by a redirection — `>log git commit -m "m"` on `main`. |
+| B3 | Refuses one wrapped in backticks or `$( )` — `` `git push origin main` `` from any branch. |
+| B4 | Refuses one invoked under a listed wrapper — `sudo git push origin main`, and the same for `env`, `time`, `nohup` and `doas`. |
+| B5 | Matches the executable without regard to case — `GIT commit -m "m"` on `main`. |
+| B6 | Recognises the three unknown refspec shapes: `git push -o ci.skip origin` on `main`, `git push origin @` on `main`, and `git checkout refs/heads/main && git commit` from a feature branch. |
+| B7 | Treats an unresolvable switch as making the branch unknown, so `git checkout - && git commit` is refused from any branch, with a message saying the branch could not be determined rather than the message for committing to `main`. |
+| B8 | Introduces no false positives: `echo git commit`, `grep push log.txt`, `git log --grep=commit`, `sudo apt install git` and `time ls` are all still allowed, demonstrated by re-running round 1's differential across both branches rather than by citing test names. |
 
 ### Open questions
 
-> Must be empty before step 2 begins. An unanswered question here is a decision being
-> made by accident later.
+None. Two were raised and settled during this step:
+
+- *How far should the guard go in finding the command name?* Shell grammar — assignments,
+  redirections, substitution delimiters, case — plus a short, explicitly incomplete list of
+  wrapper programs. Not recursion into any unknown leading command, which would refuse
+  `echo git commit`.
+- *What happens when a switch target cannot be resolved?* The branch becomes unknown and a
+  following commit or push is refused wherever it runs. `-` may be `main` and the guard
+  cannot tell; the cost is one retry with an explanatory message, against an unpicked commit
+  on `main`.
 
 ---
 
