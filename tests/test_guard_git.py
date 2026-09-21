@@ -422,3 +422,53 @@ def test_violation_refuses_a_commit_after_a_weak_separator_and_newline() -> None
 
 def test_violation_trusts_and_glued_to_a_newline() -> None:
     assert not refused('git checkout -b feat/x &&\ngit commit -m "m"', PROTECTED)
+
+
+# --- violation: regressions the test-designer found in the rewrite -----------
+
+
+@pytest.mark.parametrize(
+    "command",
+    [
+        'echo ok#1 && git commit -m "m"',
+        "git log --grep=#12 && git push origin main",
+    ],
+)
+def test_violation_survives_an_unquoted_hash(command: str) -> None:
+    assert refused(command, PROTECTED)
+
+
+def test_segments_keeps_a_hash_inside_a_word() -> None:
+    parsed = segments("echo ok#1 && git status")
+
+    assert parsed is not None
+    assert parsed[0].tokens == ("echo", "ok#1")
+
+
+def test_violation_distrusts_a_switch_made_inside_a_subshell() -> None:
+    assert refused('(git checkout -b feat/x) && git commit -m "m"', PROTECTED)
+
+
+def test_violation_still_trusts_a_switch_sharing_the_subshell() -> None:
+    assert not refused('(git checkout -b feat/x && git commit -m "m")', PROTECTED)
+
+
+def test_violation_distrusts_a_switch_in_another_repository() -> None:
+    command = 'git -C /other checkout -b feat/x && git commit -m "m"'
+
+    assert refused(command, PROTECTED)
+
+
+def test_violation_distrusts_a_switch_across_a_mixed_separator_run() -> None:
+    assert refused('git checkout -b feat/x ; && git commit -m "m"', PROTECTED)
+
+
+@pytest.mark.parametrize("word", ["committee", "pushover", "recommitted"])
+def test_violation_does_not_read_a_longer_word_as_a_risky_subcommand(
+    word: str,
+) -> None:
+    assert not refused(f'echo "this is about the {word}', PROTECTED)
+
+
+def test_violation_still_refuses_unreadable_input_on_a_real_word() -> None:
+    assert refused('git commit -m "unbalanced', PROTECTED)

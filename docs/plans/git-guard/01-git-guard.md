@@ -1,6 +1,6 @@
 # Git guard: quote-aware command parsing
 
-<!-- claude-plan step=5 status=active -->
+<!-- claude-plan step=6 status=active -->
 
 | Field | Value |
 |---|---|
@@ -17,7 +17,7 @@
 | 2 | Plan | `/plan` | done |
 | 3 | Implement | `/implement` | done |
 | 4 | Verify | `/verify` | done |
-| 5 | Test | `/test` | in progress |
+| 5 | Test | `/test` | done |
 | 6 | Concept check | `/concept-check` | pending |
 | 7 | Ship | `/ship` | pending |
 | 8 | Recommend | `/recommend` | pending |
@@ -311,6 +311,14 @@ guarantee working correctly. It was not — the command was collapsing into one 
 the commit was never examined. A probe that checks only the verdict cannot tell those
 apart; the test that asserts on the *segmentation* can, which is why it caught it.
 
+**A private helper, `_redirected`, and a rewritten `_join`.** Added after the
+`test-designer` subagent found four more regressions (see section 5). `_join` now grants
+the `&&` guarantee only when the run is `&&` and newlines — anything else in it, a `)` or a
+`;`, means at least one path reaches the next invocation unconditionally. `_redirected`
+reports whether a git invocation is aimed at another repository, so a `-C /elsewhere`
+branch switch is no longer trusted here. Both private, so neither appears in the Public API
+table or `STRUCTURE.md`.
+
 **`stop_gate.py` changed, and section 1 said it would not.** Its own tests found that
 `PATH_IN_TEXT` (`[\w./-]+\.py`) cannot match a placeholder path whole: on
 `src/<package>/module.py` it matches only the `/module.py` tail, which then passes the
@@ -412,7 +420,7 @@ specified. They become real tests in step 5 rather than staying a one-off script
 
 ## 5. Test log
 
-190 tests, all passing. 186 are new; the remaining 4 are the placeholder suite that was
+201 tests, all passing. 197 are new; the remaining 4 are the placeholder suite that was
 already there.
 
 | Intent | Test names | Result |
@@ -437,6 +445,50 @@ Three real defects, all fixed in this step and all recorded in section 3:
    allowed on `main`. A bypass, introduced by step 3.
 3. **`stop_gate.PATH_IN_TEXT` could not match a placeholder path whole**, so the gate
    reported prose as a deleted file. Pre-existing, and out of the scope section 1 set.
+
+### The test-designer subagent
+
+The first run was killed by the harness for exceeding its output token limit and reported
+nothing. A second run, given a hard cap of fifteen cases and told to read the existing
+suite first, returned fifteen. **All fifteen were reproduced against the code before any
+was acted on**, and then each was re-run against the original module as it stands on
+`main`, which is what separated the two kinds:
+
+**Five were regressions in this round's own rewrite** — the original module refused them
+and this one did not. All five are now fixed and carry tests:
+
+| # | Command | Cause |
+|---|---|---|
+| 2 | `echo ok#1 && git commit -m "m"` | `shlex` comments out the rest of the line from a bare `#`, even mid-word, so everything after it vanished. `commenters` is now empty. |
+| 3 | `(git checkout -b feat/x) && git commit -m "m"` | A branch switch inside a subshell does not survive it, but `_join` saw `&&` in the run `[")", "&&"]` and trusted it. |
+| 7 | `git -C /other checkout -b feat/x && git commit -m "m"` | The switch happens in another repository; the commit lands here, on `main`. |
+| 12 | `git checkout -b feat/x ; && git commit -m "m"` | `_join` took `&&` from anywhere in a mixed run rather than requiring the run be `&&` alone. |
+| 14 | `echo "this is about the committee` | The unreadable-input branch tested `"commit" in command` as a substring, so `committee` refused. A false positive, and the docstring says blocking legitimate work is the worse failure. |
+
+Cases 3 and 12 share one fix: the `&&` guarantee now requires the whole run to be `&&` and
+newlines. Case 14 became a word-boundary match, case 2 an empty `commenters`, case 7 the
+new `_redirected` helper.
+
+**Nine were pre-existing** — the module on `main` allows them too, so they are outside
+A5, which asks only that everything refused today is still refused. Recorded here and
+carried to section 8 rather than fixed, because fixing them widens a concept that has
+already been stretched once this round:
+
+| # | Command | What slips through |
+|---|---|---|
+| 1 | `GIT_EDITOR=true git commit -m "m"` | An environment assignment before `git` |
+| 4 | `sudo git push origin main` | A wrapper command — also `env`, `time`, `nohup` |
+| 5 | `git push -o ci.skip origin` | An option value read as the remote, so the branch looks unnamed |
+| 6 | `git checkout - && git commit -m "m"` | The previous branch, which cannot be resolved statically |
+| 8 | `` `git push origin main` `` | Backticks, which are neither whitespace nor punctuation |
+| 9 | `git checkout refs/heads/main && git commit` | A switch to `main` by full ref |
+| 10 | `git push origin @` | `@` is git's alias for `HEAD`; only the literal is matched |
+| 11 | `>log git commit -m "m"` | A leading redirection |
+| 15 | `GIT commit -m "m"` | Case-sensitive matching on a case-insensitive filesystem |
+
+Cases 1, 4, 8 and 11 are one hole seen four ways: `git_subcommand` only ever looks at
+`tokens[0]`, so anything occupying that position hides the command behind it. That is the
+single most valuable follow-up of the nine.
 
 ### Edge cases considered and deliberately skipped
 

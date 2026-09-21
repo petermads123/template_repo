@@ -32,6 +32,7 @@ Git Bash on Windows, so the usual shell recipe does not work here.
 from __future__ import annotations
 
 import json
+import re
 import shlex
 import sys
 from dataclasses import dataclass
@@ -77,8 +78,14 @@ SWITCH_SUBCOMMANDS = {"checkout", "switch"}
 #: Their options that take the new branch's name as the following token.
 NEW_BRANCH_OPTIONS = {"-b", "-B", "-c", "-C"}
 
-#: Subcommands worth refusing an unreadable command over.
+#: Global options that aim git at a different repository, so anything the
+#: invocation does happens somewhere other than here.
+REDIRECTING_OPTIONS = {"-C", "--git-dir", "--work-tree"}
+
+#: Subcommands worth refusing an unreadable command over. Matched on word
+#: boundaries: "committee" is not a commit.
 RISKY_SUBCOMMANDS = ("commit", "push")
+RISKY_PATTERN = re.compile(r"\b(?:" + "|".join(RISKY_SUBCOMMANDS) + r")\b")
 
 
 @dataclass(frozen=True)
@@ -87,8 +94,9 @@ class Segment:
 
     Attributes:
         tokens: The invocation's tokens, with quoting already resolved.
-        separator: The separator that preceded it — one of `SEPARATORS`, or
-            `NEWLINE`. Empty for the first invocation in the command.
+        separator: The separator that preceded it — one of `SEPARATORS`,
+            `NEWLINE`, or a grouping delimiter such as `(`. Empty for the first
+            invocation in the command.
     """
 
     tokens: tuple[str, ...]
@@ -130,8 +138,10 @@ def _join(pending: list[str]) -> str:
     """Reduce a run of consecutive separators to the one that governs.
 
     An `&&` followed by a line break is a single `&&` join written across two
-    lines, not an `&&` and then a newline separator, so a run containing `&&`
-    keeps its guarantee.
+    lines, so newlines alongside an `&&` do not weaken it. Anything else in the
+    run does: `)` ends a subshell whose branch switch never escaped it, and a
+    `;` beside an `&&` means at least one path reaches the next invocation
+    unconditionally. Only a run that is `&&` and newlines guarantees anything.
 
     Args:
         pending: The separators seen since the previous invocation ended.
@@ -141,9 +151,40 @@ def _join(pending: list[str]) -> str:
     """
     if not pending:
         return ""
-    if GUARANTEEING in pending:
+    meaningful = [separator for separator in pending if separator != NEWLINE]
+    if not meaningful:
+        return NEWLINE
+    if all(separator == GUARANTEEING for separator in meaningful):
         return GUARANTEEING
-    return pending[0]
+    return next(s for s in meaningful if s != GUARANTEEING)
+
+
+def _redirected(tokens: tuple[str, ...]) -> bool:
+    """Report whether a git invocation is aimed at another repository.
+
+    Only the global options before the subcommand count: `-C` is also
+    `git commit`'s "reuse this message" option, and `-C` after the subcommand
+    says nothing about where the command runs.
+
+    Args:
+        tokens: The invocation's tokens.
+
+    Returns:
+        True if a global option redirects git elsewhere.
+    """
+    index = 1
+    while index < len(tokens):
+        token = tokens[index]
+        if token in REDIRECTING_OPTIONS:
+            return True
+        if token in OPTIONS_WITH_VALUE:
+            index += 2
+            continue
+        if token.startswith("-"):
+            index += 1
+            continue
+        return False
+    return False
 
 
 def segments(command: str) -> list[Segment] | None:
@@ -159,6 +200,9 @@ def segments(command: str) -> list[Segment] | None:
     lexer = shlex.shlex(command, posix=True, punctuation_chars=PUNCTUATION_CHARS)
     lexer.whitespace_split = True
     lexer.whitespace = INLINE_WHITESPACE
+    # `shlex` comments out the rest of the line from a bare `#`, even inside a
+    # word, which silently discarded everything after `echo ok#1 &&`.
+    lexer.commenters = ""
     try:
         tokens = list(lexer)
     except ValueError:
@@ -280,7 +324,7 @@ def violation(command: str, branch: str) -> str:
     """
     parsed = segments(command)
     if parsed is None:
-        if branch == PROTECTED and any(word in command for word in RISKY_SUBCOMMANDS):
+        if branch == PROTECTED and RISKY_PATTERN.search(command):
             return (
                 "Refused: this command could not be read — an unbalanced quote, "
                 f"most likely — and it names `commit` or `push` while `{PROTECTED}` "
@@ -314,7 +358,7 @@ def violation(command: str, branch: str) -> str:
             )
 
         target = switch_target(subcommand, args)
-        if target:
+        if target and not _redirected(segment.tokens):
             effective = target
 
     return ""
