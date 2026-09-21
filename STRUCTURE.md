@@ -100,18 +100,25 @@ to a newline, a run of newlines, a newline inside a quoted message, and input th
 be lexed at all; `git_subcommand` for each spelling of the executable and the options that
 hide the subcommand; `push_targets_main` for every refspec shape that reaches `main`;
 `switch_target` for both subcommands, their new-branch options and a file restore; and
-`violation` for the whole behavioural matrix — punctuation in a commit message, a branch
-switch trusted across `&&` and distrusted across everything else, commands hidden behind
-grouping delimiters, unreadable input, and every refusal that held before the rewrite.
+a `#` inside a word; `violation` for the whole behavioural matrix — punctuation in a commit
+message, a branch switch trusted across `&&` and across an `&&` ending a line but distrusted
+across everything else, including a mixed run such as `; &&`, a subshell that has closed and
+another repository reached with `-C`; commands hidden behind grouping delimiters; unreadable
+input, matched on word boundaries so `committee` is not a commit; and every refusal that held
+before the rewrite. `main` is exercised end to end against a throwaway repository: a commit on
+`main` refused with exit 2 and the reason on stderr, a commit allowed after branching and off
+`main`, payloads that are not a git command, an unparseable payload, and a byte-order mark.
 
 ### `tests/test_plan_state.py`
 
 Covers `.claude/hooks/plan_state.py`. `parse` against a complete marker, a file with none,
 a step outside 1-10, an uppercase status, a missing Branch row, a missing title and an
 unreadable path; `all_plans` for recursion, modification-time ordering and relative paths;
-`active_plan` for none, one and several active at once; `feature_rounds` for round
-ordering and feature isolation; and `git_lines`/`current_branch` against a throwaway
-repository, including a detached HEAD and a directory that is not a repository at all.
+`active_plan` for none, one and several active at once; `feature_rounds` for round ordering,
+feature isolation and an unknown feature; `git_lines`/`current_branch` against a throwaway
+repository, including a detached HEAD and a directory that is not a repository at all; and
+`main` printing the plans it finds, with one active and with none. `Plan.step_name` and
+`Plan.gated` are covered either side of `GATE_FROM_STEP`.
 
 ### `tests/test_stop_gate.py`
 
@@ -120,12 +127,16 @@ when both exist; `capture` for output, a non-zero exit and an expired timeout;
 `changed_python_files` and `tracked_python_files` against a throwaway repository, including
 a rename, a `.gitignore` and work committed on a branch; `structure_problems` in both
 directions plus placeholder paths; `stray_test_files`; `missing_init_files`; and
-`advisory_notes`, `notice` and `block`.
+`advisory_notes`, `notice` and `block`; `enforce` for blocking on one failure, for gathering
+every check's problems into a single reason, and for returning quietly when all four pass; and
+`main` for an unreadable payload, a turn already blocked once, the `.skip-gate` escape hatch,
+enforcement with no plan and Python changed, and the advisory path below the gate step.
 
 `gate_failures` is driven through a monkeypatched `venv_tool` and `capture` rather than
 real executables. Running it for real would invoke Ruff, mypy and `pytest` from inside
 `pytest`, and building stub executables would need a shell script on POSIX and an `.exe` on
-Windows.
+Windows. `enforce` and `main` are driven the same way, with the four checks monkeypatched, so
+neither reaches a real tool either.
 
 
 ## Plans: `docs/plans/`
@@ -228,17 +239,24 @@ to re-explain it. Silent when no plan is active. Stdlib only.
 `PreToolUse` hook on `Bash`. Refuses a `git commit` or `git push` that would land on
 `main`. Reads the command the way a shell does — `shlex` resolves quoting, so a `;` or `|`
 inside a commit message stays part of the message — then splits it on the real separators
-into one invocation per segment.
+into one invocation per segment. The grouping delimiters `(`, `)`, `{` and `}` split too, so
+a command hidden inside `(git commit -m "x")` is seen rather than left with `(` sitting
+where its name should be.
 
 Each segment is judged against the branch that will be checked out when it runs. Only `&&`
-guarantees its left side succeeded, so a branch switch carries forward across `&&` and
-across nothing else: `git checkout -b feat/x && git commit` is allowed from `main`, while
-the same pair joined by `;` or a newline is refused. What still cannot be read is refused
-when it names `commit` or `push` on `main`, and allowed anywhere else. Stdlib only.
+guarantees its left side succeeded, so a branch switch carries forward across a run of
+separators that is `&&` and newlines, and across nothing else: `git checkout -b feat/x &&
+git commit` is allowed from `main`, and so is the same pair with the `&&` ending the line,
+while `;`, `|`, `||`, `&`, a bare newline or a mixed run such as `; &&` is refused. A switch
+that may not have taken effect here is distrusted the same way: one made inside a subshell
+that has since closed, or aimed elsewhere by a global `-C`, `--git-dir` or `--work-tree`,
+leaves the branch as it was. What still cannot be read is refused when it names `commit` or
+`push` — matched on word boundaries, so `committee` is not a commit — while `main` is
+checked out, and allowed anywhere else. Stdlib only.
 
 | Signature | Description |
 |---|---|
-| `Segment` | Frozen dataclass: `tokens` and the `separator` that preceded them (`""` for the first). |
+| `Segment` | Frozen dataclass: `tokens` and the `separator` that preceded them — one of `SEPARATORS`, a newline, or a grouping delimiter (`""` for the first). |
 | `segments(command: str) -> list[Segment] \| None` | Split a command into invocations, or None if it cannot be read. |
 | `git_subcommand(tokens: tuple[str, ...]) -> tuple[str, tuple[str, ...]]` | Identify the git subcommand and its arguments. |
 | `push_targets_main(args: tuple[str, ...], branch: str) -> bool` | Whether a push would update `main`. |

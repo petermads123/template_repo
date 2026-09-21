@@ -2,6 +2,7 @@ import os
 import subprocess
 from pathlib import Path
 
+import plan_state
 import pytest
 from plan_state import (
     GATE_FROM_STEP,
@@ -297,3 +298,33 @@ def test_current_branch_is_empty_on_a_detached_head(repo: Path) -> None:
 
 def test_current_branch_is_empty_outside_a_repository(tmp_path: Path) -> None:
     assert current_branch(tmp_path) == ""
+
+
+# --- main --------------------------------------------------------------------
+
+
+def test_main_reports_the_plans_it_finds(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    write_plan(tmp_path, "csv-export/01-csv-export.md", status="active")
+    monkeypatch.chdir(tmp_path)
+
+    plan_state.main()
+
+    output = capsys.readouterr().out
+    assert "01-csv-export.md" in output
+    assert "active" in output
+    assert "step 4 is gated: True" in output
+
+
+def test_main_is_quiet_about_rounds_when_nothing_is_active(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    write_plan(tmp_path, "csv-export/01-csv-export.md", status="done")
+    monkeypatch.chdir(tmp_path)
+
+    plan_state.main()
+
+    output = capsys.readouterr().out
+    assert "active: None" in output
+    assert "rounds of" not in output

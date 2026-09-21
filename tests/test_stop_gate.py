@@ -1,3 +1,4 @@
+import io
 import json
 import subprocess
 import sys
@@ -378,3 +379,146 @@ def test_block_emits_a_block_decision_and_exits_zero(
         "decision": "block",
         "reason": "not yet",
     }
+
+
+# --- enforce -----------------------------------------------------------------
+
+
+def test_enforce_blocks_when_a_check_reports_a_problem(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    monkeypatch.setattr(stop_gate, "gate_failures", lambda _project: ["ruff failed"])
+    monkeypatch.setattr(stop_gate, "structure_problems", lambda _project: [])
+    monkeypatch.setattr(stop_gate, "stray_test_files", lambda _project: [])
+    monkeypatch.setattr(stop_gate, "missing_init_files", lambda _project: [])
+
+    with pytest.raises(SystemExit) as exit_info:
+        stop_gate.enforce(tmp_path)
+
+    assert exit_info.value.code == 0
+    payload = json.loads(capsys.readouterr().out)
+    assert payload["decision"] == "block"
+    assert "ruff failed" in payload["reason"]
+
+
+def test_enforce_gathers_problems_from_every_check(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    monkeypatch.setattr(stop_gate, "gate_failures", lambda _project: ["a"])
+    monkeypatch.setattr(stop_gate, "structure_problems", lambda _project: ["b"])
+    monkeypatch.setattr(stop_gate, "stray_test_files", lambda _project: ["c"])
+    monkeypatch.setattr(stop_gate, "missing_init_files", lambda _project: ["d"])
+
+    with pytest.raises(SystemExit):
+        stop_gate.enforce(tmp_path)
+
+    reason = json.loads(capsys.readouterr().out)["reason"]
+    assert all(problem in reason for problem in "abcd")
+
+
+def test_enforce_returns_quietly_when_everything_passes(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    for name in (
+        "gate_failures",
+        "structure_problems",
+        "stray_test_files",
+        "missing_init_files",
+    ):
+        monkeypatch.setattr(stop_gate, name, lambda _project: [])
+
+    stop_gate.enforce(tmp_path)
+
+    assert capsys.readouterr().out == ""
+
+
+# --- main --------------------------------------------------------------------
+
+
+def feed(monkeypatch: pytest.MonkeyPatch, payload: str) -> None:
+    monkeypatch.setattr("sys.stdin", io.StringIO(payload))
+
+
+def test_main_exits_zero_on_an_unreadable_payload(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    feed(monkeypatch, "{not json")
+
+    with pytest.raises(SystemExit) as exit_info:
+        stop_gate.main()
+
+    assert exit_info.value.code == 0
+
+
+def test_main_does_not_loop_when_already_blocked_once(
+    monkeypatch: pytest.MonkeyPatch, repo: Path
+) -> None:
+    called = False
+
+    def record(_project: Path) -> None:
+        nonlocal called
+        called = True
+
+    monkeypatch.setattr(stop_gate, "enforce", record)
+    feed(monkeypatch, json.dumps({"stop_hook_active": True, "cwd": str(repo)}))
+
+    with pytest.raises(SystemExit):
+        stop_gate.main()
+
+    assert called is False
+
+
+def test_main_respects_the_skip_gate_file(
+    monkeypatch: pytest.MonkeyPatch, repo: Path
+) -> None:
+    (repo / ".claude").mkdir()
+    (repo / ".claude" / ".skip-gate").touch()
+    called = False
+
+    def record(_project: Path) -> None:
+        nonlocal called
+        called = True
+
+    monkeypatch.setattr(stop_gate, "enforce", record)
+    feed(monkeypatch, json.dumps({"cwd": str(repo)}))
+
+    with pytest.raises(SystemExit):
+        stop_gate.main()
+
+    assert called is False
+
+
+def test_main_enforces_with_no_plan_and_python_changed(
+    monkeypatch: pytest.MonkeyPatch, repo: Path
+) -> None:
+    (repo / "new.py").write_text("x = 1\n", encoding="utf-8")
+    called = False
+
+    def record(_project: Path) -> None:
+        nonlocal called
+        called = True
+
+    monkeypatch.setattr(stop_gate, "enforce", record)
+    feed(monkeypatch, json.dumps({"cwd": str(repo)}))
+
+    with pytest.raises(SystemExit):
+        stop_gate.main()
+
+    assert called is True
+
+
+def test_main_is_advisory_below_the_gate_step(
+    monkeypatch: pytest.MonkeyPatch, repo: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    plans = repo / "docs" / "plans" / "f"
+    plans.mkdir(parents=True)
+    (plans / "01-x.md").write_text(
+        "# A feature\n\n<!-- claude-plan step=2 status=active -->\n", encoding="utf-8"
+    )
+    feed(monkeypatch, json.dumps({"cwd": str(repo)}))
+
+    with pytest.raises(SystemExit) as exit_info:
+        stop_gate.main()
+
+    assert exit_info.value.code == 0
+    assert "systemMessage" in json.loads(capsys.readouterr().out)

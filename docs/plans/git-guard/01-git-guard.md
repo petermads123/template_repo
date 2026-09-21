@@ -1,6 +1,6 @@
 # Git guard: quote-aware command parsing
 
-<!-- claude-plan step=6 status=active -->
+<!-- claude-plan step=7 status=active -->
 
 | Field | Value |
 |---|---|
@@ -18,7 +18,7 @@
 | 3 | Implement | `/implement` | done |
 | 4 | Verify | `/verify` | done |
 | 5 | Test | `/test` | done |
-| 6 | Concept check | `/concept-check` | pending |
+| 6 | Concept check | `/concept-check` | done |
 | 7 | Ship | `/ship` | pending |
 | 8 | Recommend | `/recommend` | pending |
 | 9 | Pull request | `/create-pr` | pending |
@@ -420,7 +420,7 @@ specified. They become real tests in step 5 rather than staying a one-off script
 
 ## 5. Test log
 
-201 tests, all passing. 197 are new; the remaining 4 are the placeholder suite that was
+221 tests, all passing. 217 are new; the remaining 4 are the placeholder suite that was
 already there.
 
 | Intent | Test names | Result |
@@ -516,24 +516,80 @@ single most valuable follow-up of the nine.
 
 ## 6. Concept check
 
-> Written in step 6, against section 1 — not against section 2. The question is whether
-> the thing built is the thing agreed, not whether it matches the plan.
+Audited against section 1, with section 2 left unread until the table below was filled.
 
 | # | Criterion | Met | Evidence |
 |---|---|---|---|
-| A1 | | | |
+| A1 | Refuses a commit to `main` whose message contains `;`, `\|`, `&&` or a newline | yes | `test_violation_refuses_a_commit_whose_message_carries_punctuation`, six parametrised cases including the newline. The differential below confirms the original allowed all of them. |
+| A2 | Allows a compound switch away from `main` before committing; still refuses a switch *to* `main` | yes | `test_violation_allows_a_commit_after_a_guaranteed_switch_away` (`checkout -b`, `checkout -B`, `switch -c`), `test_violation_refuses_a_commit_after_a_switch_to_main`, `test_violation_refuses_a_push_after_a_switch_to_main`. |
+| A3 | A switch counts only when the separator guarantees it ran | yes | `test_violation_distrusts_a_switch_that_may_not_have_run` (`;`, `\|\|`, `&`, newline), `test_violation_trusts_a_switch_joined_across_lines_by_and`, `test_violation_resets_the_branch_after_a_weak_separator`, `test_violation_carries_a_switch_through_an_intervening_command`. |
+| A4 | Refuses unreadable input naming `commit`/`push` on `main`; allows it elsewhere | yes | `test_violation_refuses_unreadable_input_naming_a_risky_subcommand`, `test_violation_allows_unreadable_input_off_main`, `test_violation_allows_unreadable_input_naming_nothing_risky`, `test_violation_does_not_read_a_longer_word_as_a_risky_subcommand`. |
+| A5 | Still refuses everything it refuses today | yes | A differential, not a test-name citation: 783 generated commands across both branches, 1566 comparisons of this module against the one on `main`. Ten commands reverse, and **every one is `git checkout -b feat/x && <commit\|push>`** — A2 itself. 153 commands the original allowed are now refused. |
+| A6 | A pytest suite importing all three hooks as modules, green under a plain `pytest` | yes | 221 passed. Collection itself is the proof: `import guard_git` resolves only through the `pythonpath` entry added in this round. |
+| A7 | Covers every public function in the three `STRUCTURE.md` tables, with the stubbed exception | yes, **after being sent back** | Found unmet during this audit; see the drift note below. Now: `stop_gate.enforce` 3 call sites, `guard_git.main()` 3, `plan_state.main()` 2, `stop_gate.main()` 5, `gate_failures` 4 — all through monkeypatched tools, never a real one. |
+| A8 | Four checks green, `STRUCTURE.md` naming every file added | yes | `ruff check .` clean, `ruff format --check .` clean, `mypy` 11 files clean, `pytest` 221 passed; `structure_problems(".")` returns empty. |
 
-Drift found, and what was done about it:
+### Things the criteria do not cover
 
-### Earlier rounds still hold
+**Out of scope, checked one by one.** Nothing on section 1's exclusion list was built:
+`lint_py.py`, `session_brief.py` and `plan_state.py` are byte-identical to `main`;
+`PROTECTED` is still hardcoded; no `.github/` exists; no new stop-gate check was added; and
+`plan_state.py`'s "nine-step pipeline" docstring is deliberately still wrong, because
+section 1 put that reword out of scope.
 
-> Later rounds only. Re-check every acceptance criterion from every earlier round in this
-> folder: this round changed code they depend on, and their tests passing is necessary but
-> not sufficient — a criterion can be satisfied by tests that no longer describe what the
-> feature does.
+**Connections** are as the concept described. `guard_git.py` still imports `current_branch`
+from `plan_state.py` and nothing else changed about that dependency; `settings.json` is
+untouched, so the hook's registration is unchanged; the only new wiring is `.claude/hooks`
+on the pytest `pythonpath`, which is what A6 needs.
 
-| Round | # | Criterion | Still met | Evidence |
-|---|---|---|---|---|
+**Surface** is exactly the seven public names the plan specified — no more, no fewer. The
+four helpers added along the way (`_is_separator`, `_governs`, `_join`, `_redirected`) are
+private and absent from `STRUCTURE.md`; the `structure-auditor` confirmed none leaked.
+
+**Showcase** does not apply: `guard_git.py` is an executable script, which
+`.claude/rules/python.md` exempts. It is now exercised end to end instead — a JSON payload
+on stdin against a throwaway repository, asserting exit 2 and the reason on stderr.
+
+**Structure.** The auditor found no signature drift but four stale prose entries, all of
+them describing rules that step 5 changed — most seriously, the `guard_git.py` section
+still claimed a switch carries "across `&&` and across nothing else", which would have told
+a reader that the subshell and `-C` cases are allowed when they are refused. Seven edits
+applied. Its suggestion to also fix the "nine-step pipeline" docstrings in three hooks was
+**declined**: section 1 puts that out of scope, and it is `/small-change` work.
+
+### Drift found, and what was done about it
+
+**1. `stop_gate.py` changed, and the concept said it would not.** Section 1's Inputs and
+outputs is unambiguous: "Neither changes in this round; both gain tests." One line changed
+anyway — `PATH_IN_TEXT` widened to `[\w./<>*-]+\.py` so the placeholder filter can see a
+placeholder that is not in the final path segment. It was found by this round's own tests,
+it is one character class, and it fails toward blocking rather than allowing.
+
+It is still drift. **Not resolved here — it goes to the user**, because they agreed to a
+concept that excluded it. Three ways to settle it: accept it into this round and amend
+section 1; revert it and open a separate `/small-change`; or revert it and let it wait in
+`docs/BACKLOG.md`. The audit does not get to pick.
+
+**2. The concept's headline promises more than its criteria deliver.** "What this is" says
+the parsing is rebuilt so the guard cannot be walked past. A1 to A5 are all met, and yet
+the nine pre-existing holes in section 5 mean it still can be: `sudo git push origin main`,
+`` `git push origin main` ``, `GIT_EDITOR=true git commit` and `>log git commit` all reach
+`main` today, exactly as they did before this round. No criterion is unmet — A5 asks only
+that nothing regress — but a reader of the concept alone would expect otherwise. Recorded
+here so step 8 puts it to the user rather than leaving the gap to be discovered later.
+
+**3. A7 was unmet when this audit began, and the work went back to step 5.** The claim was
+that the toolchain-touching functions are "driven with a stubbed tool directory and a
+captured exit". `gate_failures` was; `enforce` was covered by nothing at all, and none of
+the three `main()` entry points were either. A first grep appeared to pass only because the
+word `main` is all over those tests as the protected branch name. Twenty tests were added
+and A7 re-audited against call sites rather than mentions.
+
+**4. Two distrust rules go beyond A3 as written.** A3 speaks only of separators. The code
+also distrusts a switch made inside a closed subshell and one aimed elsewhere by `-C`.
+Both were added because the original module refused those commands and the rewrite had
+stopped doing so, which A5 requires — so they are inside the concept even though A3 does
+not name them.
 
 ---
 

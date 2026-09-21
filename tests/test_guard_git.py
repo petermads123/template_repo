@@ -1,3 +1,9 @@
+import io
+import json
+import subprocess
+from pathlib import Path
+
+import guard_git
 import pytest
 from guard_git import (
     PROTECTED,
@@ -472,3 +478,104 @@ def test_violation_does_not_read_a_longer_word_as_a_risky_subcommand(
 
 def test_violation_still_refuses_unreadable_input_on_a_real_word() -> None:
     assert refused('git commit -m "unbalanced', PROTECTED)
+
+
+# --- main: the hook's real entry point ---------------------------------------
+
+
+def git(repo: Path, *args: str) -> subprocess.CompletedProcess[bytes]:
+    return subprocess.run(["git", *args], cwd=repo, check=True, capture_output=True)
+
+
+@pytest.fixture
+def repo_on_main(tmp_path: Path) -> Path:
+    git(tmp_path, "init", "-b", PROTECTED)
+    git(tmp_path, "config", "user.email", "test@example.com")
+    git(tmp_path, "config", "user.name", "Test")
+    (tmp_path / "seed.txt").write_text("seed", encoding="utf-8")
+    git(tmp_path, "add", "seed.txt")
+    git(tmp_path, "commit", "-m", "seed")
+    return tmp_path
+
+
+def run_hook(monkeypatch: pytest.MonkeyPatch, payload: object) -> int | str | None:
+    monkeypatch.setattr("sys.stdin", io.StringIO(json.dumps(payload)))
+    with pytest.raises(SystemExit) as exit_info:
+        guard_git.main()
+    return exit_info.value.code
+
+
+def test_main_blocks_a_commit_on_main(
+    monkeypatch: pytest.MonkeyPatch,
+    repo_on_main: Path,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    payload = {
+        "tool_input": {"command": 'git commit -m "Add parser; drop the old one"'},
+        "cwd": str(repo_on_main),
+    }
+
+    assert run_hook(monkeypatch, payload) == 2
+    assert PROTECTED in capsys.readouterr().err
+
+
+def test_main_allows_a_commit_after_branching(
+    monkeypatch: pytest.MonkeyPatch, repo_on_main: Path
+) -> None:
+    payload = {
+        "tool_input": {"command": 'git checkout -b feat/x && git commit -m "m"'},
+        "cwd": str(repo_on_main),
+    }
+
+    assert run_hook(monkeypatch, payload) == 0
+
+
+def test_main_allows_a_commit_off_main(
+    monkeypatch: pytest.MonkeyPatch, repo_on_main: Path
+) -> None:
+    git(repo_on_main, "checkout", "-b", OTHER)
+    payload = {
+        "tool_input": {"command": 'git commit -m "m"'},
+        "cwd": str(repo_on_main),
+    }
+
+    assert run_hook(monkeypatch, payload) == 0
+
+
+@pytest.mark.parametrize(
+    "payload",
+    [
+        {},
+        {"tool_input": "not a dict"},
+        {"tool_input": {}},
+        {"tool_input": {"command": 42}},
+        {"tool_input": {"command": "ls -la"}},
+    ],
+)
+def test_main_allows_anything_it_cannot_read_as_a_git_command(
+    monkeypatch: pytest.MonkeyPatch, payload: dict[str, object]
+) -> None:
+    assert run_hook(monkeypatch, payload) == 0
+
+
+def test_main_allows_an_unparseable_payload(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr("sys.stdin", io.StringIO("{not json"))
+
+    with pytest.raises(SystemExit) as exit_info:
+        guard_git.main()
+
+    assert exit_info.value.code == 0
+
+
+def test_main_tolerates_a_byte_order_mark(
+    monkeypatch: pytest.MonkeyPatch, repo_on_main: Path
+) -> None:
+    payload = json.dumps(
+        {"tool_input": {"command": 'git commit -m "m"'}, "cwd": str(repo_on_main)}
+    )
+    monkeypatch.setattr("sys.stdin", io.StringIO("﻿" + payload))
+
+    with pytest.raises(SystemExit) as exit_info:
+        guard_git.main()
+
+    assert exit_info.value.code == 2
