@@ -39,6 +39,7 @@ src/                    everything installable; nothing outside it is packaged
   template_repo/        the package itself (rename this to <package_name>)
 tests/                  pytest suite, one test_<module>.py per module
 docs/plans/             one folder per feature, one file per round: the pipeline's state
+docs/BACKLOG.md         known defects and proposed setup work, not yet in the pipeline
 .claude/                Claude Code configuration: rules, skills, agents, hooks
 .vscode/                editor config (Ruff as formatter, format on save)
 pyproject.toml          packaging, Ruff, mypy and pytest configuration
@@ -119,6 +120,17 @@ The first line after the title is the workflow's state and is read by the hooks:
 across the whole repo should be `active` — opening a round stands its predecessor down to
 `done`. Plan files are committed: they are the record of why the code looks the way it is,
 and `/create-pr` builds the pull request body from every round in the folder.
+
+## Backlog: `docs/BACKLOG.md`
+
+Findings from reviewing this repo's own Claude configuration: confirmed defects, proposed
+improvements, and decisions taken against. Deliberately **not** a plan file — it carries no
+`claude-plan` marker and sits outside `docs/plans/`, the only directory
+`.claude/hooks/plan_state.py` scans, so it cannot be mistaken for pipeline state.
+
+Each entry records its routing (`/feature` or `/small-change`) so picking one up does not
+mean re-deciding it. An item graduates by becoming a plan folder under `docs/plans/`, and
+its entry here is deleted in the same change.
 
 ## Claude configuration: `.claude/`
 
