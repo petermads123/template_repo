@@ -1,6 +1,6 @@
 # Git guard: recognising the command
 
-<!-- claude-plan step=9 status=active -->
+<!-- claude-plan step=10 status=active -->
 
 | Field | Value |
 |---|---|
@@ -21,7 +21,7 @@
 | 6 | Concept check | `/concept-check` | done |
 | 7 | Ship | `/ship` | done |
 | 8 | Recommend | `/recommend` | done |
-| 9 | Pull request | `/create-pr` | pending |
+| 9 | Pull request | `/create-pr` | done |
 | 10 | Review | `/watch-pr` | pending |
 
 Statuses: `pending`, `in progress`, `done`.
@@ -601,8 +601,49 @@ the truth.
 
 | Field | Value |
 |---|---|
-| URL | |
+| URL | https://github.com/petermads123/template_repo/pull/6 |
 | Opened as | ready for review |
+| Reviewer | requested and **refused** — see below |
+| Assignee | `petermads123` |
+
+The pull request already existed. It was opened early in the session for `docs/BACKLOG.md`
+alone, before this feature existed, because the session can only push to one branch; step 9
+updated it rather than opening a second. Its title and body were rewritten from both rounds'
+plan files, and it was moved out of draft.
+
+The review request was refused with *"Review cannot be requested from pull request author"*,
+which is the case `CLAUDE.md` predicts for a solo repository: Claude pushes under the
+owner's own token, so every pull request is authored by the person who would approve it.
+`petermads123` was assigned instead, which GitHub does permit for an author. It gates
+nothing, but it puts the pull request in their *Assigned* queue rather than only in
+*Created*.
+
+**The merge signal is therefore an unambiguous instruction in a comment or here**, not an
+approval — one cannot exist. `CLAUDE.md` is explicit that "looks good" on a thread is
+feedback rather than authorisation.
+
+### Whole-branch verification, run in one pass before publishing
+
+| Check | Result |
+|---|---|
+| Working tree clean before any gate ran | yes |
+| `origin/main` moved since the branch started | no |
+| `ruff check .` | `All checks passed!` |
+| `ruff format --check .` | `34 files already formatted` |
+| `mypy` | `Success: no issues found in 11 source files` |
+| `pytest`, whole suite, no filters | **291 passed** |
+| Hooks run standalone | all four touched hooks behave; `guard_git` exits 2 on `main`, `stop_gate` exits 0 |
+| Public API, both rounds | 7 names each, no drift in either |
+| Rounds finished | round 1 `done`; round 2 steps 1-8 `done`, no unmet criterion, regression table filled |
+| `structure-auditor` | clean, and caught two stale code docstrings |
+
+The auditor's last pass is worth recording: `STRUCTURE.md` needed no edits, and it found
+that `switch_target`'s *docstring* still described the round 1 contract while its
+`STRUCTURE.md` row had been corrected at step 4 to document `UNRESOLVED`. A reader of the
+code alone would have taken the sentinel for a branch named `?`. Both that docstring and
+the module docstring were fixed before publishing. The documentation of a change and the
+change itself drifted apart in opposite directions at different times, and only a reader
+comparing them caught it.
 
 ---
 
