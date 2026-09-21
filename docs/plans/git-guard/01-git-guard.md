@@ -17,7 +17,7 @@
 | 2 | Plan | `/plan` | done |
 | 3 | Implement | `/implement` | done |
 | 4 | Verify | `/verify` | done |
-| 5 | Test | `/test` | pending |
+| 5 | Test | `/test` | in progress |
 | 6 | Concept check | `/concept-check` | pending |
 | 7 | Ship | `/ship` | pending |
 | 8 | Recommend | `/recommend` | pending |
@@ -173,7 +173,7 @@ today it is structure for its own sake.
 | `pyproject.toml` | changed | `[tool.pytest.ini_options] pythonpath` gains `.claude/hooks`, so the suite imports the hooks the same way a sibling hook does at runtime. |
 | `STRUCTURE.md` | changed | The `guard_git.py` signature table, which step 4 checks literally. |
 | `.claude/hooks/plan_state.py` | unchanged | Covered by tests in step 5; no production change. |
-| `.claude/hooks/stop_gate.py` | unchanged | Covered by tests in step 5; no production change. |
+| `.claude/hooks/stop_gate.py` | changed in step 5 | Covered by tests, which found a defect in `PATH_IN_TEXT`. One-line fix; see section 3. |
 
 Test files are step 5's output, not step 3's, and are listed under Test intents below.
 
@@ -287,6 +287,43 @@ A run containing `&&` therefore keeps its guarantee. Private, so it stays out of
 **Everything else was built as planned.** All seven public signatures match the section 2
 table exactly.
 
+### Added in step 5, when the tests found bugs
+
+**Two bypasses in the step 3 code, both mine, both found by the suite.** Neither was in
+the original defect; both were introduced by the rewrite and would have shipped without
+these tests.
+
+`shlex` groups a *run* of punctuation into one token, so `&&` followed by a newline arrives
+as the single token `"&&\n"` and `;` followed by a newline as `";\n"`. Neither matched
+`SEPARATORS`, so both were swallowed as ordinary words and the whole command collapsed into
+one segment — leaving `git status ;` + newline + `git push origin main` **allowed on
+`main`**. Separator detection now works on characters (`SEPARATOR_CHARS`) rather than whole
+tokens, and `_governs` reduces a run to the separator that governs it, keeping the `&&`
+guarantee for a chain written across two lines.
+
+The grouping delimiters were the second. `(git commit -m "x")` and `{ git commit -m "x"; }`
+were **allowed on `main`**, because `(` or `{` sat where the command name should be and
+`git_subcommand` never saw `git` behind it. Those delimiters begin and end a command list,
+so they now separate invocations too.
+
+Step 3's own probe had reported the `&&`-across-lines case as allowed and read it as the
+guarantee working correctly. It was not — the command was collapsing into one segment and
+the commit was never examined. A probe that checks only the verdict cannot tell those
+apart; the test that asserts on the *segmentation* can, which is why it caught it.
+
+**`stop_gate.py` changed, and section 1 said it would not.** Its own tests found that
+`PATH_IN_TEXT` (`[\w./-]+\.py`) cannot match a placeholder path whole: on
+`src/<package>/module.py` it matches only the `/module.py` tail, which then passes the
+`PLACEHOLDER` filter because the `<` and `>` are outside the match. The gate therefore
+reports prose as a deleted file and blocks, clearable only by rewording documentation. The
+character class now includes `<>*` so the filter sees what it was always meant to see.
+
+This is a genuine defect found by this round's own tests, in a module this round was
+explicitly testing — but section 1 listed no production change to it, so it is scope the
+concept did not authorise. One line, and it fails toward blocking rather than allowing, so
+it was taken rather than deferred. **Step 6 should judge this against the concept, not wave
+it through**, and section 2's Modules table has been corrected to match.
+
 ---
 
 ## 4. Verification log
@@ -375,12 +412,53 @@ specified. They become real tests in step 5 rather than staying a one-off script
 
 ## 5. Test log
 
-> Written in step 5: the dynamic half.
+190 tests, all passing. 186 are new; the remaining 4 are the placeholder suite that was
+already there.
 
 | Intent | Test names | Result |
 |---|---|---|
+| T1 — punctuation in a commit message | `test_violation_refuses_a_commit_whose_message_carries_punctuation` (6 cases: `;`, `\|`, `&&`, `\|\|`, `&`, newline), `test_violation_allows_those_same_commits_off_main` | pass |
+| T2 — a guaranteed switch | `test_violation_allows_a_commit_after_a_guaranteed_switch_away` (3 cases), `test_violation_refuses_a_commit_after_a_switch_to_main`, `test_violation_refuses_a_push_after_a_switch_to_main`, `test_violation_carries_a_switch_through_an_intervening_command` | pass |
+| T3 — a switch that may not have run | `test_violation_distrusts_a_switch_that_may_not_have_run` (4 cases), `test_violation_resets_the_branch_after_a_weak_separator`, `test_violation_trusts_a_switch_joined_across_lines_by_and`, `test_violation_splits_a_separator_glued_to_a_newline` (4 cases), `test_violation_trusts_and_glued_to_a_newline` | pass |
+| T4 — unreadable input | `test_violation_refuses_unreadable_input_naming_a_risky_subcommand` (2 cases), `test_violation_allows_unreadable_input_off_main`, `test_violation_allows_unreadable_input_naming_nothing_risky`, `test_segments_returns_none_for_an_unbalanced_quote` | pass |
+| T5 — everything that already held | `test_violation_refuses_every_push_that_would_reach_main` (7 cases), `test_push_targets_main_recognises_every_refspec_shape` (6 cases), `test_violation_refuses_a_plain_commit_on_main`, `test_violation_refuses_a_commit_reached_through_a_directory_option`, `test_violation_ignores_commands_that_are_not_git` (4 cases), `test_violation_sees_through_grouping_delimiters` (4 cases), and the rest of the `git_subcommand`, `push_targets_main` and `switch_target` blocks | pass |
+| T6 — the hooks import as modules | every test in all three files; collection would fail otherwise | pass |
+| T7 — `plan_state` | `tests/test_plan_state.py`, 36 tests across `Plan`, `parse`, `all_plans`, `active_plan`, `feature_rounds`, `git_lines`, `current_branch` | pass |
+| T8 — `stop_gate` | `tests/test_stop_gate.py`, 38 tests across `venv_tool`, `capture`, `changed_python_files`, `tracked_python_files`, `structure_problems`, `stray_test_files`, `missing_init_files`, `gate_failures`, `advisory_notes`, `notice`, `block` | pass |
+| T9 — the tree stays green | `ruff check .`, `ruff format --check .`, `mypy` (11 files), `pytest` (190) | pass |
 
-Edge cases considered and deliberately skipped, with reasons:
+### What the tests found
+
+Three real defects, all fixed in this step and all recorded in section 3:
+
+1. **A separator run collapsed a command into one segment**, so `git status ;` + newline +
+   `git push origin main` was allowed on `main`. A bypass, introduced by step 3.
+2. **Grouping delimiters hid the command behind them**, so `(git commit -m "x")` was
+   allowed on `main`. A bypass, introduced by step 3.
+3. **`stop_gate.PATH_IN_TEXT` could not match a placeholder path whole**, so the gate
+   reported prose as a deleted file. Pre-existing, and out of the scope section 1 set.
+
+### Edge cases considered and deliberately skipped
+
+- **A quoted argument that is nothing but separator characters** — `git commit -m "&&"`.
+  `shlex` does not report whether a token was quoted, so the argument is read as a
+  separator and the command splits. It errs toward refusing rather than allowing: the
+  `git commit` part still forms its own segment and is still caught. Left as is, since the
+  only fix is a second parser that tracks quoting, and the failure direction is safe.
+- **Git aliases** — `git ci` for `git commit`. Resolving them means reading git config, and
+  section 1 put it out of scope.
+- **A git command nested inside another interpreter** — `bash -c "git commit -m x"`,
+  `ssh host git commit`. The outer command is not git, so the guard allows it. Detecting
+  this means parsing arbitrary nested shells, which is the point at which a guard for slips
+  becomes a sandbox.
+- **Command substitution** — `$(git commit)`, backticks. Same reasoning; also not a form
+  anyone reaches for by accident.
+- **`None` and non-string commands.** `main()` already type-checks its payload before
+  calling `violation`, and `mypy` covers the internal path, so a test would only prove
+  Python raises `AttributeError`.
+- **Windows executable layouts beyond `git.exe`.** `git_subcommand` normalises with
+  `Path(...).name`, covered by the `/usr/bin/git` and `git.exe` cases; enumerating more
+  spellings proves nothing further.
 
 ---
 

@@ -39,7 +39,11 @@ SRC_DIR = "src"
 
 # Paths mentioned in STRUCTURE.md that look like this are prose, not real files.
 PLACEHOLDER = re.compile(r"[<>*]")
-PATH_IN_TEXT = re.compile(r"[\w./-]+\.py")
+# The placeholder characters are matched as part of the path so that
+# `src/<package>/module.py` is captured whole and PLACEHOLDER can reject it.
+# Leaving them out matched only the `/module.py` tail, which looks like a real
+# path, and reported prose as a deleted file.
+PATH_IN_TEXT = re.compile(r"[\w./<>*-]+\.py")
 
 
 def venv_tool(project_dir: Path, name: str) -> Path | None:

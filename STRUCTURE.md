@@ -92,6 +92,30 @@ All tests live here and nowhere else — `testpaths = ["tests"]` in `pyproject.t
 `pytest` collects nothing outside this directory, and the stop gate blocks on a test file
 found anywhere else.
 
+### `tests/test_plan_state.py`
+
+Covers `.claude/hooks/plan_state.py`. `parse` against a complete marker, a file with none,
+a step outside 1-10, an uppercase status, a missing Branch row, a missing title and an
+unreadable path; `all_plans` for recursion, modification-time ordering and relative paths;
+`active_plan` for none, one and several active at once; `feature_rounds` for round
+ordering and feature isolation; and `git_lines`/`current_branch` against a throwaway
+repository, including a detached HEAD and a directory that is not a repository at all.
+
+### `tests/test_stop_gate.py`
+
+Covers `.claude/hooks/stop_gate.py`. `venv_tool` for both layouts, neither, and which wins
+when both exist; `capture` for output, a non-zero exit and an expired timeout;
+`changed_python_files` and `tracked_python_files` against a throwaway repository, including
+a rename, a `.gitignore` and work committed on a branch; `structure_problems` in both
+directions plus placeholder paths; `stray_test_files`; `missing_init_files`; and
+`advisory_notes`, `notice` and `block`.
+
+`gate_failures` is driven through a monkeypatched `venv_tool` and `capture` rather than
+real executables. Running it for real would invoke Ruff, mypy and `pytest` from inside
+`pytest`, and building stub executables would need a shell script on POSIX and an `.exe` on
+Windows.
+
+
 ## Plans: `docs/plans/`
 
 One folder per feature, one numbered file per round inside it, created by `/feature` from

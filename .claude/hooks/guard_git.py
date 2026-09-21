@@ -52,6 +52,14 @@ INLINE_WHITESPACE = " \t\r"
 #: Tokens that end one invocation and begin the next.
 SEPARATORS = frozenset({"&&", "||", ";", "|", "&"})
 
+#: The characters those tokens are built from. `shlex` groups a run of
+#: punctuation into one token, so `&&` followed by a newline arrives as the
+#: single token `"&&\n"`; matching on characters catches every such run.
+#: The grouping delimiters are here too: they begin and end a command list, so
+#: `(git commit)` has to split rather than leave `(` sitting where the command
+#: name should be, which would hide the `git` behind it.
+SEPARATOR_CHARS = frozenset("&|;\n(){}")
+
 #: The one separator whose right side runs only if its left side succeeded, so
 #: a branch switch before it can be trusted to have taken effect.
 GUARANTEEING = "&&"
@@ -87,16 +95,35 @@ class Segment:
     separator: str
 
 
-def _is_newline(token: str) -> bool:
-    """Report whether a token is a run of newlines rather than a word.
+def _is_separator(token: str) -> bool:
+    """Report whether a token separates invocations rather than being a word.
 
     Args:
         token: One token from the lexer.
 
     Returns:
-        True if the token is nothing but newline characters.
+        True if the token is built only from separator characters.
     """
-    return token != "" and token.strip("\n") == ""
+    return token != "" and set(token) <= SEPARATOR_CHARS
+
+
+def _governs(token: str) -> str:
+    """Reduce one separator token to the separator that governs it.
+
+    Args:
+        token: A token for which `_is_separator` is true.
+
+    Returns:
+        The governing separator. A run containing `&&` keeps its guarantee,
+        since an `&&` written at the end of a line still only runs its right
+        side if the left side succeeded.
+    """
+    if GUARANTEEING in token:
+        return GUARANTEEING
+    stripped = token.strip("\n")
+    if not stripped:
+        return NEWLINE
+    return stripped if stripped in SEPARATORS else stripped[0]
 
 
 def _join(pending: list[str]) -> str:
@@ -143,12 +170,12 @@ def segments(command: str) -> list[Segment] | None:
     separator = ""
 
     for token in tokens:
-        if token in SEPARATORS or _is_newline(token):
+        if _is_separator(token):
             if current:
                 parsed.append(Segment(tokens=tuple(current), separator=separator))
                 current = []
                 pending = []
-            pending.append(NEWLINE if _is_newline(token) else token)
+            pending.append(_governs(token))
             separator = _join(pending)
             continue
         current.append(token)

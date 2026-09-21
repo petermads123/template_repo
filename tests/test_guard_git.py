@@ -1,0 +1,424 @@
+import pytest
+from guard_git import (
+    PROTECTED,
+    Segment,
+    git_subcommand,
+    push_targets_main,
+    segments,
+    switch_target,
+    violation,
+)
+
+OTHER = "feat/topic"
+
+
+def refused(command: str, branch: str) -> bool:
+    return bool(violation(command, branch))
+
+
+# --- Segment -----------------------------------------------------------------
+
+
+def test_segment_is_frozen() -> None:
+    segment = Segment(tokens=("git", "status"), separator="")
+
+    with pytest.raises(AttributeError):
+        segment.separator = "&&"  # type: ignore[misc]  # frozen by design
+
+
+def test_segment_keeps_its_tokens_and_separator() -> None:
+    segment = Segment(tokens=("git", "push"), separator="&&")
+
+    assert segment.tokens == ("git", "push")
+    assert segment.separator == "&&"
+
+
+# --- segments ----------------------------------------------------------------
+
+
+def test_segments_returns_one_segment_for_a_simple_command() -> None:
+    assert segments("git status") == [Segment(tokens=("git", "status"), separator="")]
+
+
+def test_segments_is_empty_for_an_empty_command() -> None:
+    assert segments("") == []
+
+
+def test_segments_is_empty_for_whitespace_only() -> None:
+    assert segments("   \t  ") == []
+
+
+@pytest.mark.parametrize("separator", ["&&", "||", ";", "|", "&"])
+def test_segments_splits_on_every_separator(separator: str) -> None:
+    parsed = segments(f"git status {separator} git log")
+
+    assert parsed is not None
+    assert [segment.tokens for segment in parsed] == [("git", "status"), ("git", "log")]
+    assert parsed[1].separator == separator
+
+
+def test_segments_splits_a_separator_glued_to_a_word() -> None:
+    parsed = segments('git commit -m "a";git push')
+
+    assert parsed is not None
+    assert [segment.tokens for segment in parsed] == [
+        ("git", "commit", "-m", "a"),
+        ("git", "push"),
+    ]
+
+
+@pytest.mark.parametrize("punctuation", [";", "|", "&&", "||"])
+def test_segments_keeps_punctuation_inside_a_quoted_argument(punctuation: str) -> None:
+    parsed = segments(f'git commit -m "before {punctuation} after"')
+
+    assert parsed == [
+        Segment(
+            tokens=("git", "commit", "-m", f"before {punctuation} after"), separator=""
+        )
+    ]
+
+
+def test_segments_treats_a_newline_as_a_separator() -> None:
+    parsed = segments('git checkout -b x\ngit commit -m "y"')
+
+    assert parsed is not None
+    assert len(parsed) == 2
+    assert parsed[1].separator == "\n"
+
+
+def test_segments_collapses_a_run_of_newlines_into_one_separator() -> None:
+    parsed = segments("git status\n\n\ngit log")
+
+    assert parsed is not None
+    assert len(parsed) == 2
+    assert parsed[1].separator == "\n"
+
+
+def test_segments_keeps_a_newline_inside_a_quoted_message() -> None:
+    parsed = segments('git commit -m "first\nsecond"')
+
+    assert parsed == [
+        Segment(tokens=("git", "commit", "-m", "first\nsecond"), separator="")
+    ]
+
+
+def test_segments_keeps_the_guarantee_when_and_is_split_across_lines() -> None:
+    parsed = segments("git checkout -b x &&\ngit commit -m 'y'")
+
+    assert parsed is not None
+    assert parsed[1].separator == "&&"
+
+
+def test_segments_returns_none_for_an_unbalanced_quote() -> None:
+    assert segments('git commit -m "unbalanced') is None
+
+
+def test_segments_is_idempotent() -> None:
+    command = 'git checkout -b x && git commit -m "a; b"'
+
+    assert segments(command) == segments(command)
+
+
+def test_segments_handles_a_non_ascii_message() -> None:
+    parsed = segments('git commit -m "café — naïve ✅"')
+
+    assert parsed == [
+        Segment(tokens=("git", "commit", "-m", "café — naïve ✅"), separator="")
+    ]
+
+
+def test_segments_handles_a_very_long_message() -> None:
+    message = "x" * 10_000
+    parsed = segments(f'git commit -m "{message}"')
+
+    assert parsed is not None
+    assert parsed[0].tokens[-1] == message
+
+
+# --- git_subcommand ----------------------------------------------------------
+
+
+def test_git_subcommand_finds_the_subcommand_and_its_arguments() -> None:
+    assert git_subcommand(("git", "push", "origin", "main")) == (
+        "push",
+        ("origin", "main"),
+    )
+
+
+def test_git_subcommand_is_empty_for_a_non_git_invocation() -> None:
+    assert git_subcommand(("ls", "-la")) == ("", ())
+
+
+def test_git_subcommand_is_empty_for_no_tokens() -> None:
+    assert git_subcommand(()) == ("", ())
+
+
+def test_git_subcommand_is_empty_for_git_with_no_subcommand() -> None:
+    assert git_subcommand(("git",)) == ("", ())
+
+
+@pytest.mark.parametrize("executable", ["git", "git.exe", "/usr/bin/git"])
+def test_git_subcommand_accepts_git_however_it_is_spelled(executable: str) -> None:
+    assert git_subcommand((executable, "commit"))[0] == "commit"
+
+
+@pytest.mark.parametrize(
+    "option", ["-C", "-c", "--git-dir", "--work-tree", "--exec-path"]
+)
+def test_git_subcommand_steps_over_an_option_and_its_value(option: str) -> None:
+    assert git_subcommand(("git", option, "value", "commit"))[0] == "commit"
+
+
+def test_git_subcommand_steps_over_a_valueless_option() -> None:
+    assert git_subcommand(("git", "--no-pager", "commit"))[0] == "commit"
+
+
+# --- push_targets_main -------------------------------------------------------
+
+
+def test_push_targets_main_for_a_bare_push_on_main() -> None:
+    assert push_targets_main((), PROTECTED) is True
+
+
+def test_push_targets_main_is_false_for_a_bare_push_elsewhere() -> None:
+    assert push_targets_main((), OTHER) is False
+
+
+@pytest.mark.parametrize(
+    "refspec",
+    ["main", "HEAD:main", "refs/heads/main", "+main", "main:main", "+refs/heads/main"],
+)
+def test_push_targets_main_recognises_every_refspec_shape(refspec: str) -> None:
+    assert push_targets_main(("origin", refspec), OTHER) is True
+
+
+@pytest.mark.parametrize("option", ["--all", "--mirror"])
+def test_push_targets_main_for_options_that_push_everything(option: str) -> None:
+    assert push_targets_main((option, "origin"), OTHER) is True
+
+
+def test_push_targets_main_is_false_for_a_feature_refspec() -> None:
+    assert push_targets_main(("-u", "origin", OTHER), OTHER) is False
+
+
+def test_push_targets_main_follows_head_to_the_current_branch() -> None:
+    assert push_targets_main(("origin", "HEAD"), PROTECTED) is True
+    assert push_targets_main(("origin", "HEAD"), OTHER) is False
+
+
+def test_push_targets_main_ignores_a_branch_merely_named_like_main() -> None:
+    assert push_targets_main(("origin", "maintenance"), OTHER) is False
+
+
+# --- switch_target -----------------------------------------------------------
+
+
+@pytest.mark.parametrize("option", ["-b", "-B"])
+def test_switch_target_reads_a_new_branch_from_checkout(option: str) -> None:
+    assert switch_target("checkout", (option, "feat/x")) == "feat/x"
+
+
+@pytest.mark.parametrize("option", ["-c", "-C"])
+def test_switch_target_reads_a_new_branch_from_switch(option: str) -> None:
+    assert switch_target("switch", (option, "feat/x")) == "feat/x"
+
+
+def test_switch_target_reads_an_existing_branch() -> None:
+    assert switch_target("checkout", ("main",)) == PROTECTED
+
+
+def test_switch_target_skips_options_before_the_branch() -> None:
+    assert switch_target("checkout", ("--quiet", "feat/x")) == "feat/x"
+
+
+def test_switch_target_is_empty_for_a_file_restore() -> None:
+    assert switch_target("checkout", ("--", "file.py")) == ""
+
+
+def test_switch_target_is_empty_for_another_subcommand() -> None:
+    assert switch_target("commit", ("-m", "message")) == ""
+
+
+def test_switch_target_is_empty_without_arguments() -> None:
+    assert switch_target("checkout", ()) == ""
+
+
+def test_switch_target_is_empty_when_the_option_has_no_value() -> None:
+    assert switch_target("checkout", ("-b",)) == ""
+
+
+# --- violation: the defect this round closes (T1) ----------------------------
+
+
+@pytest.mark.parametrize(
+    "message",
+    [
+        "Add parser; drop the old one",
+        "Handle a|b correctly",
+        "Fix && polish",
+        "Either || or",
+        "Background & foreground",
+        "first line\nsecond line",
+    ],
+)
+def test_violation_refuses_a_commit_whose_message_carries_punctuation(
+    message: str,
+) -> None:
+    assert refused(f'git commit -m "{message}"', PROTECTED)
+
+
+def test_violation_allows_those_same_commits_off_main() -> None:
+    assert not refused('git commit -m "Add parser; drop the old one"', OTHER)
+
+
+# --- violation: branch switches (T2, T3) -------------------------------------
+
+
+@pytest.mark.parametrize("switch", ["checkout -b", "checkout -B", "switch -c"])
+def test_violation_allows_a_commit_after_a_guaranteed_switch_away(switch: str) -> None:
+    assert not refused(f'git {switch} feat/x && git commit -m "m"', PROTECTED)
+
+
+def test_violation_refuses_a_commit_after_a_switch_to_main() -> None:
+    assert refused('git checkout main && git commit -m "m"', OTHER)
+
+
+def test_violation_refuses_a_push_after_a_switch_to_main() -> None:
+    assert refused("git checkout main && git push", OTHER)
+
+
+@pytest.mark.parametrize("separator", [";", "||", "&", "\n"])
+def test_violation_distrusts_a_switch_that_may_not_have_run(separator: str) -> None:
+    command = f'git checkout -b feat/x {separator} git commit -m "m"'
+
+    assert refused(command, PROTECTED)
+
+
+def test_violation_trusts_a_switch_joined_across_lines_by_and() -> None:
+    assert not refused('git checkout -b feat/x &&\ngit commit -m "m"', PROTECTED)
+
+
+def test_violation_resets_the_branch_after_a_weak_separator() -> None:
+    command = 'git checkout -b feat/x && git status ; git commit -m "m"'
+
+    assert refused(command, PROTECTED)
+
+
+def test_violation_carries_a_switch_through_an_intervening_command() -> None:
+    command = 'git checkout -b feat/x && git status && git commit -m "m"'
+
+    assert not refused(command, PROTECTED)
+
+
+# --- violation: unreadable input (T4) ----------------------------------------
+
+
+@pytest.mark.parametrize("word", ["commit", "push"])
+def test_violation_refuses_unreadable_input_naming_a_risky_subcommand(
+    word: str,
+) -> None:
+    reason = violation(f'git {word} -m "unbalanced', PROTECTED)
+
+    assert "could not be read" in reason
+
+
+def test_violation_allows_unreadable_input_off_main() -> None:
+    assert not refused('git commit -m "unbalanced', OTHER)
+
+
+def test_violation_allows_unreadable_input_naming_nothing_risky() -> None:
+    assert not refused('echo "unbalanced', PROTECTED)
+
+
+# --- violation: everything that already held (T5) ----------------------------
+
+
+def test_violation_refuses_a_plain_commit_on_main() -> None:
+    assert refused('git commit -m "Add the parser"', PROTECTED)
+
+
+def test_violation_allows_a_plain_commit_off_main() -> None:
+    assert not refused('git commit -m "Add the parser"', OTHER)
+
+
+def test_violation_refuses_a_commit_reached_through_a_directory_option() -> None:
+    assert refused('git -C /somewhere commit -m "m"', PROTECTED)
+
+
+@pytest.mark.parametrize(
+    "command",
+    [
+        "git push",
+        "git push origin main",
+        "git push origin HEAD:main",
+        "git push origin refs/heads/main",
+        "git push origin +main",
+        "git push --all",
+        "git push --mirror",
+    ],
+)
+def test_violation_refuses_every_push_that_would_reach_main(command: str) -> None:
+    assert refused(command, PROTECTED)
+
+
+def test_violation_allows_pushing_a_feature_branch() -> None:
+    assert not refused(f"git push -u origin {OTHER}", OTHER)
+
+
+@pytest.mark.parametrize("command", ["ls -la", "echo hello", "python -m pytest", ""])
+def test_violation_ignores_commands_that_are_not_git(command: str) -> None:
+    assert not refused(command, PROTECTED)
+
+
+def test_violation_allows_a_redirection_on_a_harmless_subcommand() -> None:
+    assert not refused("git log > out.txt", PROTECTED)
+
+
+def test_violation_refuses_the_second_half_of_a_chain() -> None:
+    assert refused('git status && git commit -m "m"', PROTECTED)
+
+
+def test_violation_names_the_protected_branch_in_its_reason() -> None:
+    assert PROTECTED in violation('git commit -m "m"', PROTECTED)
+
+
+def test_violation_is_idempotent() -> None:
+    command = 'git commit -m "a; b"'
+
+    assert violation(command, PROTECTED) == violation(command, PROTECTED)
+
+
+# --- violation: commands hidden behind grouping ------------------------------
+
+
+@pytest.mark.parametrize(
+    "command",
+    [
+        '(git commit -m "x")',
+        '{ git commit -m "x"; }',
+        '(cd sub && git commit -m "x")',
+        "(git push origin main)",
+    ],
+)
+def test_violation_sees_through_grouping_delimiters(command: str) -> None:
+    assert refused(command, PROTECTED)
+
+
+def test_violation_still_trusts_a_switch_inside_a_subshell() -> None:
+    assert not refused('(git checkout -b feat/x && git commit -m "m")', PROTECTED)
+
+
+# --- violation: separators glued to a newline --------------------------------
+
+
+@pytest.mark.parametrize("separator", [";", "||", "&", "|"])
+def test_violation_splits_a_separator_glued_to_a_newline(separator: str) -> None:
+    assert refused(f"git status {separator}\ngit push origin main", PROTECTED)
+
+
+def test_violation_refuses_a_commit_after_a_weak_separator_and_newline() -> None:
+    assert refused('git checkout -b feat/x ;\ngit commit -m "m"', PROTECTED)
+
+
+def test_violation_trusts_and_glued_to_a_newline() -> None:
+    assert not refused('git checkout -b feat/x &&\ngit commit -m "m"', PROTECTED)
