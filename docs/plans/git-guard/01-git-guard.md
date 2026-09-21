@@ -1,6 +1,6 @@
 # Git guard: quote-aware command parsing
 
-<!-- claude-plan step=1 status=active -->
+<!-- claude-plan step=2 status=active -->
 
 | Field | Value |
 |---|---|
@@ -13,7 +13,7 @@
 
 | # | Step | Skill | Status |
 |---|---|---|---|
-| 1 | Conceptualize | `/conceptualize` | pending |
+| 1 | Conceptualize | `/conceptualize` | done |
 | 2 | Plan | `/plan` | pending |
 | 3 | Implement | `/implement` | pending |
 | 4 | Verify | `/verify` | pending |
