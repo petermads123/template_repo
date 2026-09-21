@@ -5,11 +5,25 @@ a rejected push happens after the mistake, and a local commit on `main` has to
 be unpicked by hand. This hook refuses the command instead, and says what to do
 instead of just saying no.
 
-It inspects the Bash command about to run, splitting compound commands so a
-`git checkout main && git commit` is caught on its second half. Anything it
-cannot confidently parse is allowed through: the guard exists to catch slips,
-and a parser that blocks legitimate work is worse than one that misses an
-exotic invocation.
+It reads the command the way a shell does. `shlex` resolves quoting, so a `;` or
+`|` inside a commit message stays part of the message instead of being mistaken
+for a separator, and emits the real separators as tokens of their own even when
+they are glued to a word. The command is then split on those separators into one
+invocation per segment.
+
+Each segment is judged against the branch that will be checked out when it runs,
+not the one checked out now: `git checkout -b feat/x && git commit` is allowed
+from `main`, because `&&` runs its right side only if the switch succeeded. No
+other separator carries that guarantee — after `;` or a newline the commit runs
+whether the switch worked or not — so across those the branch is taken as it is
+now.
+
+What still cannot be read is refused rather than allowed when it names `commit`
+or `push` and `main` is checked out. Such a command would usually fail in the
+shell too, so refusing costs little, while allowing it would leave exactly the
+hole this hook exists to close. Anywhere else, unreadable input is allowed: the
+guard catches slips, and one that blocks legitimate work is worse than one that
+misses an exotic invocation.
 
 Stdlib only: `jq` is not available on this machine and hook commands default to
 Git Bash on Windows, so the usual shell recipe does not work here.
@@ -18,46 +32,133 @@ Git Bash on Windows, so the usual shell recipe does not work here.
 from __future__ import annotations
 
 import json
-import re
 import shlex
 import sys
+from dataclasses import dataclass
 from pathlib import Path
 
 from plan_state import current_branch
 
 PROTECTED = "main"
 
-# Compound-command separators. `||` must precede `|` so it is matched first.
-SEPARATORS = re.compile(r"&&|\|\||;|\n|\|")
+#: Characters `shlex` emits as tokens of their own rather than folding into a
+#: word. The default set plus the newline, which would otherwise be whitespace
+#: and would silently join two commands written on two lines into one.
+PUNCTUATION_CHARS = "();<>|&\n"
 
-# Git options that swallow the next token, hiding the subcommand behind them.
+#: Whitespace, minus the newline that `PUNCTUATION_CHARS` claims.
+INLINE_WHITESPACE = " \t\r"
+
+#: Tokens that end one invocation and begin the next.
+SEPARATORS = frozenset({"&&", "||", ";", "|", "&"})
+
+#: The one separator whose right side runs only if its left side succeeded, so
+#: a branch switch before it can be trusted to have taken effect.
+GUARANTEEING = "&&"
+
+#: Stands for one or more newlines between invocations. Separates them, but
+#: guarantees nothing about whether the one before it succeeded.
+NEWLINE = "\n"
+
+#: Git options that swallow the next token, hiding the subcommand behind them.
 OPTIONS_WITH_VALUE = {"-C", "-c", "--git-dir", "--work-tree", "--exec-path"}
 
+#: Subcommands that move HEAD to a different branch.
+SWITCH_SUBCOMMANDS = {"checkout", "switch"}
 
-def segments(command: str) -> list[list[str]]:
+#: Their options that take the new branch's name as the following token.
+NEW_BRANCH_OPTIONS = {"-b", "-B", "-c", "-C"}
+
+#: Subcommands worth refusing an unreadable command over.
+RISKY_SUBCOMMANDS = ("commit", "push")
+
+
+@dataclass(frozen=True)
+class Segment:
+    """One invocation within a compound command.
+
+    Attributes:
+        tokens: The invocation's tokens, with quoting already resolved.
+        separator: The separator that preceded it — one of `SEPARATORS`, or
+            `NEWLINE`. Empty for the first invocation in the command.
+    """
+
+    tokens: tuple[str, ...]
+    separator: str
+
+
+def _is_newline(token: str) -> bool:
+    """Report whether a token is a run of newlines rather than a word.
+
+    Args:
+        token: One token from the lexer.
+
+    Returns:
+        True if the token is nothing but newline characters.
+    """
+    return token != "" and token.strip("\n") == ""
+
+
+def _join(pending: list[str]) -> str:
+    """Reduce a run of consecutive separators to the one that governs.
+
+    An `&&` followed by a line break is a single `&&` join written across two
+    lines, not an `&&` and then a newline separator, so a run containing `&&`
+    keeps its guarantee.
+
+    Args:
+        pending: The separators seen since the previous invocation ended.
+
+    Returns:
+        The governing separator, or an empty string if there were none.
+    """
+    if not pending:
+        return ""
+    if GUARANTEEING in pending:
+        return GUARANTEEING
+    return pending[0]
+
+
+def segments(command: str) -> list[Segment] | None:
     """Split a shell command into its individual invocations.
 
     Args:
         command: The full command line the Bash tool is about to run.
 
     Returns:
-        One token list per invocation. Unparseable segments are dropped.
+        One segment per invocation, in order, or None if the command could not
+        be read at all — an unbalanced quote, most often.
     """
-    parsed: list[list[str]] = []
-    for raw in SEPARATORS.split(command):
-        piece = raw.strip()
-        if not piece:
+    lexer = shlex.shlex(command, posix=True, punctuation_chars=PUNCTUATION_CHARS)
+    lexer.whitespace_split = True
+    lexer.whitespace = INLINE_WHITESPACE
+    try:
+        tokens = list(lexer)
+    except ValueError:
+        return None
+
+    parsed: list[Segment] = []
+    current: list[str] = []
+    pending: list[str] = []
+    separator = ""
+
+    for token in tokens:
+        if token in SEPARATORS or _is_newline(token):
+            if current:
+                parsed.append(Segment(tokens=tuple(current), separator=separator))
+                current = []
+                pending = []
+            pending.append(NEWLINE if _is_newline(token) else token)
+            separator = _join(pending)
             continue
-        try:
-            tokens = shlex.split(piece)
-        except ValueError:
-            continue  # unbalanced quotes: not something to block on
-        if tokens:
-            parsed.append(tokens)
+        current.append(token)
+
+    if current:
+        parsed.append(Segment(tokens=tuple(current), separator=separator))
     return parsed
 
 
-def git_subcommand(tokens: list[str]) -> tuple[str, list[str]]:
+def git_subcommand(tokens: tuple[str, ...]) -> tuple[str, tuple[str, ...]]:
     """Identify the git subcommand in one invocation.
 
     Args:
@@ -68,7 +169,7 @@ def git_subcommand(tokens: list[str]) -> tuple[str, list[str]]:
         invocation is not git.
     """
     if not tokens or Path(tokens[0]).name not in {"git", "git.exe"}:
-        return "", []
+        return "", ()
 
     index = 1
     while index < len(tokens):
@@ -80,15 +181,15 @@ def git_subcommand(tokens: list[str]) -> tuple[str, list[str]]:
             index += 1
             continue
         return token, tokens[index + 1 :]
-    return "", []
+    return "", ()
 
 
-def push_targets_main(args: list[str], branch: str) -> bool:
+def push_targets_main(args: tuple[str, ...], branch: str) -> bool:
     """Decide whether a `git push` would write to the protected branch.
 
     Args:
         args: Arguments following `push`.
-        branch: The branch currently checked out.
+        branch: The branch that will be checked out when the push runs.
 
     Returns:
         True if the push would update `main` on the remote.
@@ -111,6 +212,35 @@ def push_targets_main(args: list[str], branch: str) -> bool:
     return False
 
 
+def switch_target(subcommand: str, args: tuple[str, ...]) -> str:
+    """Name the branch a `checkout` or `switch` moves to.
+
+    Args:
+        subcommand: The git subcommand, as returned by `git_subcommand`.
+        args: The arguments following it.
+
+    Returns:
+        The branch name, or an empty string when the invocation does not move
+        HEAD to a named branch — `git checkout -- file` restores a file, and
+        every other subcommand leaves the branch alone.
+    """
+    if subcommand not in SWITCH_SUBCOMMANDS:
+        return ""
+
+    index = 0
+    while index < len(args):
+        argument = args[index]
+        if argument == "--":
+            return ""
+        if argument in NEW_BRANCH_OPTIONS:
+            return args[index + 1] if index + 1 < len(args) else ""
+        if argument.startswith("-"):
+            index += 1
+            continue
+        return argument
+    return ""
+
+
 def violation(command: str, branch: str) -> str:
     """Find the reason to refuse this command, if there is one.
 
@@ -121,9 +251,26 @@ def violation(command: str, branch: str) -> str:
     Returns:
         An explanation to show Claude, or an empty string to allow the command.
     """
-    for tokens in segments(command):
-        subcommand, args = git_subcommand(tokens)
-        if subcommand == "commit" and branch == PROTECTED:
+    parsed = segments(command)
+    if parsed is None:
+        if branch == PROTECTED and any(word in command for word in RISKY_SUBCOMMANDS):
+            return (
+                "Refused: this command could not be read — an unbalanced quote, "
+                f"most likely — and it names `commit` or `push` while `{PROTECTED}` "
+                "is checked out.\n"
+                "Rewrite it so the quoting is balanced, or move onto a branch "
+                "first:\n"
+                "    git checkout -b <type>/<kebab-case-topic>"
+            )
+        return ""
+
+    effective = branch
+    for segment in parsed:
+        if segment.separator != GUARANTEEING:
+            effective = branch  # the switch before this one may not have run
+
+        subcommand, args = git_subcommand(segment.tokens)
+        if subcommand == "commit" and effective == PROTECTED:
             return (
                 f"Refused: this would commit to `{PROTECTED}`, which this repo "
                 "never commits to directly.\n"
@@ -131,13 +278,18 @@ def violation(command: str, branch: str) -> str:
                 "    git checkout -b <type>/<kebab-case-topic>\n"
                 "Prefixes: feat, fix, refactor, docs, test, chore."
             )
-        if subcommand == "push" and push_targets_main(args, branch):
+        if subcommand == "push" and push_targets_main(args, effective):
             return (
                 f"Refused: this would push to `{PROTECTED}`, which is protected "
                 "on the remote and would be rejected anyway.\n"
                 "Push the feature branch and open a pull request instead:\n"
                 "    git push -u origin <branch>"
             )
+
+        target = switch_target(subcommand, args)
+        if target:
+            effective = target
+
     return ""
 
 

@@ -1,6 +1,6 @@
 # Git guard: quote-aware command parsing
 
-<!-- claude-plan step=3 status=active -->
+<!-- claude-plan step=4 status=active -->
 
 | Field | Value |
 |---|---|
@@ -15,7 +15,7 @@
 |---|---|---|---|
 | 1 | Conceptualize | `/conceptualize` | done |
 | 2 | Plan | `/plan` | done |
-| 3 | Implement | `/implement` | pending |
+| 3 | Implement | `/implement` | done |
 | 4 | Verify | `/verify` | pending |
 | 5 | Test | `/test` | pending |
 | 6 | Concept check | `/concept-check` | pending |
@@ -200,13 +200,13 @@ must land there in the same edit.
    tokens (`&&`, `||`, `;`, `|`, `&`) and the single guaranteeing one (`&&`).
 2. Replace `SEPARATORS`-based splitting in `segments()` with the `shlex` lexer, returning
    `None` on `ValueError` instead of dropping fragments.
-3. Handle newline boundaries inside `segments()`. `punctuation_chars` treats `\n` as plain
-   whitespace, so `git checkout -b x\ngit commit` would otherwise collapse into one
-   invocation and the commit would never be examined — a regression against today. Detect
-   a boundary by comparing the lexer's `lineno` before and after each token against the
-   count of newlines inside the token itself; a newline outside a token starts a new
-   segment with a non-guaranteeing separator. A newline *inside* a quoted commit message
-   must not split.
+3. Handle newline boundaries inside `segments()`. A newline is ordinary whitespace to the
+   lexer, so `git checkout -b x` and `git commit` written on two lines would otherwise
+   collapse into one invocation and the commit would never be examined — a regression
+   against today. Claim the newline as punctuation instead: pass it in
+   `punctuation_chars` and drop it from the lexer's `whitespace`, so it arrives as a
+   separator token of its own while a newline inside a quoted message stays part of that
+   token. *(Corrected in step 3; see section 3.)*
 4. Retype `git_subcommand` and `push_targets_main` to `tuple[str, ...]`.
 5. Add `switch_target`: the first non-option positional of `checkout`/`switch`, honouring
    `-b`/`-B`/`-c`/`-C` and stopping at `--`.
@@ -261,8 +261,31 @@ type. Step 4 checks the code against the Public API table character by character
 
 ## 3. Implementation notes
 
-> Written in step 3. Only deviations from the plan above, each with its reason. "Built as
-> planned" is a complete and good entry.
+**The newline mechanism is not the one the plan specified.** Section 2 said to detect a
+line boundary by comparing the lexer's `lineno` before and after each token against the
+newlines inside the token. Tried first, and it is wrong: `shlex` consumes the whitespace
+that *terminates* a token as part of reading that token, so the line break is attributed to
+the token before the boundary rather than the one after it. Lexing
+`git checkout -b x` + newline + `git commit -m "y"` marks `x` as newline-preceded and the
+following `git` as not, putting the split one token early.
+
+What replaced it is simpler than what was planned rather than more complex: pass the
+newline in `punctuation_chars` and remove it from the lexer's `whitespace`, and it arrives
+as its own token like any other separator, while a newline inside a quoted commit message
+stays inside that token. The implementation guide in section 2 has been corrected to match.
+No public signature changed, so the Public API table stands as planned.
+
+**A run of separators is reduced by a new private helper, `_join`.** Not in the plan.
+Writing the splitter surfaced a case the plan had not considered: an `&&` chain written
+across two lines produces `&&` and a newline as consecutive separator tokens. Taking the
+last would make the join non-guaranteeing and refuse
+`git checkout -b x &&` + newline + `git commit` — a false positive on a perfectly ordinary
+multi-line chain, and the same class of annoyance as the defect this round exists to fix.
+A run containing `&&` therefore keeps its guarantee. Private, so it stays out of
+`STRUCTURE.md` and out of the Public API table.
+
+**Everything else was built as planned.** All seven public signatures match the section 2
+table exactly.
 
 ---
 

@@ -188,14 +188,23 @@ to re-explain it. Silent when no plan is active. Stdlib only.
 ### `.claude/hooks/guard_git.py`
 
 `PreToolUse` hook on `Bash`. Refuses a `git commit` or `git push` that would land on
-`main`, splitting compound commands so the second half of a `&&` chain is caught too.
-Allows anything it cannot confidently parse. Stdlib only.
+`main`. Reads the command the way a shell does — `shlex` resolves quoting, so a `;` or `|`
+inside a commit message stays part of the message — then splits it on the real separators
+into one invocation per segment.
+
+Each segment is judged against the branch that will be checked out when it runs. Only `&&`
+guarantees its left side succeeded, so a branch switch carries forward across `&&` and
+across nothing else: `git checkout -b feat/x && git commit` is allowed from `main`, while
+the same pair joined by `;` or a newline is refused. What still cannot be read is refused
+when it names `commit` or `push` on `main`, and allowed anywhere else. Stdlib only.
 
 | Signature | Description |
 |---|---|
-| `segments(command: str) -> list[list[str]]` | Split a shell command into its invocations. |
-| `git_subcommand(tokens: list[str]) -> tuple[str, list[str]]` | Identify the git subcommand and its arguments. |
-| `push_targets_main(args: list[str], branch: str) -> bool` | Whether a push would update `main`. |
+| `Segment` | Frozen dataclass: `tokens` and the `separator` that preceded them. |
+| `segments(command: str) -> list[Segment] \| None` | Split a command into invocations, or None if it cannot be read. |
+| `git_subcommand(tokens: tuple[str, ...]) -> tuple[str, tuple[str, ...]]` | Identify the git subcommand and its arguments. |
+| `push_targets_main(args: tuple[str, ...], branch: str) -> bool` | Whether a push would update `main`. |
+| `switch_target(subcommand: str, args: tuple[str, ...]) -> str` | The branch a `checkout`/`switch` moves to, or `""`. |
 | `violation(command: str, branch: str) -> str` | The reason to refuse, or `""` to allow. |
 | `main() -> None` | Entry point: allow or refuse the command. |
 

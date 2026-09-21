@@ -53,8 +53,10 @@ convention = "google"
 testpaths = ["tests"]
 addopts = "-v"
 # Import the package from src/, so `pytest` works on a fresh clone before
-# `pip install -e ".[dev]"` has been run.
-pythonpath = ["src"]
+# `pip install -e ".[dev]"` has been run. The hooks are added for the same
+# reason they can import each other at runtime: Python puts a script's own
+# directory on sys.path, and the suite needs the same names to resolve.
+pythonpath = ["src", ".claude/hooks"]
 
 # --- Mypy configuration ---
 [tool.mypy]
