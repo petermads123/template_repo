@@ -82,6 +82,35 @@ NEW_BRANCH_OPTIONS = {"-b", "-B", "-c", "-C"}
 #: invocation does happens somewhere other than here.
 REDIRECTING_OPTIONS = {"-C", "--git-dir", "--work-tree"}
 
+#: How git may be spelled as a command name, compared case-insensitively:
+#: the documented target platform has a case-insensitive filesystem, and where
+#: it does not, `GIT` fails to run anyway so refusing it costs nothing.
+GIT_NAMES = {"git", "git.exe"}
+
+#: A leading `NAME=value` is a variable assignment, part of the prefix a shell
+#: skips before a command's name rather than the name itself.
+ASSIGNMENT = re.compile(r"^[A-Za-z_][A-Za-z0-9_]*=")
+
+#: Tokens that begin a redirection. `shlex` emits `>`, `<`, `>>` and `>&` as
+#: tokens of their own, and a file descriptor in front of one as another.
+REDIRECTION_STARTS = ("<", ">")
+
+#: Programs that run their argument as a command. Deliberately short and
+#: deliberately incomplete: a wrapper nobody listed is a miss, which is safe,
+#: and extending the set is a one-line change.
+WRAPPERS = {"sudo", "env", "time", "nohup", "doas"}
+
+#: `git push` options whose value is the following token. Without these the
+#: value is counted as the remote and the real remote as a refspec.
+PUSH_OPTIONS_WITH_VALUE = {"-o", "--push-option", "--repo", "--receive-pack", "--exec"}
+
+#: Switch targets only the running shell can resolve.
+UNRESOLVABLE_TARGETS = {"-", "@{-1}"}
+
+#: What `switch_target` returns for those: the branch changed, to something
+#: this module cannot name.
+UNRESOLVED = "?"
+
 #: Subcommands worth refusing an unreadable command over. Matched on word
 #: boundaries: "committee" is not a commit.
 RISKY_SUBCOMMANDS = ("commit", "push")
@@ -159,6 +188,82 @@ def _join(pending: list[str]) -> str:
     return next(s for s in meaningful if s != GUARANTEEING)
 
 
+def _strip_substitution(token: str) -> str:
+    """Remove the backticks that wrap a command substitution.
+
+    `$( )` needs no equivalent: `(` is a separator, so the invocation inside
+    already becomes a segment of its own.
+
+    Args:
+        token: One token from the lexer.
+
+    Returns:
+        The token without surrounding backticks.
+    """
+    return token.strip("`")
+
+
+def _branch_name(ref: str) -> str:
+    """Reduce a ref to the branch it names.
+
+    Args:
+        ref: A refspec or branch as written on the command line.
+
+    Returns:
+        The branch name: substitution backticks removed, a leading `+`
+        dropped, the destination half of a `src:dst` pair, `refs/heads/`
+        stripped, and `@` read as `HEAD`. A closing backtick rides on the last
+        token of a substitution, so a refspec can carry one.
+    """
+    name = _strip_substitution(ref).lstrip("+").split(":")[-1]
+    name = name.removeprefix("refs/heads/")
+    return "HEAD" if name == "@" else name
+
+
+def _command_index(tokens: tuple[str, ...]) -> int:
+    """Find where a command's name starts, after the prefix a shell skips.
+
+    A simple command is a run of variable assignments and redirections, then
+    the name. Wrapper programs are stepped over too: they are not shell syntax,
+    but they run their argument as a command, so the name behind one is the
+    name that matters.
+
+    Args:
+        tokens: The invocation's tokens.
+
+    Returns:
+        The index of the command name, or `len(tokens)` when the invocation is
+        prefix and nothing else.
+    """
+    index = 0
+    while index < len(tokens):
+        token = tokens[index]
+        if ASSIGNMENT.match(token):
+            index += 1
+            continue
+        if token.startswith(REDIRECTION_STARTS):
+            index += 2  # the operator and the file it redirects to
+            continue
+        if (
+            token.isdigit()
+            and index + 1 < len(tokens)
+            and tokens[index + 1].startswith(REDIRECTION_STARTS)
+        ):
+            index += 1  # a file descriptor; its operator is handled next pass
+            continue
+        if Path(_strip_substitution(token)).name.lower() in WRAPPERS:
+            index += 1
+            # Only options are skipped, never a bare word, so this cannot walk
+            # past a command name. An option that takes a value hides what
+            # follows it -- `sudo -u me git push` reads as `me` -- which is a
+            # miss rather than a false refusal.
+            while index < len(tokens) and tokens[index].startswith("-"):
+                index += 1
+            continue
+        return index
+    return len(tokens)
+
+
 def _redirected(tokens: tuple[str, ...]) -> bool:
     """Report whether a git invocation is aimed at another repository.
 
@@ -172,7 +277,7 @@ def _redirected(tokens: tuple[str, ...]) -> bool:
     Returns:
         True if a global option redirects git elsewhere.
     """
-    index = 1
+    index = _command_index(tokens) + 1
     while index < len(tokens):
         token = tokens[index]
         if token in REDIRECTING_OPTIONS:
@@ -239,10 +344,13 @@ def git_subcommand(tokens: tuple[str, ...]) -> tuple[str, tuple[str, ...]]:
         The subcommand and the arguments following it. Both are empty when the
         invocation is not git.
     """
-    if not tokens or Path(tokens[0]).name not in {"git", "git.exe"}:
+    start = _command_index(tokens)
+    if start >= len(tokens):
+        return "", ()
+    if Path(_strip_substitution(tokens[start])).name.lower() not in GIT_NAMES:
         return "", ()
 
-    index = 1
+    index = start + 1
     while index < len(tokens):
         token = tokens[index]
         if token in OPTIONS_WITH_VALUE:
@@ -265,17 +373,28 @@ def push_targets_main(args: tuple[str, ...], branch: str) -> bool:
     Returns:
         True if the push would update `main` on the remote.
     """
-    options = [a for a in args if a.startswith("-")]
-    if {"--all", "--mirror"} & set(options):
+    if {"--all", "--mirror"} & set(args):
         return True
 
-    positional = [a for a in args if not a.startswith("-")]
+    positional: list[str] = []
+    index = 0
+    while index < len(args):
+        argument = args[index]
+        if argument in PUSH_OPTIONS_WITH_VALUE:
+            index += 2  # the option and its value, which is not the remote
+            continue
+        if argument.startswith("-"):
+            index += 1
+            continue
+        positional.append(argument)
+        index += 1
+
     refspecs = positional[1:]  # the first positional is the remote
     if not refspecs:
         return branch == PROTECTED
 
     for spec in refspecs:
-        destination = spec.lstrip("+").split(":", 1)[-1].removeprefix("refs/heads/")
+        destination = _branch_name(spec)
         if destination == PROTECTED:
             return True
         if destination == "HEAD" and branch == PROTECTED:
@@ -303,12 +422,14 @@ def switch_target(subcommand: str, args: tuple[str, ...]) -> str:
         argument = args[index]
         if argument == "--":
             return ""
+        if argument in UNRESOLVABLE_TARGETS:
+            return UNRESOLVED
         if argument in NEW_BRANCH_OPTIONS:
-            return args[index + 1] if index + 1 < len(args) else ""
+            return _branch_name(args[index + 1]) if index + 1 < len(args) else ""
         if argument.startswith("-"):
             index += 1
             continue
-        return argument
+        return _branch_name(argument)
     return ""
 
 
@@ -341,6 +462,14 @@ def violation(command: str, branch: str) -> str:
             effective = branch  # the switch before this one may not have run
 
         subcommand, args = git_subcommand(segment.tokens)
+        if subcommand in RISKY_SUBCOMMANDS and effective == UNRESOLVED:
+            return (
+                f"Refused: this would run `git {subcommand}` after a branch switch "
+                "whose target only the running shell can resolve, so which branch "
+                "it would land on cannot be determined here.\n"
+                "Name the branch instead:\n"
+                f"    git checkout <branch> && git {subcommand} ..."
+            )
         if subcommand == "commit" and effective == PROTECTED:
             return (
                 f"Refused: this would commit to `{PROTECTED}`, which this repo "

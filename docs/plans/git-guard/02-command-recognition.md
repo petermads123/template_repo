@@ -1,6 +1,6 @@
 # Git guard: recognising the command
 
-<!-- claude-plan step=2 status=active -->
+<!-- claude-plan step=5 status=active -->
 
 | Field | Value |
 |---|---|
@@ -14,9 +14,9 @@
 | # | Step | Skill | Status |
 |---|---|---|---|
 | 1 | Conceptualize | `/conceptualize` | done |
-| 2 | Plan | `/plan` | pending |
-| 3 | Implement | `/implement` | pending |
-| 4 | Verify | `/verify` | pending |
+| 2 | Plan | `/plan` | done |
+| 3 | Implement | `/implement` | done |
+| 4 | Verify | `/verify` | done |
 | 5 | Test | `/test` | pending |
 | 6 | Concept check | `/concept-check` | pending |
 | 7 | Ship | `/ship` | pending |
@@ -185,66 +185,232 @@ None. Two were raised and settled during this step:
 
 ## 2. Plan
 
-> Written in step 2. Concrete enough that step 3 is transcription, not invention.
-
 ### Approach
 
-One paragraph on the chosen approach, and one on what was rejected and why.
+A shell finds a command's name by skipping a prefix: variable assignments and redirections.
+`git_subcommand` currently assumes that prefix is empty and reads `tokens[0]`. The change is
+to give it a private helper that walks the prefix the way a shell does and returns the index
+where the command name actually starts — then the same function, with the same signature,
+asks its question at the right position. Case folding and backtick stripping happen at that
+position; the wrapper list is one more kind of prefix to step over.
+
+The refspec work is separate and mechanical: one normaliser, `_branch_name`, that reduces a
+ref to the branch it names — dropping a leading `+`, taking the destination half of a
+`src:dst` pair, stripping `refs/heads/`, and reading `@` as `HEAD` — used by both
+`push_targets_main` and `switch_target` so the two cannot drift apart. `push_targets_main`
+also stops filtering its arguments and walks them instead, so an option's value is never
+mistaken for the remote.
+
+For the unresolvable switch, `switch_target` gains a third answer. It already returns a
+branch name or `""` for "no switch"; it now also returns `UNRESOLVED` for a target only the
+running shell could resolve — `-` and `@{-1}`. `violation` carries that forward like any
+other effective branch and refuses a risky subcommand that meets it.
+
+**No public signature changes.** All four public functions keep the parameter lists and
+return types round 1 documented; what changes is which invocations they recognise. That
+keeps step 4's literal check green without special pleading and means `STRUCTURE.md` needs
+prose, not a new table.
+
+Rejected — **scan the segment for any `git` token**. It satisfies B1 to B5 in about four
+lines, and refuses `echo git commit`, `grep push log.txt` and `git log --grep=commit`. B8
+exists to make that trade explicit rather than discovering it in review.
+
+Rejected — **resolve `-` by reading `.git/HEAD`'s reflog**. It would turn B7 from a refusal
+into a correct answer, but it makes a pure function do I/O, and it is wrong the moment the
+command runs in a different repository than the one the hook is looking at.
 
 ### Modules
 
 | Path | New or changed | Purpose |
 |---|---|---|
+| `.claude/hooks/guard_git.py` | changed | Prefix-aware command recognition, ref normalisation, and the unresolved-branch policy. |
+| `STRUCTURE.md` | changed | The `guard_git.py` prose. Its signature table does not move. |
+| `tests/test_guard_git.py` | changed in step 5 | The B-criteria cases and the differential. |
+| `.claude/hooks/plan_state.py`, `.claude/hooks/stop_gate.py` | unchanged | Section 1 says so, and says what happens if that turns out to be wrong. |
 
 ### Public API
 
-> Every public class and function, with its full signature as it will be written.
-> `Covers` links back to the acceptance criteria above.
+Every entry already exists and keeps its signature. Listed so step 4 has something to check
+literally, with what changes behind each one.
 
 | Signature | Module | Purpose | Covers |
 |---|---|---|---|
+| `git_subcommand(tokens: tuple[str, ...]) -> tuple[str, tuple[str, ...]]` | `guard_git` | Identify the git subcommand. Now finds the command name after the shell prefix, folds case, and strips backticks. | B1-B5 |
+| `push_targets_main(args: tuple[str, ...], branch: str) -> bool` | `guard_git` | Whether a push would update `main`. Now walks its arguments so an option value is not read as the remote, and normalises every refspec. | B6 |
+| `switch_target(subcommand: str, args: tuple[str, ...]) -> str` | `guard_git` | The branch a `checkout`/`switch` moves to, `""` for none, or `UNRESOLVED` when only the running shell could say. | B6, B7 |
+| `violation(command: str, branch: str) -> str` | `guard_git` | The reason to refuse, or `""`. Now refuses a risky subcommand whose effective branch is `UNRESOLVED`, with its own message. | B1-B7 |
+| `Segment`, `segments`, `main` | `guard_git` | Unchanged in signature and behaviour. | — |
+
+`UNRESOLVED` is a new module constant, the sentinel `switch_target` returns. It is named in
+`switch_target`'s row in `STRUCTURE.md` rather than given a row of its own, the way
+`GATE_FROM_STEP` is treated in `plan_state`.
 
 ### Implementation guide
 
-Ordered. Each entry small enough to finish and check.
-
-1.
-2.
+1. Add the constants: `UNRESOLVED`; an `ASSIGNMENT` pattern for `NAME=value`;
+   `REDIRECTION_STARTS` for the tokens `shlex` produces for `>`, `<`, `>>` and `>&`;
+   `WRAPPERS` = `sudo`, `env`, `time`, `nohup`, `doas`; `PUSH_OPTIONS_WITH_VALUE` = `-o`,
+   `--push-option`, `--repo`, `--receive-pack`, `--exec`.
+2. `_strip_substitution(token)`: remove surrounding backticks so `` `git `` reads as `git`.
+   `$( )` needs nothing — `(` is already a separator, so the invocation inside already
+   lands in its own segment and is already refused today.
+3. `_command_index(tokens)`: walk the prefix and return where the command name starts.
+   Skip an assignment; skip a redirection operator *and its operand*; skip a bare file
+   descriptor digit that precedes one, since `2>&1` lexes as `2`, `>&`, `1`; skip a wrapper
+   and any options directly following it. Return `len(tokens)` when the prefix is all there
+   is.
+4. `git_subcommand`: start from `_command_index`, compare
+   `Path(_strip_substitution(token)).name.lower()` against `{"git", "git.exe"}`, and scan
+   for the subcommand from there as it does now.
+5. `_branch_name(ref)`: strip a leading `+`, take the part after the last `:`, strip a
+   `refs/heads/` prefix, and map `@` to `HEAD`.
+6. `push_targets_main`: walk `args` with an index instead of filtering, skipping each
+   `PUSH_OPTIONS_WITH_VALUE` together with its value, so the first positional really is the
+   remote. Compare every refspec through `_branch_name`.
+7. `switch_target`: return `UNRESOLVED` for `-` and `@{-1}`; pass every other target
+   through `_branch_name`.
+8. `violation`: when the effective branch is `UNRESOLVED` and the subcommand is `commit` or
+   `push`, refuse with a message that says the branch could not be determined and names the
+   switch that caused it — not the message for committing to `main`, which would be a lie.
+9. `STRUCTURE.md`: rewrite the `guard_git.py` prose for the prefix rule, the wrapper list
+   and its documented incompleteness, and the unresolved-branch policy.
 
 ### Test intents
 
-> High-level: what a test must prove, not how it is written. Step 5 turns each of these
-> into concrete cases, including the edge cases.
-
 | # | Must prove | Covers |
 |---|---|---|
-| T1 | | |
+| U1 | A commit or push hidden behind one or more variable assignments is found. | B1 |
+| U2 | One hidden behind a redirection is found, including the `2>&1` form where the file descriptor lexes as its own token. | B2 |
+| U3 | One wrapped in backticks is found; and `$( )` still refuses, having always done so. | B3 |
+| U4 | One under each listed wrapper is found, and a wrapper with an option value that hides the command is a documented miss rather than a surprise. | B4 |
+| U5 | The executable is matched case-insensitively, in every spelling `git_subcommand` already accepts. | B5 |
+| U6 | Each unknown refspec shape reaches `main`: an option value not read as the remote, `@` as `HEAD`, `refs/heads/main` as a switch target. | B6 |
+| U7 | An unresolvable switch refuses a following commit or push from any branch, and the reason names the branch as undetermined rather than as `main`. | B7 |
+| U8 | The non-invocations stay allowed: `echo git commit`, `grep push log.txt`, `git log --grep=commit`, `sudo apt install git`, `time ls`, and a commit message that contains the word `sudo`. | B8 |
+| U9 | Round 1's differential re-run across both branches shows no command that round 1 refused and this round allows. | B8, and round 1's A5 as regression |
 
 ### Risks
 
-What could make this harder than it looks, and the plan if it does.
+**Every criterion but one pushes toward strictness.** Seven of eight make the guard refuse
+more, and the failure this module's own docstring calls worse is refusing legitimate work.
+U8 and U9 are the control, and U9 is the one that cannot be satisfied by writing agreeable
+tests: it compares this module against round 1's across a generated corpus.
+
+**The wrapper prefix is where a false positive would come from.** Skipping options after a
+wrapper without knowing which take values means `sudo -u me git push` lands on `me` and is
+allowed — a miss, which is safe. The unsafe mirror would be skipping too much and landing on
+a `git` that is an argument rather than a command. The rule only ever skips tokens starting
+with `-`, so it cannot walk past a bare word.
+
+**`2>&1` and friends lex unusually.** `shlex` with `punctuation_chars` splits `2>&1` into
+three tokens. The guide handles the shape seen in the probe; other descriptor forms may lex
+differently and step 5 should try them rather than assume.
+
+**Round 1's 221 tests are the regression surface.** A stricter guard may legitimately move
+some of them. Each move is a decision to record in section 3, not a number to restore.
 
 ---
 
 ## 3. Implementation notes
 
-> Written in step 3. Only deviations from the plan above, each with its reason. "Built as
-> planned" is a complete and good entry.
+**Built as planned, with one refinement the plan did not anticipate.**
+
+`_branch_name` also strips backticks. The plan gave `_strip_substitution` a single job —
+letting the command name be found inside `` `git push ...` `` — and that worked: the
+invocation was recognised. The refspec then was not. A closing backtick rides on the *last*
+token of a substitution, so `` `git push origin main` `` yields the refspec ``main` ``,
+which is not `main`, and the command was allowed. Stripping the delimiter is part of reading
+a ref, not only part of reading a command name, so `_branch_name` does it too.
+
+It is worth naming why the probe caught this and the criterion would not have: B3 says the
+command is *found*, and it was. What failed was one step later. A test that asserts only on
+the verdict would have caught it; a test that asserted `git_subcommand` returns `push` would
+have passed while the guard still let the push through — the same shape of mistake round 1
+made when its probe read an accidental allow as a correct one.
+
+**`$( )` needed nothing at all.** The plan already said so, and the probe confirmed it: `(`
+is a separator from round 1, so `$(git push origin main)` already splits the invocation into
+its own segment and already refused. Only backticks were open. Recording it because the
+concept lists `$( )` in B3, and a reader comparing the criterion to the diff would otherwise
+look for a change that was never needed.
+
+**`_redirected` had to move with the command name.** It walked global options from index 1,
+which assumed `tokens[0]` is git. With a prefix in front, it now starts from
+`_command_index(tokens) + 1`. Not a behaviour change anyone asked for — a consequence of
+the one this round did.
+
+**No public signature changed**, as the plan said. All seven entries in round 1's
+`STRUCTURE.md` table stand, and the new names — `_strip_substitution`, `_branch_name`,
+`_command_index` — are private.
 
 ---
 
 ## 4. Verification log
 
-> Written in step 4: the static half. Command output, not a summary of it.
-
 | Check | Result |
 |---|---|
-| `ruff check .` | |
-| `ruff format --check .` | |
-| `mypy` | |
-| Plan completeness | every signature in the Public API table exists as written |
-| `STRUCTURE.md` | in sync |
-| `python -m <package>.<module>` | |
+| `ruff check .` | `All checks passed!` |
+| `ruff format --check .` | `34 files already formatted` |
+| `mypy` | `Success: no issues found in 11 source files` |
+| `pytest` | `221 passed` — round 1's suite, unchanged and unbroken. Round 2's cases are step 5. |
+| Plan completeness | all seven signatures exist exactly as round 1 wrote them (table below) |
+| `STRUCTURE.md` | in sync; auditor run, six edits applied |
+| Hook run standalone | refuses a commit hidden behind an assignment and a push behind `sudo`, allows `echo git commit` |
+
+### Plan completeness
+
+Section 2 promised no public signature would change, which makes this check a check that
+nothing moved. Read back with `inspect`, not by eye:
+
+| Planned | Found | Verdict |
+|---|---|---|
+| `Segment` — frozen, `tokens: tuple[str, ...]`, `separator: str` | identical | match |
+| `segments(command: str) -> list[Segment] \| None` | identical | match |
+| `git_subcommand(tokens: tuple[str, ...]) -> tuple[str, tuple[str, ...]]` | identical | match |
+| `push_targets_main(args: tuple[str, ...], branch: str) -> bool` | identical | match |
+| `switch_target(subcommand: str, args: tuple[str, ...]) -> str` | identical | match |
+| `violation(command: str, branch: str) -> str` | identical | match |
+| `main() -> None` | identical | match |
+
+Public names defined in the module: exactly those seven, nothing unplanned. The three
+helpers this round added — `_strip_substitution`, `_branch_name`, `_command_index` — are
+private and absent from `STRUCTURE.md`, which the auditor confirmed.
+
+### STRUCTURE.md audit
+
+Six edits, and the first was a real miss rather than a polish:
+
+1. **`switch_target`'s row documented two return values and the function now has three.**
+   A reader would have taken the sentinel `UNRESOLVED` for a branch named `?`. Section 2 had
+   explicitly decided to document it in that row, and the implementation did not go back and
+   do it — exactly the signature drift the stop gate cannot see and the auditor exists for.
+2. A third of the round's behaviour was undocumented: the prose covered the shell prefix,
+   the wrappers and the unresolved policy, and said nothing about the refspec work. A reader
+   asking whether `git push -o ci.skip origin` is caught would have concluded no.
+3. The tests entry said "the defect that prompted the round" when there are now two rounds.
+4. A clause describing a `segments` test sat inside the `switch_target` sentence, and the
+   `switch_target` list omitted the option-left-without-a-value case.
+5. The `docs/plans/` tree illustrated the layout with a `csv-export` feature that has never
+   existed here; it now shows the two rounds that do.
+
+Applying edit 4 collided with edit 3's rewrap and briefly left the `#` clause in the file
+twice. Caught by re-reading the region rather than trusting the replacement count, and
+fixed before the step closed.
+
+### Standalone run
+
+The hook exercised the way it runs — a JSON payload on stdin, against a throwaway
+repository checked out on `main`:
+
+```
+GIT_EDITOR=true git commit -m "m"        -> exit 2, "this would commit to `main`"
+sudo git push origin main                -> exit 2, "this would push to `main`"
+echo git commit                          -> exit 0
+git checkout -b feat/x && git commit     -> exit 0
+```
+
+The first two are B1 and B4 through the real entry point. The third is B8: the case that
+would fail if this round had reached for the easy implementation.
 
 ---
 

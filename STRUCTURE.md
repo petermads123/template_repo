@@ -94,13 +94,13 @@ found anywhere else.
 
 ### `tests/test_guard_git.py`
 
-Covers `.claude/hooks/guard_git.py`, and is the regression suite for the defect that
-prompted the round. `segments` for quoting, every separator, a separator glued to a word or
-to a newline, a run of newlines, a newline inside a quoted message, and input that cannot
-be lexed at all; `git_subcommand` for each spelling of the executable and the options that
+Covers `.claude/hooks/guard_git.py`, and is the regression suite for the parsing defect
+that prompted round 1. `segments` for quoting, every separator, a separator glued to a word or
+to a newline, a run of newlines, a newline inside a quoted message, a `#` inside a word,
+and input that cannot be lexed at all; `git_subcommand` for each spelling of the executable and the options that
 hide the subcommand; `push_targets_main` for every refspec shape that reaches `main`;
-`switch_target` for both subcommands, their new-branch options and a file restore; and
-a `#` inside a word; `violation` for the whole behavioural matrix — punctuation in a commit
+`switch_target` for both subcommands, their new-branch options, an option left without a
+value and a file restore; `violation` for the whole behavioural matrix — punctuation in a commit
 message, a branch switch trusted across `&&` and across an `&&` ending a line but distrusted
 across everything else, including a mixed run such as `; &&`, a subshell that has closed and
 another repository reached with `-C`; commands hidden behind grouping delimiters; unreadable
@@ -147,9 +147,9 @@ One folder per feature, one numbered file per round inside it, created by `/feat
 ```
 docs/plans/
   TEMPLATE.md                     copied for each new round; never itself active
-  csv-export/
-    01-csv-export.md              round 1
-    02-streaming-writer.md        round 2, opened from a step 8 recommendation
+  git-guard/
+    01-git-guard.md               round 1, the parsing rewrite
+    02-command-recognition.md     round 2, opened from round 1's recommendations R1-R3
 ```
 
 Each file holds the concept and acceptance criteria, the plan, the verification and test
@@ -252,7 +252,30 @@ that may not have taken effect here is distrusted the same way: one made inside 
 that has since closed, or aimed elsewhere by a global `-C`, `--git-dir` or `--work-tree`,
 leaves the branch as it was. What still cannot be read is refused when it names `commit` or
 `push` — matched on word boundaries, so `committee` is not a commit — while `main` is
-checked out, and allowed anywhere else. Stdlib only.
+checked out, and allowed anywhere else.
+
+Within a segment it finds the command name where a shell would, after the prefix of
+variable assignments and redirections, so `GIT_EDITOR=true git commit` and
+`>log git commit` are seen. Backticks around a substitution are stripped, the executable is
+matched without regard to case, and a short list of wrapper programs — `sudo`, `env`,
+`time`, `nohup`, `doas` — is stepped over. That list is deliberately incomplete: a wrapper
+nobody listed is a miss, which is safe, while scanning a segment for any `git` token would
+refuse `echo git commit`, which is the failure this module treats as worse. Only options are
+skipped after a wrapper, never a bare word, so an option that takes a value hides what
+follows it.
+
+A push's destination is read with the same care. The arguments are walked rather than
+filtered, so an option that takes a value — `-o`, `--push-option`, `--repo`,
+`--receive-pack`, `--exec` — does not leave its value standing where the remote should be,
+and `git push -o ci.skip origin` is seen as the bare push it is. Every ref is then reduced
+to the branch it names: a leading `+` dropped, the destination half of a `src:dst` pair
+taken, `refs/heads/` stripped, backticks removed and `@` read as `HEAD`. Switch targets go
+through the same reduction, so `git checkout refs/heads/main` is a switch to `main`.
+
+A branch switch whose target only the running shell can resolve — `git checkout -`,
+`@{-1}` — leaves the branch *unknown* rather than unchanged, and a `commit` or `push` that
+meets an unknown branch is refused with a message saying so rather than the one about
+`main`. Stdlib only.
 
 | Signature | Description |
 |---|---|
@@ -260,7 +283,7 @@ checked out, and allowed anywhere else. Stdlib only.
 | `segments(command: str) -> list[Segment] \| None` | Split a command into invocations, or None if it cannot be read. |
 | `git_subcommand(tokens: tuple[str, ...]) -> tuple[str, tuple[str, ...]]` | Identify the git subcommand and its arguments. |
 | `push_targets_main(args: tuple[str, ...], branch: str) -> bool` | Whether a push would update `main`. |
-| `switch_target(subcommand: str, args: tuple[str, ...]) -> str` | The branch a `checkout`/`switch` moves to, or `""`. |
+| `switch_target(subcommand: str, args: tuple[str, ...]) -> str` | The branch a `checkout`/`switch` moves to, `""` when it moves none, or the sentinel `UNRESOLVED` (`"?"`) for a target only the running shell can resolve — `-` and `@{-1}`. |
 | `violation(command: str, branch: str) -> str` | The reason to refuse, or `""` to allow. |
 | `main() -> None` | Entry point: allow or refuse the command. |
 
