@@ -1,6 +1,6 @@
 # Git guard: quote-aware command parsing
 
-<!-- claude-plan step=7 status=active -->
+<!-- claude-plan step=8 status=active -->
 
 | Field | Value |
 |---|---|
@@ -19,7 +19,7 @@
 | 4 | Verify | `/verify` | done |
 | 5 | Test | `/test` | done |
 | 6 | Concept check | `/concept-check` | done |
-| 7 | Ship | `/ship` | pending |
+| 7 | Ship | `/ship` | done |
 | 8 | Recommend | `/recommend` | pending |
 | 9 | Pull request | `/create-pr` | pending |
 | 10 | Review | `/watch-pr` | pending |
@@ -80,8 +80,17 @@ pure function `violation(command: str, branch: str) -> str` — the reason to re
 to allow — which is what the tests exercise directly.
 
 `plan_state.py` turns the plan files and `git` output into `Plan` records. `stop_gate.py`
-turns the filesystem, `git` and the tools in `.venv` into a block-or-allow decision. Neither
-changes in this round; both gain tests.
+turns the filesystem, `git` and the tools in `.venv` into a block-or-allow decision.
+`plan_state.py` does not change in this round. `stop_gate.py` changes by one line, and only
+where its own new tests proved it wrong: its placeholder filter could not recognise a
+placeholder that was not in a path's final segment, so it reported prose as a deleted file
+and blocked the gate over it. Both gain tests.
+
+> **Amended at step 6, on the user's decision.** This paragraph originally read "Neither
+> changes in this round; both gain tests", and the one-line fix was recorded as drift
+> against it rather than absorbed silently. The user accepted the change into this round,
+> which is a step 1 decision and is why the concept is edited here rather than the audit
+> being softened. A9 below was added at the same time.
 
 The tests add no runtime inputs or outputs. They import the hooks as modules and drive their
 public functions, which requires the hooks to be importable from the suite.
@@ -126,6 +135,7 @@ public functions, which requires the hooks to be importable from the suite.
 | A6 | Ships a pytest suite under `tests/` that imports `guard_git`, `plan_state` and `stop_gate` as modules and passes under a plain `pytest` from the repo root. |
 | A7 | Covers every public function named in those three modules' `STRUCTURE.md` signature tables, except that the functions which would otherwise execute the repo's own toolchain or exit the interpreter — `gate_failures`, `enforce`, `main` — are driven with a stubbed tool directory and a captured exit, never by invoking Ruff, mypy or pytest recursively. |
 | A8 | Leaves `ruff check .`, `ruff format --check .`, `mypy` and `pytest` green, with `STRUCTURE.md` naming every file added. |
+| A9 | Treats a placeholder path in `STRUCTURE.md` as prose wherever the placeholder sits, so `src/<package>/module.py` is not reported as a file that no longer exists. *(Added at step 6; see the amendment above.)* |
 
 ### Open questions
 
@@ -231,6 +241,7 @@ must land there in the same edit.
 | T7 | `plan_state`'s public surface behaves: `parse` on a valid marker, a missing marker, an out-of-range step, a file with no Branch row and no title; `all_plans` ordering and recursion; `active_plan` when none, one or several are active; `feature_rounds` ordering; `git_lines` and `current_branch` against a real temporary repo, including detached HEAD and a non-repo directory; `Plan.step_name` and `.gated` at the boundary step. | A7 |
 | T8 | `stop_gate`'s file-level checks behave against temporary trees: `venv_tool` for both layouts and neither; `capture` returning output and honouring its timeout; `changed_python_files` and `tracked_python_files`; `structure_problems` in both directions; `stray_test_files`; `missing_init_files`; `advisory_notes` for each note it can emit; `notice` and `block` exiting zero with the right JSON; and `gate_failures` driven through a monkeypatched `venv_tool`/`capture` rather than real executables. | A7 |
 | T9 | The full suite, `ruff check .`, `ruff format --check .` and `mypy` are green, and `STRUCTURE.md` names every file added. | A8 |
+| T10 | A placeholder path is ignored by `structure_problems` wherever the placeholder sits in it. | A9 |
 
 ### Risks
 
@@ -528,6 +539,7 @@ Audited against section 1, with section 2 left unread until the table below was 
 | A6 | A pytest suite importing all three hooks as modules, green under a plain `pytest` | yes | 221 passed. Collection itself is the proof: `import guard_git` resolves only through the `pythonpath` entry added in this round. |
 | A7 | Covers every public function in the three `STRUCTURE.md` tables, with the stubbed exception | yes, **after being sent back** | Found unmet during this audit; see the drift note below. Now: `stop_gate.enforce` 3 call sites, `guard_git.main()` 3, `plan_state.main()` 2, `stop_gate.main()` 5, `gate_failures` 4 — all through monkeypatched tools, never a real one. |
 | A8 | Four checks green, `STRUCTURE.md` naming every file added | yes | `ruff check .` clean, `ruff format --check .` clean, `mypy` 11 files clean, `pytest` 221 passed; `structure_problems(".")` returns empty. |
+| A9 | A placeholder path is read as prose wherever the placeholder sits | yes | `test_structure_problems_ignores_placeholder_paths`, which failed before the fix with `STRUCTURE.md mentions /module.py, which no longer exists`. |
 
 ### Things the criteria do not cover
 
@@ -565,10 +577,14 @@ anyway — `PATH_IN_TEXT` widened to `[\w./<>*-]+\.py` so the placeholder filter
 placeholder that is not in the final path segment. It was found by this round's own tests,
 it is one character class, and it fails toward blocking rather than allowing.
 
-It is still drift. **Not resolved here — it goes to the user**, because they agreed to a
-concept that excluded it. Three ways to settle it: accept it into this round and amend
-section 1; revert it and open a separate `/small-change`; or revert it and let it wait in
-`docs/BACKLOG.md`. The audit does not get to pick.
+It is still drift, and it went to the user rather than being resolved in the audit, because
+they had agreed to a concept that excluded it.
+
+**Resolved: the user accepted it into this round.** Section 1's Inputs and outputs has been
+amended to describe the change, carrying a note saying why it was edited after the fact, and
+A9 was added so the behaviour is under the same contract as everything else rather than
+riding along unexamined. The audit did not get to pick; recording the choice and who made it
+is the point.
 
 **2. The concept's headline promises more than its criteria deliver.** "What this is" says
 the parsing is rebuilt so the guard cannot be walked past. A1 to A5 are all met, and yet
@@ -597,8 +613,38 @@ not name them.
 
 | Field | Value |
 |---|---|
-| Commits | |
-| Pushed to | |
+| Commits | 11, listed below |
+| Pushed to | `claude/setup-recommendations-qoyxhf` on `origin` |
+
+The round was committed incrementally rather than in one commit here, because a user-level
+stop hook (`~/.claude/stop-hook-git-check.sh`) refuses to let a turn end with an uncommitted
+tree, while this repo's `/implement` step asks for the tree to be left dirty until step 7.
+The hook won, on the grounds that this session runs in an ephemeral container where
+uncommitted work is lost work. Each commit says which step it belongs to, and the one made
+mid-implementation says in its body that it was not yet verified.
+
+| Commit | Subject |
+|---|---|
+| `d1356d9` | Record the setup review's findings as a backlog |
+| `8d4ea6b` | Open the git-guard feature at step 1 |
+| `6e28545` | Close step 1 of git-guard: concept confirmed |
+| `c37ed47` | Close step 2 of git-guard: the design is settled |
+| `009f6e3` | Rebuild guard_git.py's parsing (step 3, not yet verified) |
+| `95be993` | Close step 4 of git-guard: static verification passes |
+| `3bcac3f` | Add the hooks' first test suite, and fix the three bugs it found |
+| `8c2bd94` | Document tests/test_guard_git.py in STRUCTURE.md |
+| `25cc922` | Close step 5: fix the five regressions the test-designer found |
+| `4e42b3b` | Close step 6: audit against the concept, and the drift it found |
+| *(this one)* | Accept the stop_gate fix into the concept, and ship the round |
+
+Gates confirmed immediately before shipping: `ruff check .` clean, `ruff format --check .`
+clean, `mypy` clean across 11 files, `pytest` 221 passed. Steps 1 to 6 all `done`, section 6
+carrying no unmet row. Nothing untracked, no `.claude/.skip-gate`, and the only file in the
+working tree at ship time was this plan.
+
+**This repository is public**, so the diff was read with that in mind: it contains hook
+source, tests, configuration and the plan files, no credentials, no paths outside the repo
+and nothing about the user beyond the authorship already in the git history.
 
 ---
 
