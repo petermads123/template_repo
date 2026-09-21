@@ -1,6 +1,6 @@
 # Git guard: recognising the command
 
-<!-- claude-plan step=6 status=active -->
+<!-- claude-plan step=8 status=active -->
 
 | Field | Value |
 |---|---|
@@ -18,8 +18,8 @@
 | 3 | Implement | `/implement` | done |
 | 4 | Verify | `/verify` | done |
 | 5 | Test | `/test` | done |
-| 6 | Concept check | `/concept-check` | pending |
-| 7 | Ship | `/ship` | pending |
+| 6 | Concept check | `/concept-check` | done |
+| 7 | Ship | `/ship` | done |
 | 8 | Recommend | `/recommend` | pending |
 | 9 | Pull request | `/create-pr` | pending |
 | 10 | Review | `/watch-pr` | pending |
@@ -475,24 +475,70 @@ at "the command was recognised" passes while the command still gets through.
 
 ## 6. Concept check
 
-> Written in step 6, against section 1 — not against section 2. The question is whether
-> the thing built is the thing agreed, not whether it matches the plan.
+Audited against section 1, read before section 2 and before the diff.
 
 | # | Criterion | Met | Evidence |
 |---|---|---|---|
-| A1 | | | |
-
-Drift found, and what was done about it:
+| B1 | A commit or push behind variable assignments | yes | `test_violation_finds_a_commit_behind_an_assignment`, 4 cases including an empty value and one containing `;`; and through the real entry point, `GIT_EDITOR=true git commit` exits 2 against a throwaway repo on `main`. |
+| B2 | Behind a redirection | yes | `test_violation_finds_a_commit_behind_a_redirection`, 5 forms including `2>&1`, whose three-token lexing the probe established rather than assumed. |
+| B3 | Wrapped in backticks or `$( )` | yes | `test_violation_finds_a_push_inside_backticks` and the two siblings. `$( )` needed no code: `(` was already a separator, so it already refused — recorded in section 3 so the diff and the criterion can be reconciled. |
+| B4 | Under a listed wrapper | yes | `test_violation_finds_a_push_under_each_wrapper` and `..._a_commit_under_each_wrapper`, 5 wrappers each; `sudo git push origin main` exits 2 through the entry point. |
+| B5 | Executable matched without regard to case | yes | `test_violation_matches_the_executable_without_regard_to_case`, 5 spellings including `/usr/bin/GIT`. |
+| B6 | The three unknown refspec shapes | yes | `test_violation_does_not_read_a_push_option_value_as_the_remote` (5 options), `test_push_targets_main_follows_both_spellings_of_head`, `test_switch_target_reduces_a_ref_to_its_branch` (4 shapes). |
+| B7 | Unresolvable switch makes the branch unknown | yes | `test_violation_refuses_a_commit_after_an_unresolvable_switch` on both branches, and `test_violation_says_the_branch_is_undetermined_rather_than_main`, which asserts the reason does *not* contain the `main` wording — the criterion asked for a distinct message, not just a refusal. |
+| B8 | No false positives introduced | yes | 12 parametrised allow-cases, plus the differential: 2,390 comparisons against round 1's module across two corpora, zero commands that round 1 refused and this round allows. Round 1's 221 tests also pass unmodified, which is independent evidence — not one had to be adjusted for a stricter guard. |
 
 ### Earlier rounds still hold
 
-> Later rounds only. Re-check every acceptance criterion from every earlier round in this
-> folder: this round changed code they depend on, and their tests passing is necessary but
-> not sufficient — a criterion can be satisfied by tests that no longer describe what the
-> feature does.
+Re-checked against the code as it stands now, not by reading round 1's test names. Round 1's
+criteria were written against a module this round rewrote the recognition path of, so their
+tests passing is necessary and not sufficient.
 
 | Round | # | Criterion | Still met | Evidence |
 |---|---|---|---|---|
+| 1 | A1 | Punctuation in a commit message refused on `main` | yes | Re-run directly for `;`, `\|`, `&&` and a newline. |
+| 1 | A2 | Switch away allowed, switch to `main` refused | yes | Re-run both directions. |
+| 1 | A3 | A switch counts only across `&&` and newlines | yes | Re-run for `;`, `\|\|`, `&`, newline, and the `&&`-ending-a-line case. The round 2 addition that an *unresolvable* switch is distrusted does not weaken this: a resolvable switch across `&&` still carries. |
+| 1 | A4 | Unreadable input refused on `main`, allowed elsewhere | yes | Re-run all three branches of the rule, including the message wording. |
+| 1 | A5 | Nothing that was refused before is allowed now | yes | The differential, which is the same instrument A5 was evidenced with: 0 regressions. |
+| 1 | A6 | Suite imports the three hooks, green under plain `pytest` | yes | 291 passed; collection still resolves through the `pythonpath` entry. |
+| 1 | A7 | Every public function covered | yes | No public function was added or removed this round; the three new helpers are private. |
+| 1 | A8 | Four checks green, `STRUCTURE.md` complete | yes | All four green; `structure_problems(".")` empty. |
+| 1 | A9 | A placeholder path read as prose | yes | Re-run against a throwaway repo whose `STRUCTURE.md` names `src/<package>/module.py`: no problems reported. |
+
+Nothing round 1 delivered was broken by this round.
+
+### Things the criteria do not cover
+
+**Out of scope, checked.** Nothing on section 1's exclusion list was built: no nested
+interpreter is followed (`bash -c`, `ssh`, `xargs` are all still allowed), substitution is
+not evaluated, the wrapper set is the five named and no more, git aliases are untouched,
+`PROTECTED` is still hardcoded, and the ninth hole — `HEAD` when `current_branch` returns
+`""` — is deliberately absent.
+
+**Section 1's promise about the other two hooks held this time.** `plan_state.py` and
+`stop_gate.py` are byte-identical to where round 1 left them. Round 1 made the same promise
+and broke it; this round's section 1 said what would happen if that recurred, and it did not
+arise.
+
+**Surface** is unchanged: the same seven public names, no additions, three new private
+helpers correctly absent from `STRUCTURE.md`.
+
+**Structure.** The auditor found the one thing that mattered — `switch_target` gained a
+third return value and its row documented two — plus the undocumented refspec behaviour and
+three smaller staleness items. All applied.
+
+### Drift found, and what was done about it
+
+**None that changes the concept.** Section 1 was written, the work was built to it, and
+every criterion is met without amendment. That is worth saying plainly rather than
+manufacturing a finding: round 1 needed its concept amended mid-audit, and the difference
+here is that section 1 named the wrapper list as incomplete *before* the work started
+instead of discovering the limit afterwards.
+
+One thing is recorded rather than resolved, and it is not drift: `sudo -u me git push` is
+allowed, and a test asserts it. The concept said the wrapper list is incomplete by
+construction; this is what that costs, made visible instead of left to be found.
 
 ---
 
@@ -500,8 +546,28 @@ Drift found, and what was done about it:
 
 | Field | Value |
 |---|---|
-| Commits | |
-| Pushed to | |
+| Commits | 4 for this round, on top of round 1's 11 |
+| Pushed to | `claude/setup-recommendations-qoyxhf` on `origin` |
+
+| Commit | Subject |
+|---|---|
+| `f0b6c1e` | Write round 2's concept: recognising the command |
+| `4c19c33` | Close step 1 of round 2: concept confirmed |
+| *(steps 2-4)* | Round 2 steps 2-4: plan, implement and verify command recognition |
+| *(step 5)* | Round 2 step 5: 70 tests, and a bug the probe found first |
+| *(this one)* | Close round 2: concept check passes, ship the round |
+
+The round was again committed step by step rather than in one commit here, for the reason
+round 1 recorded: a user-level stop hook refuses to end a turn on an uncommitted tree, and
+this session runs in an ephemeral container where an uncommitted tree is lost work.
+
+Gates confirmed immediately before shipping: `ruff check .` clean, `ruff format --check .`
+clean, `mypy` clean across 11 files, `pytest` 291 passed. Steps 1 to 6 all `done`, section 6
+carrying no unmet row and no unmet row in the earlier-rounds table either.
+
+**This repository is public.** The diff is hook source, tests, plan prose and one
+`STRUCTURE.md` revision. No credentials, no paths outside the repo, nothing about the user
+beyond the authorship already in the history.
 
 ---
 
