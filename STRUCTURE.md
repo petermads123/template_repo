@@ -92,6 +92,18 @@ All tests live here and nowhere else — `testpaths = ["tests"]` in `pyproject.t
 `pytest` collects nothing outside this directory, and the stop gate blocks on a test file
 found anywhere else.
 
+### `tests/test_guard_git.py`
+
+Covers `.claude/hooks/guard_git.py`, and is the regression suite for the defect that
+prompted the round. `segments` for quoting, every separator, a separator glued to a word or
+to a newline, a run of newlines, a newline inside a quoted message, and input that cannot
+be lexed at all; `git_subcommand` for each spelling of the executable and the options that
+hide the subcommand; `push_targets_main` for every refspec shape that reaches `main`;
+`switch_target` for both subcommands, their new-branch options and a file restore; and
+`violation` for the whole behavioural matrix — punctuation in a commit message, a branch
+switch trusted across `&&` and distrusted across everything else, commands hidden behind
+grouping delimiters, unreadable input, and every refusal that held before the rewrite.
+
 ### `tests/test_plan_state.py`
 
 Covers `.claude/hooks/plan_state.py`. `parse` against a complete marker, a file with none,
