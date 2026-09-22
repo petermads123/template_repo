@@ -1,6 +1,6 @@
 ---
 name: concept-check
-description: Step 6 of the feature pipeline. Audit the finished implementation against the concept agreed in step 1 — not against the plan — marking each acceptance criterion met or unmet with evidence. Use after the tests pass and before committing.
+description: Step 6 of the feature pipeline. Audit the finished implementation against the concept agreed in step 1 — not against the plan — marking each acceptance criterion met or unmet with evidence. Runs inside /build as a subagent, after the tests pass; a different model from the one that planned the work.
 argument-hint: [slug, if more than one plan exists]
 model: sonnet
 effort: max
@@ -14,7 +14,13 @@ question, and it is the one the pipeline exists to protect:
 > Is the thing that got built the thing that was agreed?
 
 A plan can drift from its concept a little at each step and still pass every check along
-the way. This is the only place that drift gets caught before it ships.
+the way. This is the only place that drift gets caught before it ships — and in this
+pipeline nobody has looked at the code since the plan was accepted, so it is also the first
+pair of eyes. Read as an auditor, not as the author.
+
+This step runs unattended, as a subagent of `/build`. An unmet criterion sends the work
+back inside the block. A criterion that turns out to be *wrong* is a halt: the rules are
+in `/build` and in your brief.
 
 ## 1. Read the concept first
 
@@ -49,8 +55,7 @@ describes, because the tests were written against an implementation this round r
 Re-read the criterion and check it against the code as it stands now.
 
 A criterion from round 1 that this round broke is a regression, not a trade-off. It goes
-back to step 3 like any other unmet criterion — unless the user agrees to change it, which
-is a step 1 decision recorded in *this* round's Builds on section.
+back to step 3 like any other unmet criterion — unless it should change, which is a halt.
 
 ## 4. Check the things criteria do not cover
 
@@ -66,25 +71,33 @@ Then go looking, adversarially, for the ways the user would be disappointed on o
   as a worked example — named inputs, one call, a named result — so a reader learns how to
   use the feature rather than just that it runs?
 - **Structure** — run the `structure-auditor` subagent once more. Steps 3 and 5 both edit
-  signatures, and this is the last chance to catch the drift before it is committed.
+  signatures, and this is the last chance to catch the drift before step 7 closes the round.
 
 ## 5. Act on what you find
 
 - **Everything met, no drift** — say so plainly and move on. Do not manufacture findings to
   look thorough.
-- **Unmet criterion or real drift** — do not ship it and do not note it as a follow-up.
-  Go back: to step 3 if the code is wrong, to step 2 if the design cannot satisfy the
-  criterion, to step 1 if the criterion itself turned out to be wrong. Say which, and why.
-- **Something genuinely better than the concept** — that is still drift. Record it, then
-  put it to the user. They agreed to the concept; they get to agree to the change.
+- **Unmet criterion or real drift, code wrong** — do not ship it and do not note it as a
+  follow-up. Set the marker back to step 3, say exactly what is unmet and why, and report
+  `STATUS: done` with the step named: `/build` re-runs from there. If the same criterion
+  comes back unmet a second time, that is the gate failing twice — halt instead.
+- **The design cannot satisfy the criterion, or the criterion itself is wrong** — either
+  one changes section 1 or 2 under the user. **Halt**, with the criterion and what you
+  found.
+- **Something genuinely better than the concept** — that is still drift, and still a halt.
+  They agreed to the concept; they get to agree to the change.
 
 Record the drift and its resolution at the bottom of section 6 either way.
+
+## 6. Commit and push
+
+The plan file, and anything the structure auditor had you fix — subject
+`Concept check: <title>`, round file in the body. Clean tree.
 
 ## Stop here
 
 1. Mark step 6 `done` and set the marker to `<!-- claude-plan step=7 status=active -->`.
-   If you sent the work back a step, set the marker to that step instead and say so.
-2. Report: the criteria table, and the drift found and resolved.
-3. End the turn.
-
-The user opens step 7 with `/ship`.
+   If you sent the work back to step 3, set the marker there instead and say so.
+2. Report, in the `/build` contract: `STATUS`, and a `TRACE` with the criteria table, the
+   earlier-rounds table where there is one, and every drift found and what was done.
+3. End. `/build` opens the next step; do not.

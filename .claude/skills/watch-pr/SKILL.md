@@ -16,6 +16,11 @@ Cheaper than the rest of the pipeline on purpose. Most check-ins find nothing an
 cost almost nothing; the expensive thinking happens only when a comment turns out to need a
 new round, and that round runs at its own steps' settings.
 
+The plan file was marked `done` at step 9, so nothing on disk says a watch is running: the
+watch is session state, and the pull request thread is the record of the review. Resuming
+in a fresh session means finding the pull request for the checked-out branch and arming
+the watch again.
+
 ## 1. Arm the watch
 
 On the first run, subscribe to the pull request's activity if the environment offers it, so
@@ -44,10 +49,10 @@ Every check-in, on the current head — not just the thing that woke you:
 **Merge conflict** — merge the base branch in and resolve it. Never rebase or force-push a
 branch someone else may have checked out. Then re-run the gates and push.
 
-**CI red** — fix it. A failure in code this branch touched is this branch's to fix. A
-failure that reproduces on the base branch too is not, and standing down from it is never
-silent: say once what is failing and why it is not this pull request's. "Flake" is not a
-root cause, and never skip or disable a test to get green.
+**CI red** — where the repo has CI at all: fix it. A failure in code this branch touched is
+this branch's to fix. A failure that reproduces on the base branch too is not, and standing
+down from it is never silent: say once what is failing and why it is not this pull
+request's. "Flake" is not a root cause, and never skip or disable a test to get green.
 
 **Review comments** — classify each one. This is the judgment the step exists for:
 
@@ -60,6 +65,10 @@ root cause, and never skip or disable a test to get green.
 
 That last row is not a failure. A review comment you cannot classify is exactly the thing a
 person should read, and guessing at it is worse than saying so.
+
+A fix pushed from here is pushed with no active plan, so the stop gate holds its strict
+line: the four checks must be green before the turn ends. That is right — a review fix is
+the one change on the branch nothing else re-verifies.
 
 ### Bot reviews
 
@@ -103,13 +112,14 @@ in as one skips everything the pipeline exists to do. It gets a round, exactly a
 recommendation does:
 
 ```bash
-cp docs/plans/TEMPLATE.md docs/plans/<feature-slug>/0<N>-<round-slug>.md
+cp development/TEMPLATE.md development/<branch>/0<N>-<round-slug>.md
 ```
 
-Mark this file's step 10 `done`, set the new file to
-`<!-- claude-plan step=1 status=active -->`, fill its **Builds on** section — naming the
-review comment and quoting it — and invoke `/conceptualize`. The round runs steps 1 to 7 on
-the same branch and lands in the same pull request; step 10 resumes when it is pushed.
+Set the new file to `<!-- claude-plan step=1 status=active -->`, fill its **Builds on**
+section — naming the review comment and quoting it — commit, and invoke `/conceptualize`.
+The round runs steps 1 to 9 on the same branch: its step 9 re-verifies the whole branch,
+marks the round `done` and pushes into the same pull request, and its `/watch-pr` resumes
+this watch.
 
 Use the same test as everywhere else. It is not small if it adds or removes a file, changes
 a public signature, changes behavior, or needs a new test. **When it is close, route up** —
@@ -118,14 +128,14 @@ behaviour into a pull request a reviewer already looked at.
 
 Tell the user before starting a round. They may prefer to answer the reviewer instead.
 
-## 5. Record it
+## 5. The record
 
-Section 10 of the plan file, one row per thread: who asked for what, and what was done —
-fixed and pushed, replied and left open, or taken to round N. This is the record of how the
-pull request got from opened to merged, and it is the part nobody can reconstruct later
-from the diff.
+The pull request thread is the record: every fix names its commit in a reply, every
+dismissal says why, every round says where it went. Nothing is written to the plan file
+from here — it was closed at step 9, and a commit that only updates a log after the review
+started is the bookkeeping this pipeline was redesigned to avoid.
 
-Quiet check-ins are not recorded. A log of "nothing had changed" nineteen times is noise.
+Quiet check-ins are recorded nowhere. A log of "nothing had changed" nineteen times is noise.
 
 ## 6. Merge only when told to
 
@@ -165,16 +175,14 @@ reason to merge something broken; they told you to merge the thing they last saw
 ### After merging
 
 - Delete the branch, if the repo does that.
-- Mark the plan `<!-- claude-plan step=10 status=done -->` and record the merge in section 10.
 - Cancel the recurring check.
 - Report once: the merge commit, and **every bot finding dismissed along the way**, with the
   reason each was dismissed.
 
 ## 7. Stop conditions
 
-- **Merged or closed** — whether Claude merged it or someone else did, set the marker to
-  `<!-- claude-plan step=10 status=done -->`, cancel the recurring check, and say so once.
-  The pipeline is finished.
+- **Merged or closed** — whether Claude merged it or someone else did, cancel the recurring
+  check and say so once. The pipeline is finished; the plan file already says so.
 - **The user says stop** — unsubscribe, cancel the check, and stop. Immediately, no
   argument.
 

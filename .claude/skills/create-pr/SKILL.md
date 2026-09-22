@@ -1,6 +1,6 @@
 ---
 name: create-pr
-description: Step 9 of the feature pipeline. Verify the whole branch in one pass — clean tree, current base, the full test suite, every module showcase and every round's plan — then confirm with the user and open a pull request to main, ready for review. Use when the work is shipped, the recommendations are decided, and the branch is ready for review.
+description: Step 9 of the feature pipeline. Verify the whole branch in one pass — clean tree, current base, the full test suite, every module showcase and every round's plan — then confirm with the user, mark the plan done, and open a pull request to main, ready for review. Use when the recommendations are decided and the branch is ready for review.
 argument-hint: [slug, if more than one plan exists]
 model: sonnet
 effort: max
@@ -8,7 +8,7 @@ effort: max
 
 # Step 9 — Pull request
 
-The last step. Gates first, confirmation second, publication last.
+The last step that changes the branch. Gates first, confirmation second, publication last.
 
 ## 1. Refuse on `main`
 
@@ -21,21 +21,21 @@ has been refusing commits all along, so this means the work was never branched.
 
 ## 2. Verify the whole branch, not just the last round
 
-Nothing before this step has verified the branch as a whole. Step 4 checked one round at
-the moment it was written, and step 7 checked the tree at the moment it was committed —
-neither knows what a later round did to the code an earlier one shipped. This is the only
-place the finished branch is proved green in one pass, so run all of it, in this order.
+Nothing before this step has verified the branch as a whole. Step 7 checked the tree at the
+moment it closed its round, and knows nothing of what a later round did to the code an
+earlier one shipped. This is the only place the finished branch is proved green in one
+pass, so run all of it, in this order.
 
-### 2a. Commit first, so the gates test what ships
+### 2a. Clean tree, so the gates test what ships
 
 ```bash
 git status --short
 ```
 
-**It must be empty before any gate runs.** Gates run against the working tree, so on a
-dirty tree they prove something about code that is not in the pull request. Commit what
-belongs and remove what does not, then continue. Do not run the suite first and reconcile
-afterwards — that is the failure this ordering exists to prevent.
+**It must be empty before any gate runs.** Every step commits as it goes, so a dirty tree
+here means something was edited outside the pipeline. Commit what belongs and remove what
+does not, then continue. Do not run the suite first and reconcile afterwards — that is the
+failure this ordering exists to prevent.
 
 ### 2b. Catch up with the base
 
@@ -89,9 +89,9 @@ stale file.
 
 ### 2f. Every round finished
 
-Confirm **every round in this feature's folder**: steps 1 to 8 marked `done`, section 6
-with no unmet criteria, section 8 with a decision against every recommendation. An
-undecided recommendation means step 8 is not finished.
+Confirm **every round in this branch's folder**: steps 1 to 8 marked `done`, section 6
+with no unmet criteria, section 8 with a decision against every recommendation, no
+`Halted` section left unanswered. An undecided recommendation means step 8 is not finished.
 
 On a multi-round branch, also confirm the newest round's **Earlier rounds still hold**
 regression table is filled in. An empty one means step 6 skipped the regression pass, and
@@ -118,35 +118,41 @@ report. If there is, something was written after the gates ran: go back to secti
 create the pull request, and do not run anything with a remote side effect until the user
 has answered.
 
-## 4. Open it, ready for review
+## 4. Close the plan, then open the pull request
 
-```bash
-git push -u origin <branch>
-gh pr create --title "<title>" --body "<body>" --reviewer <approver>
-```
+The plan file is `done` from here, and it says so **before** the pull request exists, in
+the last commit the pull request carries. Marking it done afterwards would need a commit
+after the review started, or a second pull request just for bookkeeping; leaving it active
+would put a live marker on `main` at merge and make every fresh session think a build is in
+flight. Neither is acceptable, so:
 
-`<approver>` is the reviewer named in `CLAUDE.md`. Two things can go wrong with it, and both
-are expected rather than errors:
+1. In the newest round, mark step 9 `done`, set the marker to
+   `<!-- claude-plan step=9 status=done -->`, and leave the URL row of section 9 reading
+   `opened by step 9 — see the branch's pull request`. The URL does not exist yet and there
+   will be no commit to write it into; the pull request is found from the branch.
+2. Commit with subject `Pull request: <title>` and push:
 
-- **The approver is the pull request's own author.** GitHub refuses with *"Review cannot be
-  requested from pull request author"*. This is the normal case in a solo repo, where Claude
-  pushes under the owner's own token.
-- **The approver is not a collaborator.** Say the request could not be made and name who
-  would need to be added.
+   ```bash
+   git push -u origin <branch>
+   ```
 
-**When the review request is refused, assign them instead:**
+3. Open the pull request with whatever this environment provides — the GitHub MCP tools
+   where they are available, `gh pr create` where it is — with the title and body the user
+   confirmed, base `main`, **not a draft**, and a review requested from the approver named
+   in `CLAUDE.md`. Two things can go wrong with the request, and both are expected rather
+   than errors:
 
-```bash
-gh pr edit <number> --add-assignee <approver>
-```
+   - **The approver is the pull request's own author.** GitHub refuses with *"Review cannot
+     be requested from pull request author"*. This is the normal case in a solo repo, where
+     Claude pushes under the owner's own token.
+   - **The approver is not a collaborator.** Say the request could not be made and name
+     who would need to be added.
 
-GitHub allows assigning an author even though it refuses to make them a reviewer, so the
-pull request still lands in their *Assigned* queue rather than only in *Created*. It is not
-a review request and does not gate anything, but it is the closest thing that works, and
-"waiting on me" is a more useful signal than nothing. Say which of the two happened.
-
-Never let a failed reviewer request stop the pull request being opened. It is routing, not a
-gate.
+   **When the review request is refused, assign them instead.** GitHub allows assigning an
+   author even though it refuses to make them a reviewer, so the pull request still lands
+   in their *Assigned* queue rather than only in *Created*. It is not a review request and
+   does not gate anything, but it is the closest thing that works. Say which of the two
+   happened. Never let a failed reviewer request stop the pull request being opened.
 
 **Not a draft.** Everything ahead of a reviewer has already happened: the branch was
 verified whole in section 2, audited against its concept in step 6, and the user said yes
@@ -156,21 +162,15 @@ can look at it.
 This also means section 3 is the only gate between the work and a published pull request.
 Treat it that way — an unanswered confirmation is not a yes, and neither is silence.
 
-## 5. Record, then hand off to step 10
+## 5. Hand off to step 10
 
-Write the URL into section 9 of the newest round, then set that file's marker to
-`<!-- claude-plan step=10 status=active -->`. Commit and push that edit.
+Invoke `/watch-pr`. That is the one place in the pipeline where a step starts the next one
+without being asked: the alternative is a published pull request that nobody is watching
+because the user did not know to say so.
 
-**The plan stays active.** Opening a pull request is not finishing the work — the work is
-finished when it merges or closes, and step 10 is the stretch in between. Marking it `done`
-here would clear the session brief while a live pull request still needs watching.
-
-Earlier rounds in the folder are already `done`; they were stood down when their successor
-opened. Confirm it rather than assuming it.
-
-Then invoke `/watch-pr` to arm the hourly check. That is the one place in the pipeline where
-a step starts the next one without being asked: the alternative is a published pull request
-that nobody is watching because the user did not know to say so.
+The plan is `done`, so the session brief goes quiet from here; the pull request thread is
+the record of the review, and `/feature` with no argument reports the last round and its
+pull request when a fresh session asks where things stand.
 
 ## The body
 
@@ -207,9 +207,10 @@ Deferred recommendations from section 8 of every round, with their reasons. Drop
 a later round went on to implement.
 
 ## Notes
-Trade-offs, deliberate omissions, anything a reviewer should know.
+Trade-offs, deliberate omissions, anything a reviewer should know — including anything the
+build halted on and how the user answered.
 
-Plan: `docs/plans/<feature-slug>/` — one file per round.
+Plan: `development/<branch>/` — one file per round.
 ```
 
 Omit a section rather than filling it with nothing.

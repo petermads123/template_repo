@@ -39,7 +39,7 @@ def repo(tmp_path: Path) -> Path:
 
 def plan_at(step: int, *, branch: str = "") -> Plan:
     return Plan(
-        Path("docs/plans/f/01-x.md"), step, "active", "A feature", branch, "f", 1
+        Path("development/f/01-x.md"), step, "active", "A feature", branch, "f", 1
     )
 
 
@@ -510,7 +510,7 @@ def test_main_enforces_with_no_plan_and_python_changed(
 def test_main_is_advisory_below_the_gate_step(
     monkeypatch: pytest.MonkeyPatch, repo: Path, capsys: pytest.CaptureFixture[str]
 ) -> None:
-    plans = repo / "docs" / "plans" / "f"
+    plans = repo / "development" / "f"
     plans.mkdir(parents=True)
     (plans / "01-x.md").write_text(
         "# A feature\n\n<!-- claude-plan step=2 status=active -->\n", encoding="utf-8"

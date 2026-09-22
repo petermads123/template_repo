@@ -1,6 +1,6 @@
 ---
 name: test
-description: Step 5 of the feature pipeline. Turn the plan's test intents into a concrete pytest suite, hunting edge cases — empty, boundary, unicode, missing and malformed input — then fix what the tests expose and re-run the static checks. Use after verification passes.
+description: Step 5 of the feature pipeline. Turn the plan's test intents into a concrete pytest suite, hunting edge cases — empty, boundary, unicode, missing and malformed input — then fix what the tests expose and re-run the static checks. Runs inside /build as a subagent, after verification passes.
 argument-hint: [slug, if more than one plan exists]
 model: sonnet
 effort: max
@@ -11,6 +11,10 @@ effort: max
 The dynamic half. Step 4 proved the code is well-formed and matches the plan; this step
 proves it actually works, including when it is handed things it did not expect.
 
+This step runs unattended, as a subagent of `/build`. Bugs are yours to fix. A case the
+concept never decided is not — it is a halt, and the rules for both are in `/build` and in
+your brief.
+
 ## 1. Find the cases
 
 For each public function, delegate edge-case discovery rather than guessing at it:
@@ -19,9 +23,10 @@ For each public function, delegate edge-case discovery rather than guessing at i
 Agent with subagent_type: "test-designer"
 ```
 
-Give it the signature, the docstring and the body. It returns a ranked list of concrete
-inputs with expected results, plus any contradiction it found between the docstring and the
-code. **You** write the test code — the agent is read-only, so the suite stays in one voice.
+Give it the signature, the docstring and the body, and ask for at most fifteen cases — a
+longer list is padding. It returns a ranked list of concrete inputs with expected results,
+plus any contradiction it found between the docstring and the code. **You** write the test
+code — the agent is read-only, so the suite stays in one voice.
 
 Its findings go through this checklist, which is the repo's standard. Include every row
 that applies to the function in front of you:
@@ -119,9 +124,9 @@ A failing test means one of three things. Say which:
 
 - **A bug in the code.** Fix the code. This is the normal case and the point of the step.
 - **A wrong expectation.** Fix the test, and say why the first expectation was wrong.
-- **A concept that was never settled.** Stop. Section 1 did not decide what should happen
-  here, so nothing in the plan can. Take it back to the user rather than inventing an
-  answer and burying it in an assertion.
+- **A concept that was never settled.** Section 1 did not decide what should happen here,
+  so nothing in the plan can. **Halt.** Report the case and the two answers it could have,
+  rather than inventing one and burying it in an assertion.
 
 Never weaken a test to make it pass, and never delete a case because it is inconvenient.
 Both convert a real finding into a silent one.
@@ -129,7 +134,7 @@ Both convert a real finding into a silent one.
 ## 4. Re-run the static checks
 
 Fixing production code can break what step 4 proved, so close the loop here rather than
-sending the user back a step:
+sending the work back a step:
 
 ```powershell
 ruff check .
@@ -141,17 +146,20 @@ pytest
 If a signature changed while fixing a bug, update section 2's Public API table,
 `STRUCTURE.md` and section 3's deviation list — all three, in this change.
 
-## 5. Record it
+## 5. Record, commit, push
 
 Section 5 of the plan file: intent, the test names covering it, the result. Then list the
 edge cases you considered and deliberately skipped, with the reason for each. A considered
 omission is information; a silent one is a gap.
 
+Commit the tests, the fixes and the plan file — subject `Test: <title>`, round file in the
+body — and push. Clean tree, green tree.
+
 ## Stop here
 
 1. Mark step 5 `done` and set the marker to `<!-- claude-plan step=6 status=active -->`.
-2. Report: the tests added, the pass count, every bug the tests found and how it was fixed,
-   and anything skipped deliberately.
-3. End the turn.
-
-The user opens step 6 with `/concept-check`.
+   That edit goes in the commit above.
+2. Report, in the `/build` contract: `STATUS`, and a `TRACE` with a line or two per test
+   group — what it proves and how many cases — the pass count, every bug the tests found
+   and how it was fixed, and anything skipped deliberately.
+3. End. `/build` opens step 6; do not.

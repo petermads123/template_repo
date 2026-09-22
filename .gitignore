@@ -208,3 +208,7 @@ cython_debug/
 marimo/_static/
 marimo/_lsp/
 __marimo__/
+
+# Claude Code: the gate bypass and per-machine settings are never shared
+.claude/.skip-gate
+.claude/settings.local.json

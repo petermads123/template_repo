@@ -1,6 +1,6 @@
 ---
 name: implement
-description: Step 3 of the feature pipeline. Create the branch and write the production code from the plan, updating STRUCTURE.md in the same change and recording any deviation from the plan. Use once the plan is agreed; tests come later, in step 5.
+description: Step 3 of the feature pipeline. Write the production code from the plan, updating STRUCTURE.md in the same change, recording any deviation from the plan, and committing. Runs inside /build as a subagent; tests come later, in step 5.
 argument-hint: [slug, if more than one plan exists]
 model: sonnet
 effort: max
@@ -11,34 +11,36 @@ effort: max
 Transcribe the plan into working code. Production code only — the test suite is step 5, and
 writing it now would blur the line the pipeline draws between "it exists" and "it works".
 
-## 1. Branch
+This step runs unattended, as a subagent of `/build`. Nobody answers a question asked here.
+What the plan settles, do; what it does not settle and section 1 does not either, halt on —
+the rules are in `/build` and repeated in your brief. Do not guess.
 
-The plan file names no branch yet. Choose one now that the scope is settled, using the
-convention in `CLAUDE.md` — `feat/`, `fix/`, `refactor/`, `docs/`, `test/` or `chore/` plus
-a kebab-case topic:
+## 1. Check the branch
+
+The branch was created at step 1 and is named in the Branch row of the plan file. Confirm
+it is checked out:
 
 ```bash
-git checkout -b feat/<topic>
+git branch --show-current
 ```
 
-Branch from `main` unless a plan-related branch is already checked out, in which case stay
-on it. Write the name into the Branch row of the plan file — the session brief and the stop
-gate both read it, and a mismatch is reported at the start of every session.
-
-`.claude/hooks/guard_git.py` refuses commits on `main` outright, so a missed branch is
-caught rather than discovered later.
+A mismatch is a halt, not something to fix by switching — the build is on the wrong branch,
+and only the user knows which one is right. `.claude/hooks/guard_git.py` refuses commits on
+`main` outright, so a missed branch is caught rather than discovered later.
 
 ## 2. Write the code
 
-Follow the implementation guide in order. `.claude/rules/python.md` is already in context
-whenever a `.py` file is open, and it is not optional: full annotations, Google docstrings,
-a `main()` showcase and `__main__` guard on every module, private helpers prefixed with `_`.
+Follow the implementation guide in order. `.claude/rules/python.md` is not optional: full
+annotations, Google docstrings, a `main()` showcase and `__main__` guard on every module,
+private helpers prefixed with `_`. Read it before the first `.py` file — a subagent does not
+get it loaded automatically.
 
 The showcase has a required shape, and it is the part most often written carelessly: bind
 every argument to a named variable, call on its own line, name the result, print it. Not
 `print(f(1, 2))`. Where an argument takes one of a fixed set of values, list them in a
-comment on the same line: `resolution = "daily"  # "daily", "weekly", "monthly"`. It is the first thing anyone reads to learn how the module is used, so
-write it as the worked example it is.
+comment on the same line: `resolution = "daily"  # "daily", "weekly", "monthly"`. It is the
+first thing anyone reads to learn how the module is used, so write it as the worked example
+it is.
 
 Match the Public API table exactly — signature, parameter names, defaults, return type.
 Step 4 compares them literally.
@@ -128,20 +130,25 @@ from it is not — step 4 will find the difference and will not know whether it 
 decision or a slip. **Correct the Public API table in section 2 when you deviate**, so the
 plan stays the description of the code rather than a historical artefact.
 
-If a deviation invalidates an acceptance criterion, stop and say so. That is a step 1
-problem, not something to absorb here.
+If a deviation invalidates an acceptance criterion, that is a step 1 problem: **halt**.
+Report it with the criterion it breaks and what you would have needed decided.
 
-## 5. Do not commit
+## 5. Commit and push
 
-Step 7 commits, once the work has been verified, tested and checked against the concept.
-Leave the tree dirty.
+The code, `STRUCTURE.md` and the plan file, in one commit unless the work genuinely
+separates. Subject in the imperative, under 72 characters, saying what changes rather than
+what you did — `Add CSV export for record collections` — with the round file named in the
+body. Then push. The tree must be clean when this step ends: a step that leaves work
+uncommitted leaves nothing for the next session to resume from.
+
+The tree does not have to be green yet. Step 4 runs the tools; the stop gate is advisory
+through step 7 for exactly this reason.
 
 ## Stop here
 
 1. Mark step 3 `done` and set the marker to `<!-- claude-plan step=4 status=active -->`.
-2. Report: the branch, the files added or changed, any deviation from the plan, and what
-   `STRUCTURE.md` gained.
-3. End the turn.
-
-The stop gate is advisory through step 3, so a tree that does not yet pass everything can
-end the turn here. From step 4 it blocks. The user opens step 4 with `/verify`.
+   That edit goes in the commit above.
+2. Report, in the `/build` contract: `STATUS`, and a `TRACE` with one or two lines per
+   module, class and function added or changed — every one of them, named — plus what
+   `STRUCTURE.md` gained and any deviation from the plan.
+3. End. `/build` opens step 4; do not.

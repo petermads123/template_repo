@@ -1,6 +1,6 @@
 ---
 name: recommend
-description: Step 8 of the feature pipeline. Propose ranked follow-up work that would make the shipped change into a better product, and agree with the user which to defer, reject, or take through another round. Use after the work is pushed and before opening the pull request.
+description: Step 8 of the feature pipeline. Propose ranked follow-up work that would make the shipped change into a better product, and agree with the user which to defer, reject, or take through another round. Opened by /build when the round is complete; the user's gate before the pull request.
 argument-hint: [slug, if more than one plan exists]
 model: opus
 effort: xhigh
@@ -8,12 +8,15 @@ effort: xhigh
 
 # Step 8 — Recommend
 
-The work is shipped to its branch and provably does what was agreed. This step asks the
-question the pipeline has deliberately suppressed until now: **what would make this
-better?**
+The round is on its branch and provably does what was agreed. This step asks the question
+the pipeline has deliberately suppressed until now: **what would make this better?**
 
-It was suppressed for a reason. Scope that arrives during steps 1 to 7 is a distraction;
-scope that arrives here is a decision, taken with the finished thing in front of you.
+It was suppressed for a reason. Scope that arrives during steps 1 to 7 is a distraction —
+and since steps 3 to 7 now run without the user, it would have been a distraction nobody
+was there to dismiss; scope that arrives here is a decision, taken with the finished thing
+in front of you. This is the first time the user has been asked anything since they
+accepted the plan, so the report that opens this step is also where they see the build's
+outcome as a whole.
 
 ## 1. Look at the finished feature, not the diff
 
@@ -30,6 +33,8 @@ its author. Productive angles:
 - **Debt this created** — duplication introduced to keep the change small, a `TODO` left
   behind, a test that covers the case rather than the rule.
 - **Debt this exposed** — something already wrong in the repo that this work ran into.
+- **What the build halted on or worked around** — the `Halted` section and section 3's
+  deviations are a list of places the plan was thinner than the code needed.
 
 ## 2. Rank them
 
@@ -47,16 +52,18 @@ invented recommendation costs the user real time to evaluate.
 
 ## 3. What does not belong here
 
-**A bug is not a recommendation.** Anything actually broken goes back to step 3 and gets
-fixed before the pull request. Do not let a defect leave this step wearing a "future
-improvement" label.
+**A bug is not a recommendation.** Anything actually broken goes back through `/build`
+from step 3 and gets fixed before the pull request. Do not let a defect leave this step
+wearing a "future improvement" label.
 
 Neither is anything already agreed in section 1 and not built — that is an unmet acceptance
 criterion, and step 6 should have caught it.
 
 ## 4. Decide them with the user
 
-Present the list and ask for a decision on each. Three outcomes:
+Commit and push the list first — subject `Recommend: <title>` — so it is on disk before
+the conversation, which can take a while. Then present it and ask for a decision on each.
+Three outcomes:
 
 - **`deferred`** — worth doing, not now. Record it; it stays in the plan file as the record.
 - **`rejected`** — record the reason. Next time this comes up, the reasoning is already
@@ -65,11 +72,11 @@ Present the list and ask for a decision on each. Three outcomes:
 
 ### Opening the next round
 
-A round is a new file in this feature's folder, not an edit to this one. The work already
-shipped in step 7 stays exactly as it was written and audited.
+A round is a new file in this branch's folder, not an edit to this one. The work already
+on the branch stays exactly as it was written and audited.
 
 ```bash
-cp docs/plans/TEMPLATE.md docs/plans/<feature-slug>/0<N>-<round-slug>.md
+cp development/TEMPLATE.md development/<branch>/0<N>-<round-slug>.md
 ```
 
 Then, in order:
@@ -81,7 +88,7 @@ Then, in order:
    marker `<!-- claude-plan step=1 status=active -->`.
 3. Fill its **Builds on** section: what each earlier round delivered, the recommendation it
    came from quoted in full, and what is already on the branch that it must not break.
-4. Invoke `/conceptualize` for the follow-up.
+4. Commit and push both files, then invoke `/conceptualize` for the follow-up.
 
 The branch and the pull request carry every round. Step 6 of the new round re-checks this
 round's acceptance criteria as a regression pass, and step 9 builds the pull request body
@@ -93,9 +100,10 @@ this file until their turn.
 
 ## Stop here
 
-1. Mark step 8 `done` and set the marker to `<!-- claude-plan step=9 status=active -->`.
-   If a next round was opened, this file's marker becomes
-   `<!-- claude-plan step=8 status=done -->` instead and the new file carries the pipeline.
+1. Once every recommendation has a decision, mark step 8 `done` and set the marker to
+   `<!-- claude-plan step=9 status=active -->`, commit and push. If a next round was
+   opened, this file's marker is `<!-- claude-plan step=8 status=done -->` instead and the
+   new file carries the pipeline.
 2. Report: the ranked list with each decision.
 3. End the turn.
 

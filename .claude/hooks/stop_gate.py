@@ -1,16 +1,19 @@
 """Stop hook: refuse to end the turn on a broken tree, once the step warrants it.
 
-The ten-step pipeline reaches step 3 with code written but no tests yet, so a
-gate that demanded green on every turn would collapse steps 3 to 5 into one.
-This hook therefore reads the active plan file and scales its strictness:
+The ten-step pipeline runs steps 3 to 7 as one unattended block that carries
+its own gates — ruff, mypy and pytest at steps 4, 5 and 7 — and halts to ask
+the user when something needs a decision. A halt can leave the tree red on
+purpose, and a gate that refused to end that turn would force the second fix
+attempt the halting rule forbids. This hook therefore reads the active plan
+file and scales its strictness:
 
 - **No active plan** (a `/small-change`, or ad-hoc work): strict, as before.
   Any turn that touched Python must leave ruff, mypy, pytest and STRUCTURE.md
   in order, with every test file somewhere pytest will actually collect it.
-- **Steps 1 to 3**: advisory. Nothing is run; the turn ends freely, with a note
+- **Steps 1 to 7**: advisory. Nothing is run; the turn ends freely, with a note
   saying when the gate starts biting. Python changing during steps 1 or 2 is
   itself worth a note, since those steps are meant to produce a plan, not code.
-- **Steps 4 to 10**: strict, same as no plan. Step 4 is where the pipeline
+- **Steps 8 to 10**: strict, same as no plan. Step 7 is where the block
   promises a green tree, and nothing after it is allowed to take that back.
 
 Stdlib only: `jq` is not available on this machine and hook commands default to
@@ -253,7 +256,7 @@ def gate_failures(project_dir: Path) -> list[str]:
 
 
 def advisory_notes(project_dir: Path, plan: Plan, changed: set[str]) -> list[str]:
-    """Collect the non-blocking observations worth surfacing during steps 1 to 3.
+    """Collect the non-blocking observations worth surfacing below the gate step.
 
     Args:
         project_dir: Repository root.

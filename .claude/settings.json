@@ -52,10 +52,19 @@
       "Bash(ruff:*)",
       "Bash(mypy:*)",
       "Bash(pytest:*)",
+      "Bash(python -m:*)",
       "Bash(git status:*)",
       "Bash(git diff:*)",
       "Bash(git log:*)",
-      "Bash(git branch:*)"
+      "Bash(git branch:*)",
+      "Bash(git add:*)",
+      "Bash(git commit:*)",
+      "Bash(git push:*)",
+      "Bash(git fetch:*)",
+      "Bash(git checkout:*)",
+      "Bash(git switch:*)",
+      "Bash(git merge:*)",
+      "Bash(git mv:*)"
     ]
   }
 }

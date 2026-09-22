@@ -1,10 +1,13 @@
 """Read the workflow state that lives in the active plan file.
 
 The ten-step pipeline keeps its state on disk, not in the conversation. Each
-feature gets a folder named for its slug, holding one numbered file per round:
+feature gets a folder named for its branch, holding one numbered file per round:
 
-    docs/plans/csv-export/01-csv-export.md        an earlier round, status=done
-    docs/plans/csv-export/02-streaming-writer.md  the round in flight, status=active
+    development/feat/csv-export/01-csv-export.md        an earlier round, status=done
+    development/feat/csv-export/02-streaming-writer.md  the round in flight, status=active
+
+Branch names carry a `/`, so a feature's folder is nested one level inside the
+plans directory and `Plan.feature` is the path relative to it, not a bare name.
 
 Every file carries one machine-readable marker:
 
@@ -25,12 +28,15 @@ import subprocess
 from dataclasses import dataclass, replace
 from pathlib import Path
 
-PLAN_DIR = Path("docs") / "plans"
+PLAN_DIR = Path("development")
 
 GIT_TIMEOUT_SECONDS = 30
 
-#: Steps from here on run against real code, so the stop gate blocks on failure.
-GATE_FROM_STEP = 4
+#: Steps from here on must leave the tree green, so the stop gate blocks on failure.
+#: Steps 3 to 7 run as one unattended block that carries its own gates and halts
+#: to ask the user; a halt has to be able to end the turn on a red tree, so the
+#: stop gate only starts biting once that block has finished.
+GATE_FROM_STEP = 8
 
 STEP_NAMES: dict[int, str] = {
     1: "Conceptualize",
@@ -64,8 +70,9 @@ class Plan:
         status: `active`, `done`, `parked` or `template`.
         title: The plan's first-level heading.
         branch: The branch the plan names, or an empty string if it names none.
-        feature: The slug of the folder this round belongs to. Empty for a file
-            sitting directly in the plans directory, such as the template.
+        feature: The folder this round belongs to, relative to the plans
+            directory — the branch name, so it may contain a `/`. Empty for a
+            file sitting directly in the plans directory, such as the template.
         round_number: Which round this is, from the filename's `NN-` prefix.
             Zero when the filename carries no prefix.
     """
@@ -114,16 +121,24 @@ def parse(path: Path) -> Plan | None:
     branch = BRANCH_ROW.search(text)
     title = TITLE.search(text)
     prefix = ROUND_PREFIX.match(path.stem)
-    parent = path.parent.name
     return Plan(
         path=path,
         step=step,
         status=marker.group(2).lower(),
         title=title.group(1).strip() if title else path.stem,
         branch=branch.group(1).strip().strip("`") if branch else "",
-        feature=parent if parent != PLAN_DIR.name else "",
+        feature=_feature_of(path),
         round_number=int(prefix.group(1)) if prefix else 0,
     )
+
+
+def _feature_of(path: Path) -> str:
+    """Name the folder a plan file sits in, relative to the plans directory."""
+    parts = path.parent.parts
+    if PLAN_DIR.name not in parts:
+        return path.parent.name  # outside the plans directory: best effort
+    start = len(parts) - 1 - parts[::-1].index(PLAN_DIR.name)
+    return "/".join(parts[start + 1 :])
 
 
 def all_plans(project_dir: Path) -> list[Plan]:
@@ -132,8 +147,8 @@ def all_plans(project_dir: Path) -> list[Plan]:
     Args:
         project_dir: Repository root.
 
-    Recurses into the per-feature folders, so every round of every feature is
-    included.
+    Recurses into the per-feature folders, however deep the branch name nests
+    them, so every round of every feature is included.
 
     Returns:
         Every parseable plan, most recently modified first.
@@ -222,7 +237,8 @@ def feature_rounds(project_dir: Path, feature: str) -> list[Plan]:
 
     Args:
         project_dir: Repository root.
-        feature: The feature's folder name, as carried on `Plan.feature`.
+        feature: The feature's folder relative to the plans directory, as
+            carried on `Plan.feature`.
 
     Returns:
         The feature's rounds ordered by round number.
@@ -242,7 +258,7 @@ def main() -> None:
         siblings = feature_rounds(project_dir, active.feature)
         print(f"rounds of {active.feature!r}: {[p.round_number for p in siblings]}")
     print(f"branch: {current_branch(project_dir)!r}")
-    print(f"step 4 is gated: {GATE_FROM_STEP <= 4}")
+    print(f"the stop gate blocks from step {GATE_FROM_STEP}")
 
 
 if __name__ == "__main__":

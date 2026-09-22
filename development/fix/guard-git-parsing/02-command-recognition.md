@@ -4,7 +4,7 @@
 
 | Field | Value |
 |---|---|
-| Feature | `git-guard` (the folder) |
+| Feature | `fix/guard-git-parsing` (the folder) |
 | Round | `2` |
 | Branch | `claude/setup-recommendations-qoyxhf` |
 | Started | `2026-09-21` |
@@ -390,7 +390,7 @@ Six edits, and the first was a real miss rather than a polish:
 3. The tests entry said "the defect that prompted the round" when there are now two rounds.
 4. A clause describing a `segments` test sat inside the `switch_target` sentence, and the
    `switch_target` list omitted the option-left-without-a-value case.
-5. The `docs/plans/` tree illustrated the layout with a `csv-export` feature that has never
+5. The plans tree illustrated the layout with a `csv-export` feature that has never
    existed here; it now shows the two rounds that do.
 
 Applying edit 4 collided with edit 3's rewrap and briefly left the `#` clause in the file
