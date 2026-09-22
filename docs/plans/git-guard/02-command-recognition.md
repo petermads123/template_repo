@@ -1,6 +1,6 @@
 # Git guard: recognising the command
 
-<!-- claude-plan step=10 status=active -->
+<!-- claude-plan step=10 status=done -->
 
 | Field | Value |
 |---|---|
@@ -22,7 +22,7 @@
 | 7 | Ship | `/ship` | done |
 | 8 | Recommend | `/recommend` | done |
 | 9 | Pull request | `/create-pr` | done |
-| 10 | Review | `/watch-pr` | pending |
+| 10 | Review | `/watch-pr` | done |
 
 Statuses: `pending`, `in progress`, `done`.
 
@@ -649,22 +649,47 @@ comparing them caught it.
 
 ## 10. Review log
 
-> Written in step 10, one row per review thread. The record of how the pull request got
-> from opened to merged — the part nobody can reconstruct from the diff later.
->
-> Quiet check-ins are not recorded. Nineteen rows of "nothing had changed" is noise.
+No review threads were opened. The pull request drew no comments, no reviews and no bot
+findings across the nineteen hours it was open, so there is nothing to record per thread —
+and nothing dismissed. That absence is itself the record: had a bot finding been dismissed,
+this section would name it and the reason.
 
 | Thread | Who asked for what | Outcome |
 |---|---|---|
+| — | No review threads were opened | — |
 
-Outcomes: `fixed and pushed`, `replied, left open`, `round N`, or — for a bot finding —
-`dismissed: <reason>`. Every dismissal is also reported to the user, never only recorded here.
+Ten check-ins ran between opening and merge, all quiet. They are not listed individually;
+a log of "nothing had changed" ten times is noise. Two things about how they ran are worth
+keeping:
+
+- The cadence was widened from hourly to four-hourly overnight, once it was clear the pull
+  request was waiting on a person rather than on a check. The `watch-pr` skill says "about
+  once an hour"; this was deliberate pacing rather than cancelling, and the subscription to
+  pull request activity remained the primary signal throughout — which is what actually
+  delivered the merge, within seconds of it happening.
+- The poll itself was made cheaper after the first few: reading the whole pull request
+  returned its entire body every time for a check that almost always found nothing, so it
+  was replaced by a review-thread query plus a `git fetch` comparing the branch against
+  `main`, with the full read kept for when something had actually moved.
 
 ### Outcome
 
 | Field | Value |
 |---|---|
-| Merged or closed | |
-| Merge commit | |
-| Instructed by | who said to merge, and where |
-| Bot findings dismissed | each one, with its reason |
+| Merged or closed | **Merged**, 2026-09-22 ~07:11 UTC |
+| Merge commit | `e155ea4` |
+| Instructed by | Nobody — the approver merged it themselves in the GitHub UI |
+| Bot findings dismissed | None. No bot reviewed this pull request. |
+
+**Claude did not merge this and was never asked to.** `CLAUDE.md` allows exactly two routes
+to `main`: the approver presses the button, or they explicitly tell Claude to merge. This
+was the first. No approval existed on the pull request and none could — GitHub refuses a
+review request from an author — so there was never a signal that could have been mistaken
+for one.
+
+The branch was deleted by GitHub on merge. Verified against the repository rather than
+trusting the webhook: `origin/main` is now `e155ea4`, the branch head `6ce1939` is an
+ancestor of it, `guard_git.py` on `main` carries the rewrite, and all three test files are
+present.
+
+---
