@@ -122,12 +122,13 @@ because only options are skipped after a wrapper and never a bare word.
 ### `tests/test_plan_state.py`
 
 Covers `.claude/hooks/plan_state.py`. `parse` against a complete marker, a file with none,
-a branch-named folder nested two deep (`feature` is the path relative to `development/`), a
-file outside the plans directory,
-a step outside 1-10, an uppercase status, a missing Branch row, a missing title and an
-unreadable path; `all_plans` for recursion, modification-time ordering and relative paths;
-`active_plan` for none, one and several active at once; `feature_rounds` for round ordering,
-feature isolation and an unknown feature; `git_lines`/`current_branch` against a throwaway
+a step outside 1-10, an uppercase status, a missing Branch row, a missing title, an
+unreadable path, a nested `type/topic` folder read as a relative `feature`, a file outside
+the plans directory falling back to its parent's name, and an unprefixed filename such as
+`TEMPLATE.md` giving round 0 and an empty `feature`; `all_plans` for a missing plans
+directory, recursion, files without a marker, modification-time ordering and relative
+paths; `active_plan` for none, one and several active at once; `feature_rounds` for round
+ordering, a nested feature folder, feature isolation and an unknown feature; `git_lines`/`current_branch` against a throwaway
 repository, including a detached HEAD and a directory that is not a repository at all; and
 `main` printing the plans it finds, with one active and with none. `Plan.step_name` and
 `Plan.gated` are covered either side of `GATE_FROM_STEP`.
@@ -226,11 +227,11 @@ siblings because Python puts a script's own directory on `sys.path`. Stdlib only
 
 | Signature | Description |
 |---|---|
-| `Plan` | Frozen dataclass: `path`, `step`, `status`, `title`, `branch`, `feature`, `round_number`, plus `step_name` and `gated` properties. |
+| `Plan` | Frozen dataclass: `path`, `step`, `status`, `title`, `branch`, `feature` (the folder relative to `development/`, so the branch name with its `/`; empty for `TEMPLATE.md`), `round_number`, plus `step_name` and `gated` properties. |
 | `parse(path: Path) -> Plan \| None` | Parse one plan file, or None if it has no valid marker. |
 | `all_plans(project_dir: Path) -> list[Plan]` | Every parseable plan in every feature folder, most recently modified first. |
 | `active_plan(project_dir: Path) -> Plan \| None` | The plan the pipeline is working through. |
-| `feature_rounds(project_dir: Path, feature: str) -> list[Plan]` | One feature's rounds, oldest first. |
+| `feature_rounds(project_dir: Path, feature: str) -> list[Plan]` | One feature's rounds, oldest first; `feature` is the folder relative to `development/`, as on `Plan.feature`. |
 | `git_lines(project_dir: Path, args: list[str]) -> list[str]` | Run git, return output lines. |
 | `current_branch(project_dir: Path) -> str` | The checked-out branch, or `""`. |
 | `main() -> None` | Showcase: prints the plans found, the active one and its sibling rounds. |
