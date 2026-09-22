@@ -2,41 +2,47 @@
 
 <!-- claude-plan step=1 status=template -->
 
-> Copy this file to `docs/plans/<feature-slug>/NN-<round-slug>.md`, change
-> `status=template` to `status=active`, and fill it in as the pipeline runs. Delete these
-> quoted instructions from your copy.
+> Copy this file to `development/<branch>/NN-<round-slug>.md`, change `status=template`
+> to `status=active`, and fill it in as the pipeline runs. Delete these quoted
+> instructions from your copy.
 >
-> One folder per feature, one numbered file per round. Round 1 is `01-<feature-slug>.md`;
-> a recommendation taken up in step 8 becomes `02-<its-own-slug>.md` in the same folder,
-> and so on. Every round of a feature shares one branch and one pull request.
+> One folder per branch, one numbered file per round. Round 1 is `01-<topic>.md`; a
+> recommendation taken up in step 8, or a review comment at step 10, becomes
+> `02-<its-own-slug>.md` in the same folder, and so on. Every round of a feature shares
+> one branch and one pull request.
 >
 > The marker line above is the workflow's state, read by `.claude/hooks/plan_state.py`:
 > `step` is the step currently in progress, `status` is `active`, `done`, `parked` or
 > `template`. Keep exactly one file `active` across the whole repo — when a new round
-> opens, the round before it becomes `done`. The stop gate is advisory through step 3 and
-> blocking from step 4, so this marker decides how strict the repo is being.
+> opens, the round before it becomes `done`, and step 9 marks the newest round `done` in
+> the commit that opens the pull request. The stop gate is advisory through step 7, where
+> the build carries its own gates and must be able to halt on a red tree, and blocking
+> from step 8.
+>
+> Every step commits and pushes this file with what it produced, so the branch is always
+> the state and any session can resume from it.
 
 | Field | Value |
 |---|---|
-| Feature | `<feature-slug>` (the folder) |
+| Feature | `<branch>` (the folder) |
 | Round | `<N>` |
 | Branch | `<type>/<kebab-case-topic>` |
 | Started | `<YYYY-MM-DD>` |
 
 ## Progress
 
-| # | Step | Skill | Status |
-|---|---|---|---|
-| 1 | Conceptualize | `/conceptualize` | pending |
-| 2 | Plan | `/plan` | pending |
-| 3 | Implement | `/implement` | pending |
-| 4 | Verify | `/verify` | pending |
-| 5 | Test | `/test` | pending |
-| 6 | Concept check | `/concept-check` | pending |
-| 7 | Ship | `/ship` | pending |
-| 8 | Recommend | `/recommend` | pending |
-| 9 | Pull request | `/create-pr` | pending |
-| 10 | Review | `/watch-pr` | pending |
+| # | Step | Skill | Runs | Status |
+|---|---|---|---|---|
+| 1 | Conceptualize | `/conceptualize` | with the user | pending |
+| 2 | Plan | `/plan` | with the user | pending |
+| 3 | Implement | `/implement` | in `/build` | pending |
+| 4 | Verify | `/verify` | in `/build` | pending |
+| 5 | Test | `/test` | in `/build` | pending |
+| 6 | Concept check | `/concept-check` | in `/build` | pending |
+| 7 | Ship | `/ship` | in `/build` | pending |
+| 8 | Recommend | `/recommend` | with the user | pending |
+| 9 | Pull request | `/create-pr` | with the user | pending |
+| 10 | Review | `/watch-pr` | on the pull request | pending |
 
 Statuses: `pending`, `in progress`, `done`.
 
@@ -59,7 +65,9 @@ What is already on the branch that this round must not break:
 
 ## 1. Concept
 
-> Written in step 1, agreed with the user before step 2 starts. Prose, not code.
+> Written in step 1, agreed with the user before step 2 starts. Prose, not code. Steps 3
+> to 7 run without the user, and the one thing that stops them is a finding that would
+> change this section — so what is not decided here is decided by a halt.
 
 ### What this is
 
@@ -87,13 +95,14 @@ Which existing modules it calls, which call it, what it does not touch.
 ### Open questions
 
 > Must be empty before step 2 begins. An unanswered question here is a decision being
-> made by accident later.
+> made by accident later — and nobody is watching when it happens.
 
 ---
 
 ## 2. Plan
 
-> Written in step 2. Concrete enough that step 3 is transcription, not invention.
+> Written in step 2, accepted by the user before step 3 starts. Concrete enough that
+> step 3 is transcription, not invention.
 
 ### Approach
 
@@ -130,7 +139,8 @@ Ordered. Each entry small enough to finish and check.
 
 ### Risks
 
-What could make this harder than it looks, and the plan if it does.
+What could make this harder than it looks, and what the build should do if it does —
+including whether it should halt.
 
 ---
 
@@ -202,7 +212,7 @@ Drift found, and what was done about it:
 ## 8. Recommendations
 
 > Written in step 8. Follow-up work this change makes possible or desirable. Not bugs —
-> a bug found here goes back to step 3 before shipping.
+> a bug found here goes back through `/build` before the pull request.
 
 | # | Recommendation | Why it helps | Effort | Decision |
 |---|---|---|---|---|
@@ -215,31 +225,20 @@ taken back through steps 1 to 7 on the same branch.
 
 ## 9. Pull request
 
+> Written in step 9, in the commit that opens the pull request — so the URL is not known
+> yet and the pull request is found from the branch. The review itself is recorded on the
+> pull request thread, not here: this file is `done` from step 9 on.
+
 | Field | Value |
 |---|---|
-| URL | |
+| URL | opened by step 9 — see the branch's pull request |
 | Opened as | ready for review |
 
 ---
 
-## 10. Review log
+## Halted
 
-> Written in step 10, one row per review thread. The record of how the pull request got
-> from opened to merged — the part nobody can reconstruct from the diff later.
->
-> Quiet check-ins are not recorded. Nineteen rows of "nothing had changed" is noise.
-
-| Thread | Who asked for what | Outcome |
-|---|---|---|
-
-Outcomes: `fixed and pushed`, `replied, left open`, `round N`, or — for a bot finding —
-`dismissed: <reason>`. Every dismissal is also reported to the user, never only recorded here.
-
-### Outcome
-
-| Field | Value |
-|---|---|
-| Merged or closed | |
-| Merge commit | |
-| Instructed by | who said to merge, and where |
-| Bot findings dismissed | each one, with its reason |
+> Only if the build stopped. Written by `/build`: the step, the reason verbatim from the
+> step that halted, the question for the user — and, once answered, the answer and what
+> changed because of it. Never deleted; it is the record of where the plan was thinner
+> than the code needed.

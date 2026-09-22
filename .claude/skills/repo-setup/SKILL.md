@@ -63,10 +63,9 @@ git mv src/template_repo src/<package_name>
 | File | What to change |
 |---|---|
 | `pyproject.toml` | `[project] name`, `[project] description` |
-| `tests/test_hello_world.py` | `from <package_name> import greet` |
+| `tests/test_hello_world.py` | `from <package_name>.hello_world import main` |
 | `STRUCTURE.md` | the tree, the two module headings, the `main()` invocation |
 | `README.md` | the title, the description, both install URLs, the setup checklist |
-| `.claude/rules/python.md` | the worked-example path in the showcase section |
 
 `[tool.setuptools.packages.find]` points at `src` and `[tool.mypy] files` names directories,
 so neither needs touching. Confirm that by reading them rather than assuming it.
@@ -117,9 +116,11 @@ twice. The skill file stays on disk — harmless, and still there if a rename is
 
 > Is there anything else about this repo's setup I should know or configure?
 
-Dependencies to add, a CI workflow, an editor setting, a convention that differs from the
-template's. Handle what comes back, or route it: a CI workflow is a `/feature`, a wording
-tweak is a `/small-change`.
+Dependencies to add, an editor setting, a convention that differs from the template's.
+Handle what comes back, or route it: anything that adds a file is a `/feature`, a wording
+tweak is a `/small-change`. Do not offer continuous integration unprompted — the template
+deliberately runs its checks in the stop gate and at step 9 instead, and the reason is
+recorded in `docs/BACKLOG.md`.
 
 ## 7. Finish
 
@@ -136,5 +137,6 @@ Then `pip install -e ".[dev]"` and `python -m <package_name>.hello_world`, which
 first thing that proves the rename and the `src/` layout agree.
 
 Show the user what changed and ask whether they are happy with the setup. **Only if they
-are**, offer to commit it on a `chore/repo-setup` branch and open a pull request to `main`.
-Do not commit setup they have not looked at.
+are**, offer to commit it on a `chore/repo-setup` branch and open a pull request to `main`
+— with the GitHub MCP tools where they are available, `gh` where it is. Do not commit setup
+they have not looked at.

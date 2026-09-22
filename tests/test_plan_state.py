@@ -27,7 +27,7 @@ def write_plan(
     title: str | None = "A feature",
     branch: str | None = "feat/topic",
 ) -> Path:
-    path = root / "docs" / "plans" / relative
+    path = root / "development" / relative
     path.parent.mkdir(parents=True, exist_ok=True)
     lines = []
     if title is not None:
@@ -139,6 +139,32 @@ def test_parse_falls_back_to_the_filename_without_a_title(tmp_path: Path) -> Non
     assert plan.title == "01-untitled"
 
 
+def test_parse_reads_a_nested_feature_folder_as_a_relative_path(
+    tmp_path: Path,
+) -> None:
+    path = write_plan(tmp_path, "feat/csv-export/02-streaming.md")
+
+    plan = parse(path)
+
+    assert plan is not None
+    assert (plan.feature, plan.round_number) == ("feat/csv-export", 2)
+
+
+def test_parse_falls_back_to_the_parent_name_outside_the_plans_directory(
+    tmp_path: Path,
+) -> None:
+    path = tmp_path / "elsewhere" / "01-x.md"
+    path.parent.mkdir()
+    path.write_text(
+        "# T\n\n<!-- claude-plan step=1 status=active -->\n", encoding="utf-8"
+    )
+
+    plan = parse(path)
+
+    assert plan is not None
+    assert plan.feature == "elsewhere"
+
+
 def test_parse_reads_zero_rounds_from_an_unprefixed_filename(tmp_path: Path) -> None:
     path = write_plan(tmp_path, "TEMPLATE.md", status="template")
 
@@ -184,7 +210,7 @@ def test_all_plans_orders_most_recently_modified_first(tmp_path: Path) -> None:
 
 def test_all_plans_skips_files_without_a_marker(tmp_path: Path) -> None:
     write_plan(tmp_path, "f/01-real.md")
-    (tmp_path / "docs" / "plans" / "README.md").write_text("prose", encoding="utf-8")
+    (tmp_path / "development" / "README.md").write_text("prose", encoding="utf-8")
 
     assert [plan.path.name for plan in all_plans(tmp_path)] == ["01-real.md"]
 
@@ -194,7 +220,7 @@ def test_all_plans_reports_paths_relative_to_the_project(tmp_path: Path) -> None
 
     (plan,) = all_plans(tmp_path)
 
-    assert plan.path == Path("docs/plans/f/01-x.md")
+    assert plan.path == Path("development/f/01-x.md")
 
 
 # --- active_plan -------------------------------------------------------------
@@ -242,6 +268,16 @@ def test_feature_rounds_orders_oldest_first(tmp_path: Path) -> None:
     rounds = feature_rounds(tmp_path, "csv")
 
     assert [plan.round_number for plan in rounds] == [1, 2, 3]
+
+
+def test_feature_rounds_matches_a_nested_feature_folder(tmp_path: Path) -> None:
+    write_plan(tmp_path, "feat/csv/01-x.md")
+    write_plan(tmp_path, "feat/csv/02-y.md")
+    write_plan(tmp_path, "fix/csv/01-z.md")
+
+    rounds = feature_rounds(tmp_path, "feat/csv")
+
+    assert [plan.path.name for plan in rounds] == ["01-x.md", "02-y.md"]
 
 
 def test_feature_rounds_excludes_other_features(tmp_path: Path) -> None:
@@ -314,7 +350,7 @@ def test_main_reports_the_plans_it_finds(
     output = capsys.readouterr().out
     assert "01-csv-export.md" in output
     assert "active" in output
-    assert "step 4 is gated: True" in output
+    assert f"the stop gate blocks from step {GATE_FROM_STEP}" in output
 
 
 def test_main_is_quiet_about_rounds_when_nothing_is_active(

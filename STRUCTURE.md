@@ -40,7 +40,7 @@ here, but everything in this file is in context every session.
 src/                    everything installable; nothing outside it is packaged
   template_repo/        the package itself (rename this to <package_name>)
 tests/                  pytest suite, one test_<module>.py per module
-docs/plans/             one folder per feature, one file per round: the pipeline's state
+development/            one folder per branch, one file per round: the pipeline's state
 docs/BACKLOG.md         known defects and proposed setup work, not yet in the pipeline
 .claude/                Claude Code configuration: rules, skills, agents, hooks
 .vscode/                editor config (Ruff as formatter, format on save)
@@ -122,10 +122,13 @@ because only options are skipped after a wrapper and never a bare word.
 ### `tests/test_plan_state.py`
 
 Covers `.claude/hooks/plan_state.py`. `parse` against a complete marker, a file with none,
-a step outside 1-10, an uppercase status, a missing Branch row, a missing title and an
-unreadable path; `all_plans` for recursion, modification-time ordering and relative paths;
-`active_plan` for none, one and several active at once; `feature_rounds` for round ordering,
-feature isolation and an unknown feature; `git_lines`/`current_branch` against a throwaway
+a step outside 1-10, an uppercase status, a missing Branch row, a missing title, an
+unreadable path, a nested `type/topic` folder read as a relative `feature`, a file outside
+the plans directory falling back to its parent's name, and an unprefixed filename such as
+`TEMPLATE.md` giving round 0 and an empty `feature`; `all_plans` for a missing plans
+directory, recursion, files without a marker, modification-time ordering and relative
+paths; `active_plan` for none, one and several active at once; `feature_rounds` for round
+ordering, a nested feature folder, feature isolation and an unknown feature; `git_lines`/`current_branch` against a throwaway
 repository, including a detached HEAD and a directory that is not a repository at all; and
 `main` printing the plans it finds, with one active and with none. `Plan.step_name` and
 `Plan.gated` are covered either side of `GATE_FROM_STEP`.
@@ -149,24 +152,24 @@ Windows. `enforce` and `main` are driven the same way, with the four checks monk
 neither reaches a real tool either.
 
 
-## Plans: `docs/plans/`
+## Plans: `development/`
 
-One folder per feature, one numbered file per round inside it, created by `/feature` from
-`TEMPLATE.md` and carried through all ten steps:
+One folder per branch, one numbered file per round inside it, created at the close of step
+1 from `TEMPLATE.md` and carried through all ten steps:
 
 ```
-docs/plans/
+development/
   TEMPLATE.md                     copied for each new round; never itself active
-  git-guard/
+  fix/guard-git-parsing/          the folder is the branch name, so it nests one level
     01-git-guard.md               round 1, the parsing rewrite
     02-command-recognition.md     round 2, opened from round 1's recommendations R1-R3
 ```
 
 Each file holds the concept and acceptance criteria, the plan, the verification and test
-logs, the concept-check audit, the recommendations and the pull request. Every round of a
-feature shares one branch and one pull request; a later round's **Builds on** section names
-what the earlier rounds delivered, and its step 6 re-checks their acceptance criteria as a
-regression pass.
+logs, the concept-check audit, the recommendations and the pull request, plus a `Halted`
+section if the build stopped to ask. Every round of a feature shares one branch and one
+pull request; a later round's **Builds on** section names what the earlier rounds
+delivered, and its step 6 re-checks their acceptance criteria as a regression pass.
 
 The first line after the title is the workflow's state and is read by the hooks:
 
@@ -174,44 +177,48 @@ The first line after the title is the workflow's state and is read by the hooks:
 <!-- claude-plan step=3 status=active -->
 ```
 
-`step` is 1 to 10; `status` is `active`, `done`, `parked` or `template`. A plan stays
-`active` through step 10 and is marked `done` only when the pull request merges or closes. Exactly one file
+`step` is 1 to 10; `status` is `active`, `done`, `parked` or `template`. Exactly one file
 across the whole repo should be `active` — opening a round stands its predecessor down to
-`done`. Plan files are committed: they are the record of why the code looks the way it is,
-and `/create-pr` builds the pull request body from every round in the folder.
+`done`, and step 9 marks the newest round `done` in the commit that opens the pull request,
+so `main` never carries a live marker. Every step commits and pushes the file with what it
+produced: plan files are the record of why the code looks the way it is, the state any
+session resumes from, and what `/create-pr` builds the pull request body from.
 
 ## Backlog: `docs/BACKLOG.md`
 
 Findings from reviewing this repo's own Claude configuration: confirmed defects, proposed
 improvements, and decisions taken against. Deliberately **not** a plan file — it carries no
-`claude-plan` marker and sits outside `docs/plans/`, the only directory
+`claude-plan` marker and sits outside `development/`, the only directory
 `.claude/hooks/plan_state.py` scans, so it cannot be mistaken for pipeline state.
 
 Each entry records its routing (`/feature` or `/small-change`) so picking one up does not
-mean re-deciding it. An item graduates by becoming a plan folder under `docs/plans/`, and
+mean re-deciding it. An item graduates by becoming a plan folder under `development/`, and
 its entry here is deleted in the same change.
 
 ## Claude configuration: `.claude/`
 
 | Path | Role |
 |---|---|
-| `settings.json` | Registers the four hooks; pre-approves ruff/mypy/pytest and read-only git |
+| `settings.json` | Registers the four hooks; pre-approves ruff/mypy/pytest, `python -m`, and the git commands the pipeline uses (read-only ones plus add, commit, push, fetch, checkout, switch, merge, mv) so an unattended build never stalls on a prompt — `guard_git.py` is what keeps that safe |
 | — | Every skill pins `model` and `effort` in its frontmatter; the table in `CLAUDE.md` says which and why |
+| `skills/build/` | `/build` — steps 3 to 7 as one unattended block: a subagent per step on its pinned model, commit and push after each, halting rules, trace relay, resume from the marker |
 | `rules/python.md` | Coding conventions, auto-loaded for `**/*.py` |
 | `skills/repo-setup/` | `/repo-setup` — one-time setup of a repo made from this template; carries `main_protect.solo.json` and `main_protect.collab.json` |
 | `skills/feature/` | `/feature` — starts or resumes the pipeline |
 | `skills/conceptualize/` | `/conceptualize` — step 1, agree the concept |
 | `skills/plan/` | `/plan` — step 2, design it |
-| `skills/implement/` | `/implement` — step 3, branch and build |
+| `skills/implement/` | `/implement` — step 3, write the code (inside `/build`) |
 | `skills/verify/` | `/verify` — step 4, static verification |
 | `skills/test/` | `/test` — step 5, edge-case suite |
 | `skills/concept-check/` | `/concept-check` — step 6, audit against the concept |
-| `skills/ship/` | `/ship` — step 7, commit and push |
+| `skills/ship/` | `/ship` — step 7, close the round: whole-tree gates and diff review (inside `/build`) |
 | `skills/recommend/` | `/recommend` — step 8, ranked follow-ups |
 | `skills/create-pr/` | `/create-pr` — step 9, pull request ready for review |
 | `skills/watch-pr/` | `/watch-pr` — step 10, hourly review watch until merge or close |
 | `skills/small-change/` | `/small-change` — cosmetic edits, outside the pipeline |
-| `agents/test-designer.md` | Read-only subagent that finds edge cases (feeds step 5) |
+| `agents/plan-critic.md` | Read-only subagent that reads a plan against its concept and the repo before the user accepts it (feeds step 2); pinned to `opus` |
+| `agents/test-designer.md` | Read-only subagent that finds edge cases; run twice at step 5 with the `input-space` and `contract` briefs |
+| `agents/brainstormer.md` | Read-only subagent that proposes follow-ups through one lens — `user`, `maintainer` or `integrator`; three run in parallel at step 8 |
 | `agents/structure-auditor.md` | Read-only subagent that reconciles this file (feeds steps 4 and 6) |
 
 ### `.claude/hooks/plan_state.py`
@@ -222,22 +229,27 @@ siblings because Python puts a script's own directory on `sys.path`. Stdlib only
 
 | Signature | Description |
 |---|---|
-| `Plan` | Frozen dataclass: `path`, `step`, `status`, `title`, `branch`, `feature`, `round_number`, plus `step_name` and `gated` properties. |
+| `Plan` | Frozen dataclass: `path`, `step`, `status`, `title`, `branch`, `feature` (the folder relative to `development/`, so the branch name with its `/`; empty for `TEMPLATE.md`), `round_number`, plus `step_name` and `gated` properties. |
 | `parse(path: Path) -> Plan \| None` | Parse one plan file, or None if it has no valid marker. |
 | `all_plans(project_dir: Path) -> list[Plan]` | Every parseable plan in every feature folder, most recently modified first. |
 | `active_plan(project_dir: Path) -> Plan \| None` | The plan the pipeline is working through. |
-| `feature_rounds(project_dir: Path, feature: str) -> list[Plan]` | One feature's rounds, oldest first. |
+| `feature_rounds(project_dir: Path, feature: str) -> list[Plan]` | One feature's rounds, oldest first; `feature` is the folder relative to `development/`, as on `Plan.feature`. |
 | `git_lines(project_dir: Path, args: list[str]) -> list[str]` | Run git, return output lines. |
 | `current_branch(project_dir: Path) -> str` | The checked-out branch, or `""`. |
 | `main() -> None` | Showcase: prints the plans found, the active one and its sibling rounds. |
 
-`GATE_FROM_STEP = 4` is the step at which the stop gate starts blocking.
+`GATE_FROM_STEP = 8` is the step at which the stop gate starts blocking: steps 3 to 7 are
+the build, which carries its own gates and must be able to halt on a red tree.
+`PLAN_DIR = development` is the directory it scans; `Plan.feature` is a folder path relative
+to it, so a branch-named folder such as `feat/csv-export` comes back with its `/`.
 
 ### `.claude/hooks/session_brief.py`
 
-`SessionStart` hook. Injects the active plan's step into a new session's context, plus what
-any earlier rounds of the same feature delivered, so work resumes without the user having
-to re-explain it. Silent when no plan is active. Stdlib only.
+`SessionStart` hook. Injects the active plan's step into a new session's context, the skill
+that resumes it (`/build` for steps 3 to 7), plus what any earlier rounds of the same
+feature delivered, so work resumes without the user having to re-explain it. Silent when
+no plan is active — including while a pull request is open, since step 9 closes the plan.
+Stdlib only.
 
 | Signature | Description |
 |---|---|
@@ -312,7 +324,7 @@ writes or edits, and reports unfixable issues back via exit code 2. Stdlib only.
 ### `.claude/hooks/stop_gate.py`
 
 `Stop` hook. Reads the active plan's step to decide how strict to be: advisory through step
-3, blocking from step 4 and whenever no plan is active. When it blocks it runs ruff, mypy
+7, blocking from step 8 and whenever no plan is active. When it blocks it runs ruff, mypy
 and pytest, cross-checks `STRUCTURE.md` against the modules on disk, reports any test file
 sitting outside `tests/` where `pytest` would silently never collect it, and reports any
 package directory under `src/` missing its `__init__.py`. Bypass with
@@ -328,7 +340,7 @@ package directory under `src/` missing its `__init__.py`. Bypass with
 | `stray_test_files(project_dir: Path) -> list[str]` | Test files outside `tests/`, which pytest never collects. |
 | `missing_init_files(project_dir: Path) -> list[str]` | Package directories under `src/` with no `__init__.py`. |
 | `gate_failures(project_dir: Path) -> list[str]` | Run the verification set, collect failures. |
-| `advisory_notes(project_dir: Path, plan: Plan, changed: set[str]) -> list[str]` | Non-blocking observations for steps 1 to 3. |
+| `advisory_notes(project_dir: Path, plan: Plan, changed: set[str]) -> list[str]` | Non-blocking observations for the steps below the gate. |
 | `notice(message: str) -> None` | Show the user a message without blocking. |
 | `block(reason: str) -> None` | Emit the block decision and exit. |
 | `enforce(project_dir: Path) -> None` | Run the verification set and block on failure. |

@@ -1,6 +1,6 @@
 ---
 name: ship
-description: Step 7 of the feature pipeline. Commit the verified, tested, concept-checked work and push it to its feature branch. Use after the concept check passes; this pushes the branch but does not open a pull request.
+description: Step 7 of the feature pipeline. Close the round — confirm every gate still holds on the whole tree, review everything the round committed for things that should not be there, record the commits, and push. Runs inside /build as a subagent, after the concept check passes; does not open a pull request.
 argument-hint: [slug, if more than one plan exists]
 model: sonnet
 effort: max
@@ -8,11 +8,15 @@ effort: max
 
 # Step 7 — Ship
 
-Commit and push. The pull request is step 9 — this step exists so the work is safe on the
-remote before the recommendations conversation, which can take a while and can end in
-another round of changes.
+Every step since 1 has committed and pushed as it went, so the work is already safe on the
+remote. This step closes the round: it is the one moment the round is looked at whole
+rather than a step at a time, and the point at which the build promises a green tree that
+nothing after it takes back — the stop gate blocks from step 8 on that promise.
 
-## 1. Confirm the gates still hold
+This step runs unattended, as a subagent of `/build`. The rules for a failure are the
+block's: fix once, halt on a repeat.
+
+## 1. Confirm the gates hold on the whole tree
 
 Everything before this step passed at the time it ran. Confirm it still passes now:
 
@@ -24,41 +28,32 @@ pytest
 ```
 
 And confirm the plan file agrees: steps 1 to 6 all marked `done`, section 6's criteria
-table filled in with no unmet rows. A criterion still marked unmet means step 6 sent the
-work back and it has not come back — stop and say so.
+table filled in with no unmet rows, section 5's intent table with a test against every
+intent. A criterion still marked unmet means step 6 sent the work back and it has not come
+back — halt and say so.
 
-## 2. Look at what you are about to commit
+## 2. Review what the round committed
 
 ```bash
-git status --short
-git diff --stat
+git log main..HEAD --oneline
+git diff main...HEAD --stat
 ```
 
-Read it. Two things to catch here and nowhere else:
+Read it as a reviewer would. Two things to catch here and nowhere else:
 
 - **Files that should not be committed** — scratch scripts, sample data, anything under a
-  temp directory, `.claude/.skip-gate`. Leave them out rather than committing and reverting.
-- **The plan file** — it *should* be committed. It is the record of why this code looks the
-  way it does, and step 9 builds the pull request body from it. On a later round that means
-  this round's file; the earlier ones went in with their own commits and are untouched.
+  temp directory. `.claude/.skip-gate` and `settings.local.json` are ignored, but a stray
+  file is not. Remove it in a commit of its own so the history says what happened.
+- **A step that committed nothing.** Every step from 1 leaves a commit naming the round
+  file. One missing means that step's record is only in the file, not in the history;
+  note it in section 7 rather than rewriting anything.
 
-## 3. Commit
+On a later round the earlier rounds' commits are already there and untouched. Only this
+round's are reviewed.
 
-The branch guard refuses a commit on `main` outright, so if it fires, step 3 did not create
-a branch. Fix that before anything else.
+## 3. Record, commit, push
 
-One commit for a self-contained change; several if the work genuinely separates (the module,
-then the tests, then the docs). Subject line in the imperative, under 72 characters, saying
-what changes rather than what you did:
-
-```
-Add CSV export for record collections
-```
-
-Body: what changed and why, wrapped at 72 columns. Reference the plan file by path so the
-reasoning is one link away. Do not paste the plan into the commit message.
-
-## 4. Push
+Section 7 of the plan file: the commit subjects of this round and the branch they are on.
 
 ```bash
 git push -u origin <branch>
@@ -70,15 +65,10 @@ retry on a rejection — a rejection means something is wrong rather than slow, 
 **This repository is public. Pushing is publishing.** Nothing in the diff should be
 anything the user would not want read by a stranger.
 
-## 5. Record it
-
-Section 7 of the plan file: the commit subjects and the branch pushed to. Commit that
-update too, or the record is one commit behind the thing it records.
-
 ## Stop here
 
 1. Mark step 7 `done` and set the marker to `<!-- claude-plan step=8 status=active -->`.
-2. Report: the commits, the branch, and the remote it went to.
-3. End the turn.
-
-Do not open a pull request. The user opens step 8 with `/recommend`.
+   Commit that with subject `Ship: <title>` — the last commit of the round — and push.
+2. Report, in the `/build` contract: `STATUS`, and a `TRACE` with the four checks and
+   their results, the pass count, and the round's commit list.
+3. End. `/build` reports the round and opens step 8; do not open a pull request.

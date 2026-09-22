@@ -4,7 +4,7 @@
 
 | Field | Value |
 |---|---|
-| Feature | `git-guard` (the folder) |
+| Feature | `fix/guard-git-parsing` (the folder) |
 | Round | `1` |
 | Branch | `claude/setup-recommendations-qoyxhf` |
 | Started | `2026-09-21` |

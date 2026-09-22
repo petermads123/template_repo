@@ -4,9 +4,9 @@ Findings from a review of this repo's Claude configuration (`.claude/`, the hook
 ruleset, `pyproject.toml`), September 2026.
 
 This is **not** a plan file. It carries no `claude-plan` marker and lives outside
-`docs/plans/`, which is the only directory `.claude/hooks/plan_state.py` scans — so nothing
+`development/`, which is the only directory `.claude/hooks/plan_state.py` scans — so nothing
 here affects the pipeline's state. Items graduate out of this file by becoming a plan
-folder under `docs/plans/`, at which point delete the entry here.
+folder under `development/`, at which point delete the entry here.
 
 | Status | Meaning |
 |---|---|
@@ -18,14 +18,15 @@ folder under `docs/plans/`, at which point delete the entry here.
 
 ## 1. `guard_git.py` fails open on quoted shell separators — **shipped**
 
-Graduated to `docs/plans/git-guard/` and merged to `main` on 2026-09-22 as `e155ea4`. The
+Graduated to `development/fix/guard-git-parsing/` and merged to `main` on 2026-09-22 as
+`e155ea4`. The
 full diagnosis, the design and the evidence live in the two round files; repeating them here
 would be two records of one thing, drifting apart.
 
 Both defects are fixed, and the rounds closed eight further holes the first diagnosis had
 not found. `sudo -u me git push origin main` is still allowed — a documented limit with a
 test asserting it, not an oversight. Three follow-ups are deferred in
-`docs/plans/git-guard/02-command-recognition.md` §8, of which **R6** is the one worth
+`development/fix/guard-git-parsing/02-command-recognition.md` §8, of which **R6** is the one worth
 opening first: `current_branch` returns `""` both for a detached HEAD, where allowing a
 commit is correct, and for "git could not answer", where it is the original fail-open shape
 by another road.
@@ -50,12 +51,10 @@ misfires — they are simply dead text. Worth a prose cleanup eventually; not ur
 
 ## 3. Cheap, high value — **proposed**
 
-### 3.1 `.gitignore` entries for `.claude/`
+### 3.1 ~~`.gitignore` entries for `.claude/`~~ — **done**
 
-`.gitignore` has no `.claude/` rules, so `.claude/.skip-gate` (a deliberate bypass of every
-quality check) and `.claude/settings.local.json` can both be committed. `/ship` step 2
-handles this by asking Claude to *notice* `.skip-gate` in `git status`; two ignore lines
-cannot forget. Routing: `/small-change` (no file added, no behaviour change).
+Shipped with the autonomous-pipeline work: `.claude/.skip-gate` and
+`.claude/settings.local.json` are ignored, so neither can be committed by accident.
 
 ### 3.2 A `PreCompact` hook
 
@@ -72,11 +71,11 @@ of state the whole system turns on visible at all times. Routing: `/feature` (ad
 
 ### 3.4 Two documentation drifts
 
-- `CLAUDE.md` claims "two active plans is a state the hooks will complain about, and
-  rightly". They do not. `plan_state.active_plan` explicitly treats it as "a mistake rather
-  than an error" and silently returns the most recently modified one; `stop_gate` has no
-  check. Either add the check to `gate_failures` — it is as mechanical as
-  `missing_init_files` — or soften the sentence.
+- ~~`CLAUDE.md` claims "two active plans is a state the hooks will complain about, and
+  rightly".~~ **Prose fixed** with the autonomous-pipeline work: it now says the session
+  brief reports it and the hooks then guess. What remains is the check itself:
+  `plan_state.active_plan` silently returns the most recently modified one and `stop_gate`
+  has no check. Adding it to `gate_failures` is as mechanical as `missing_init_files`.
 - `.claude/rules/python.md` spends roughly sixty lines mandating `main()` plus the
   `if __name__` guard on every module. Nothing verifies it.
 
@@ -95,11 +94,10 @@ Routing: the prose fix alone is `/small-change`; adding either check to the stop
 | Item | Why | Routing |
 |---|---|---|
 | ~~Tests for `plan_state.py` and `stop_gate.py`~~ — **done**, `e155ea4` | Shipped with the git-guard work rather than as a later round: 291 tests now cover all three substantial hooks, where there were none. | — |
-| `gh` is an undeclared hard dependency | `create-pr` shells out to `gh pr create`/`gh pr edit` and `repo-setup` wants `gh api`. Nothing checks for it, and on Claude Code on the web it does not exist — steps 9 and 10 simply fail there. Either have `repo-setup` verify it, or ship a `.mcp.json` pinning the GitHub MCP server so the PR steps behave identically on every surface. | `/feature` |
+| ~~`gh` is an undeclared hard dependency~~ — **done** | `create-pr` and `repo-setup` now say "the GitHub MCP tools where they are available, `gh` where it is", which is how PR #6 and #7 were actually opened. A `.mcp.json` pinning the GitHub MCP server would make the two surfaces identical; not needed until one of them fails. | — |
 | `CODEOWNERS` | `main_protect.collab.json` can set `require_code_owner_review`, and the collab ruleset is offered without the file that gives it meaning. Also auto-routes the approver named in `CLAUDE.md`. | `/small-change` |
 | ~~Pin the toolchain~~ — **done**, `e155ea4` | It happened exactly as predicted while the git-guard work was in flight: a Ruff release added formatting of Python inside Markdown and turned the gate red on `.claude/rules/python.md`, prose nobody had edited. Now pinned to `ruff>=0.16,<0.17`, `mypy>=2.3,<3`, `pytest>=9.1,<10`, with the reason recorded in `pyproject.toml` so a future reader does not undo it. | — |
 | Portability | `.vscode/settings.json` hardcodes `.venv\Scripts\python.exe`, the documented commands are PowerShell, and `settings.json` invokes hooks as bare `python`. `venv_tool` correctly probes both layouts, so the hooks themselves are fine — but where the interpreter is `python3` only, all four hooks fail silently, which is a poor failure mode for the machinery enforcing every rule. | `/feature` |
 | `/bugfix` skill | Ten steps cover building a feature and the routing table has exactly two destinations. A reported bug is neither cosmetic nor a fresh concept, so it all lands in `/feature` today. | `/feature` |
 | `/release` skill | Nothing manages `version = "0.1.0"`. No tag, no changelog. | `/feature` |
 | `/audit` skill | The git history contains "Fix the inconsistencies a full audit of the repo turned up" — that audit was ad hoc, and the drifts in 3.4 are the same class of thing recurring. Make it repeatable. | `/feature` |
-| `plan-critic` agent | Both existing subagents feed steps 4 to 6, after the code exists. Step 2 is where design errors are cheapest to catch and has no adversarial read at all. Fits the "different model from the one that wrote it" principle already used at step 6. | `/feature` |

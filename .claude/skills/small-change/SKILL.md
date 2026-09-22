@@ -28,18 +28,18 @@ Borderline cases worth naming out loud: renaming a *public* name is not small, b
 changes a signature and `STRUCTURE.md`. Renaming a local variable is. Rewording a docstring
 is small; changing what it documents means the behavior changed and it is not.
 
-This skill runs on `opus` at `high` — the only Sonnet-free path outside the pipeline's
-judgment steps. That is deliberate: step 1 below is the single highest-stakes call in the
-whole setup, because it is the one decision made with none of the pipeline's safety nets
-behind it. Everything downstream of a wrong "yes, that's small" is skipped rather than
-caught.
+This skill runs on `opus` at `high`, like the pipeline's own judgment steps. That is
+deliberate: step 1 above is the single highest-stakes call in the whole setup, because it
+is the one decision made with none of the pipeline's safety nets behind it. Everything
+downstream of a wrong "yes, that's small" is skipped rather than caught.
 
 ## 2. Know that the gate is strict here
 
 With no active plan file, `.claude/hooks/stop_gate.py` holds its strict line: any turn that
 touched Python must leave ruff, mypy, pytest and `STRUCTURE.md` in order before it can end.
-That is deliberate. The pipeline earns its phased leniency by having steps 4 to 6 ahead of
-it; this path has nothing ahead of it, so it pays in full and immediately.
+That is deliberate. The pipeline earns its leniency through step 7 by having the build's
+own gates ahead of it; this path has nothing ahead of it, so it pays in full and
+immediately.
 
 ## 3. Make the edit
 

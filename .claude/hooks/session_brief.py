@@ -1,9 +1,10 @@
 """SessionStart hook: tell a fresh session where the pipeline left off.
 
-The ten-step workflow deliberately stops after every step, so a session almost
-always starts in the middle of something. Rather than relying on the user to
-remember the state — or on Claude to guess it — this hook reads the active plan
-file and injects a short brief as session context.
+The ten-step workflow stops for the user after steps 1, 2 and 8, and the build
+block in between can halt to ask, so a session often starts in the middle of
+something. Rather than relying on the user to remember the state — or on Claude
+to guess it — this hook reads the active plan file and injects a short brief as
+session context.
 
 Silent when nothing is in flight: a repo with no active plan starts clean.
 
@@ -23,11 +24,11 @@ from plan_state import STEP_NAMES, Plan, all_plans, current_branch, feature_roun
 STEP_SKILLS: dict[int, str] = {
     1: "/conceptualize",
     2: "/plan",
-    3: "/implement",
-    4: "/verify",
-    5: "/test",
-    6: "/concept-check",
-    7: "/ship",
+    3: "/build",
+    4: "/build",
+    5: "/build",
+    6: "/build",
+    7: "/build",
     8: "/recommend",
     9: "/create-pr",
     10: "/watch-pr",
@@ -80,8 +81,9 @@ def brief(project_dir: Path, plan: Plan) -> str:
         )
 
     lines.append(
-        "\nRead the plan file before doing anything to it. The pipeline never "
-        "advances on its own — finish the current step, then stop and wait."
+        "\nRead the plan file before doing anything to it. Steps 1, 2 and 8 wait "
+        "for the user; steps 3 to 7 run as one block under `/build`, which "
+        "resumes from the step above and halts only to ask."
     )
     return "\n".join(lines)
 
