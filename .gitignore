@@ -212,3 +212,6 @@ __marimo__/
 # Claude Code: the gate bypass and per-machine settings are never shared
 .claude/.skip-gate
 .claude/settings.local.json
+
+# The /build skill is a directory named build; the Python rule above must not swallow it
+!.claude/skills/build/
