@@ -17,16 +17,27 @@ your brief.
 
 ## 1. Find the cases
 
-For each public function, delegate edge-case discovery rather than guessing at it:
+For each public function, delegate edge-case discovery rather than guessing at it — to two
+designers at once, with different briefs, so the list is not one reader's blind spots:
 
 ```
-Agent with subagent_type: "test-designer"
+Agent with subagent_type: "test-designer"   brief: input-space
+Agent with subagent_type: "test-designer"   brief: contract
 ```
 
-Give it the signature, the docstring and the body, and ask for at most fifteen cases — a
-longer list is padding. It returns a ranked list of concrete inputs with expected results,
-plus any contradiction it found between the docstring and the code. **You** write the test
-code — the agent is read-only, so the suite stays in one voice.
+Both are read-only, so run them in parallel. Give each the signature, the docstring, the
+body, the plan file's path, and its brief by name; ask each for at most fifteen cases — a
+longer list is padding. The **input-space** designer works the parameters: limits, either
+side of them, shapes the author did not imagine. The **contract** designer works the
+promises: the docstring, the `Raises:`, the acceptance criteria that name the function,
+and what its callers rely on. Each returns a ranked list of concrete inputs with expected
+results, plus any contradiction it found between what the function promises and what it
+does.
+
+Merge the two lists: drop duplicates, keep the sharper of two cases that prove the same
+thing, and keep every contradiction from either — a contradiction only one designer saw is
+exactly why there are two. **You** write the test code — the agents are read-only, so the
+suite stays in one voice.
 
 Its findings go through this checklist, which is the repo's standard. Include every row
 that applies to the function in front of you:

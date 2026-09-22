@@ -67,6 +67,22 @@ The user is not watching the build, so each step reports a **trace** — a line 
 module, class, function and test group it produced — and `/build` relays every trace to the
 chat verbatim as the step returns. That is their window into the work.
 
+### More eyes where the work diverges
+
+Most steps have one right answer and one agent is enough. Three do not, and there a second
+reader is cheap insurance against one author's blind spots:
+
+| Step | Extra readers | Why there |
+|---|---|---|
+| 2 Plan | one `plan-critic` | The plan is the last thing anyone re-thinks before the build runs unattended |
+| 5 Test | two `test-designer` briefs, `input-space` and `contract` | Edge cases from the parameters and from the promises are different lists |
+| 6 Concept check | none extra | Running as its own subagent already makes it an independent read |
+| 8 Recommend | three `brainstormer` lenses, `user`, `maintainer`, `integrator` | Follow-ups are opinion; three opinions that disagree are worth more than one |
+
+Read-only agents run in parallel; anything that writes runs alone. The calling step merges
+what comes back, applies or rebuts each finding on the record, and stays the one voice in
+the code and the plan file.
+
 ### Each step picks its own model
 
 Every skill pins a model and effort in its frontmatter, so a step runs on what it needs
@@ -176,7 +192,9 @@ belongs back at step 1, and saying so — as a halt, from inside the build — i
 | Rename, docstring wording, plot styling, message text, formatting | `/small-change` |
 | Resuming work already in flight | The step's own skill, or `/feature` to check state |
 | A build that halted, once the question is answered | `/build` |
-| Need edge cases for a function | `test-designer` subagent |
+| Need edge cases for a function | `test-designer` subagent, `input-space` or `contract` brief |
+| A plan that needs a second reader | `plan-critic` subagent |
+| Follow-ups for a finished feature | `brainstormer` subagent, one lens per run |
 | STRUCTURE.md looks out of sync with the code | `structure-auditor` subagent |
 | Broad "where is X" search across the repo | built-in `Explore` subagent |
 

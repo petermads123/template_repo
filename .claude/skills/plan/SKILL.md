@@ -70,7 +70,7 @@ belong in `STRUCTURE.md`.
 
 ## 5. Check the coverage
 
-Before stopping, verify explicitly and state the result:
+Before going further, verify explicitly and state the result:
 
 - every acceptance criterion is covered by at least one Public API entry,
 - every acceptance criterion is covered by at least one test intent,
@@ -79,6 +79,30 @@ Before stopping, verify explicitly and state the result:
 A gap in either direction means the plan and the concept disagree. Fix the plan, or go back
 to step 1 and say why — do not quietly widen the concept to fit the design.
 
+## 6. Have it criticised
+
+Once the plan is written and section 5 passes, hand it to a second reader before the user
+sees it:
+
+```
+Agent with subagent_type: "plan-critic"
+```
+
+Give it the plan file's path. It reads section 1 before section 2, checks the plan against
+the concept and against the repo, and returns ranked findings — coverage gaps, awkward
+signatures, decisions the build will halt on, code the plan reimplements — with a verdict.
+
+Then, for every finding, either **apply** it to section 2 or **rebut** it in one sentence.
+Record both in a short **Critique** list at the end of section 2: the finding, and what was
+done. A rebuttal is a legitimate outcome; a finding silently dropped is not, because the
+user is about to accept this plan on the strength of it having been read twice.
+
+If the critic's verdict is **back to step 1**, that is a real answer: say so, name the
+criterion, and stay on step 2 until the user has decided. Do not present a plan for
+acceptance over a concept the critic has shown to be unsettled.
+
+Re-run section 5 if applying a finding changed the Public API or the test intents.
+
 ## Stop here
 
 The full plan is in the file. The chat gets the high-level version:
@@ -86,8 +110,9 @@ The full plan is in the file. The chat gets the high-level version:
 1. Commit and push the plan file: subject `Plan: <title>`, body naming the round file.
    The marker stays on step 2 — the plan is written, not accepted.
 2. Report: the chosen approach in a sentence, the modules to be touched, the public
-   signatures, the test intents in a line each, the risks, and the coverage result from
-   step 5. Then ask the user to accept it, and say plainly what acceptance means: steps 3
+   signatures, the test intents in a line each, the risks, the coverage result from
+   step 5, and the critic's findings with what was done about each. Then ask the user to
+   accept it, and say plainly what acceptance means: steps 3
    to 7 run without further questions, and halt only for something that would change the
    concept or a gate that fails twice the same way.
 3. End the turn.

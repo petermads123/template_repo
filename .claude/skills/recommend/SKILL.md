@@ -20,25 +20,33 @@ outcome as a whole.
 
 ## 1. Look at the finished feature, not the diff
 
-Read section 1 and run the showcase. Then think about it as a user of the code rather than
-its author. Productive angles:
+Read section 1 and run the showcase. Then get three readings of it that are not yours, in
+parallel — all three are read-only:
 
-- **Adjacent capability** — the obvious next thing someone will ask for once they have
-  this. Often the strongest recommendation on the list.
-- **Ergonomics** — a signature that works but is awkward to call; a default that will be
-  overridden every time; an error a caller cannot act on.
-- **Robustness** — an input class the concept declared out of scope that is going to turn
-  up anyway.
-- **Reach** — a connection to an existing module that would multiply the value of both.
-- **Debt this created** — duplication introduced to keep the change small, a `TODO` left
-  behind, a test that covers the case rather than the rule.
-- **Debt this exposed** — something already wrong in the repo that this work ran into.
+```
+Agent with subagent_type: "brainstormer"   lens: user
+Agent with subagent_type: "brainstormer"   lens: maintainer
+Agent with subagent_type: "brainstormer"   lens: integrator
+```
+
+Give each the plan file's path and its lens by name. The **user** lens asks what someone
+calling this tomorrow will need next and what is awkward to call; the **maintainer** lens
+asks what debt this created or exposed and what the next change will break; the
+**integrator** lens asks which existing module would multiply the value of both and where
+data leaves in the wrong shape. Each returns three to five recommendations with evidence,
+and any bug it found under a separate heading.
+
+Add your own angle, which the lenses do not cover because only the plan file shows it:
+
 - **What the build halted on or worked around** — the `Halted` section and section 3's
   deviations are a list of places the plan was thinner than the code needed.
 
-## 2. Rank them
+## 2. Merge and rank them
 
-Fill section 8. Order by value to the product, not by ease:
+Combine the three lists with your own. Drop duplicates, keep the better-evidenced of two
+that say the same thing, and note where two lenses disagreed — a recommendation the user
+lens wants and the maintainer lens warns against is worth showing the user as exactly
+that. Then fill section 8, ordered by value to the product, not by ease:
 
 | # | Recommendation | Why it helps | Effort | Decision |
 |---|---|---|---|---|
@@ -52,9 +60,10 @@ invented recommendation costs the user real time to evaluate.
 
 ## 3. What does not belong here
 
-**A bug is not a recommendation.** Anything actually broken goes back through `/build`
-from step 3 and gets fixed before the pull request. Do not let a defect leave this step
-wearing a "future improvement" label.
+**A bug is not a recommendation.** Anything actually broken — found by you or under a
+brainstormer's **Bugs** heading — goes back through `/build` from step 3 and gets fixed
+before the pull request. Do not let a defect leave this step wearing a "future improvement"
+label.
 
 Neither is anything already agreed in section 1 and not built — that is an unmet acceptance
 criterion, and step 6 should have caught it.

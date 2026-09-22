@@ -174,6 +174,11 @@ resumes once you answer. While it runs you get a trace — a line or two per mod
 function and test group as each step lands — so you can see what was built without reading
 the diff.
 
+Where the work genuinely diverges, more than one agent reads it: a plan critic reads the
+plan against the concept before you accept it, two test designers with different briefs
+find the edge cases at step 5, and three brainstormers with different lenses propose the
+follow-ups at step 8. The calling step merges what they find and stays the single voice.
+
 Step 9 requests your review on the PR it opens. **Claude never merges on its own judgment,
 and never on an approval alone** — a PR reaches `main` either because you pressed the button
 or because you explicitly told Claude to. An approval says the change is wanted, not that it

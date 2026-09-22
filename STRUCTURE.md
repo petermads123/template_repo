@@ -216,7 +216,9 @@ its entry here is deleted in the same change.
 | `skills/create-pr/` | `/create-pr` — step 9, pull request ready for review |
 | `skills/watch-pr/` | `/watch-pr` — step 10, hourly review watch until merge or close |
 | `skills/small-change/` | `/small-change` — cosmetic edits, outside the pipeline |
-| `agents/test-designer.md` | Read-only subagent that finds edge cases (feeds step 5) |
+| `agents/plan-critic.md` | Read-only subagent that reads a plan against its concept and the repo before the user accepts it (feeds step 2); pinned to `opus` |
+| `agents/test-designer.md` | Read-only subagent that finds edge cases; run twice at step 5 with the `input-space` and `contract` briefs |
+| `agents/brainstormer.md` | Read-only subagent that proposes follow-ups through one lens — `user`, `maintainer` or `integrator`; three run in parallel at step 8 |
 | `agents/structure-auditor.md` | Read-only subagent that reconciles this file (feeds steps 4 and 6) |
 
 ### `.claude/hooks/plan_state.py`
