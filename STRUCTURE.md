@@ -21,8 +21,10 @@ against the `.py` files on disk and blocks on a mismatch. It only sees file-leve
 signature drift is on you, or run the `structure-auditor` subagent.
 
 That covers `src/`, `tests/` and `.claude/hooks/`. The hooks are documented here with full
-signature tables and are type-checked like the package (`[tool.mypy] files` names all
-three), so they are held to the same standard despite not being installable.
+signature tables, type-checked like the package (`[tool.mypy] files` names all three) and
+importable from the suite (`[tool.pytest.ini_options] pythonpath` names `src` and
+`.claude/hooks`, so a test imports a hook by module name the same way a sibling hook does
+at runtime), so they are held to the same standard despite not being installable.
 
 ## Growth
 
@@ -39,6 +41,7 @@ src/                    everything installable; nothing outside it is packaged
   template_repo/        the package itself (rename this to <package_name>)
 tests/                  pytest suite, one test_<module>.py per module
 docs/plans/             one folder per feature, one file per round: the pipeline's state
+docs/BACKLOG.md         known defects and proposed setup work, not yet in the pipeline
 .claude/                Claude Code configuration: rules, skills, agents, hooks
 .vscode/                editor config (Ruff as formatter, format on save)
 pyproject.toml          packaging, Ruff, mypy and pytest configuration
@@ -89,6 +92,63 @@ All tests live here and nowhere else — `testpaths = ["tests"]` in `pyproject.t
 `pytest` collects nothing outside this directory, and the stop gate blocks on a test file
 found anywhere else.
 
+### `tests/test_guard_git.py`
+
+Covers `.claude/hooks/guard_git.py`, and is the regression suite for the parsing defect
+that prompted round 1. `segments` for quoting, every separator, a separator glued to a word or
+to a newline, a run of newlines, a newline inside a quoted message, a `#` inside a word,
+and input that cannot be lexed at all; `git_subcommand` for each spelling of the executable and the options that
+hide the subcommand; `push_targets_main` for every refspec shape that reaches `main`;
+`switch_target` for both subcommands, their new-branch options, an option left without a
+value and a file restore; `violation` for the whole behavioural matrix — punctuation in a commit
+message, a branch switch trusted across `&&` and across an `&&` ending a line but distrusted
+across everything else, including a mixed run such as `; &&`, a subshell that has closed and
+another repository reached with `-C`; commands hidden behind grouping delimiters; unreadable
+input, matched on word boundaries so `committee` is not a commit; and every refusal that held
+before the rewrite. `main` is exercised end to end against a throwaway repository: a commit on
+`main` refused with exit 2 and the reason on stderr, a commit allowed after branching and off
+`main`, payloads that are not a git command, an unparseable payload, and a byte-order mark.
+
+Round 2's cases follow: a commit or push hidden behind variable assignments, behind each
+redirection form including `2>&1`, inside backticks and `$( )`, and under each of the five
+wrapper programs; the executable in five spellings and cases; each push option whose value
+would otherwise be read as the remote; `@` and `refs/heads/main` reduced to the branches
+they name; an unresolvable switch refusing from either branch with its own message; and the
+commands that must stay allowed — `echo git commit`, `grep push log.txt`,
+`sudo apt install git`, `time ls`, and a commit message naming both `sudo` and `git push`.
+One test asserts a documented miss rather than a fix: `sudo -u me git push` is allowed,
+because only options are skipped after a wrapper and never a bare word.
+
+### `tests/test_plan_state.py`
+
+Covers `.claude/hooks/plan_state.py`. `parse` against a complete marker, a file with none,
+a step outside 1-10, an uppercase status, a missing Branch row, a missing title and an
+unreadable path; `all_plans` for recursion, modification-time ordering and relative paths;
+`active_plan` for none, one and several active at once; `feature_rounds` for round ordering,
+feature isolation and an unknown feature; `git_lines`/`current_branch` against a throwaway
+repository, including a detached HEAD and a directory that is not a repository at all; and
+`main` printing the plans it finds, with one active and with none. `Plan.step_name` and
+`Plan.gated` are covered either side of `GATE_FROM_STEP`.
+
+### `tests/test_stop_gate.py`
+
+Covers `.claude/hooks/stop_gate.py`. `venv_tool` for both layouts, neither, and which wins
+when both exist; `capture` for output, a non-zero exit and an expired timeout;
+`changed_python_files` and `tracked_python_files` against a throwaway repository, including
+a rename, a `.gitignore` and work committed on a branch; `structure_problems` in both
+directions plus placeholder paths; `stray_test_files`; `missing_init_files`; and
+`advisory_notes`, `notice` and `block`; `enforce` for blocking on one failure, for gathering
+every check's problems into a single reason, and for returning quietly when all four pass; and
+`main` for an unreadable payload, a turn already blocked once, the `.skip-gate` escape hatch,
+enforcement with no plan and Python changed, and the advisory path below the gate step.
+
+`gate_failures` is driven through a monkeypatched `venv_tool` and `capture` rather than
+real executables. Running it for real would invoke Ruff, mypy and `pytest` from inside
+`pytest`, and building stub executables would need a shell script on POSIX and an `.exe` on
+Windows. `enforce` and `main` are driven the same way, with the four checks monkeypatched, so
+neither reaches a real tool either.
+
+
 ## Plans: `docs/plans/`
 
 One folder per feature, one numbered file per round inside it, created by `/feature` from
@@ -97,9 +157,9 @@ One folder per feature, one numbered file per round inside it, created by `/feat
 ```
 docs/plans/
   TEMPLATE.md                     copied for each new round; never itself active
-  csv-export/
-    01-csv-export.md              round 1
-    02-streaming-writer.md        round 2, opened from a step 8 recommendation
+  git-guard/
+    01-git-guard.md               round 1, the parsing rewrite
+    02-command-recognition.md     round 2, opened from round 1's recommendations R1-R3
 ```
 
 Each file holds the concept and acceptance criteria, the plan, the verification and test
@@ -119,6 +179,17 @@ The first line after the title is the workflow's state and is read by the hooks:
 across the whole repo should be `active` — opening a round stands its predecessor down to
 `done`. Plan files are committed: they are the record of why the code looks the way it is,
 and `/create-pr` builds the pull request body from every round in the folder.
+
+## Backlog: `docs/BACKLOG.md`
+
+Findings from reviewing this repo's own Claude configuration: confirmed defects, proposed
+improvements, and decisions taken against. Deliberately **not** a plan file — it carries no
+`claude-plan` marker and sits outside `docs/plans/`, the only directory
+`.claude/hooks/plan_state.py` scans, so it cannot be mistaken for pipeline state.
+
+Each entry records its routing (`/feature` or `/small-change`) so picking one up does not
+mean re-deciding it. An item graduates by becoming a plan folder under `docs/plans/`, and
+its entry here is deleted in the same change.
 
 ## Claude configuration: `.claude/`
 
@@ -176,14 +247,53 @@ to re-explain it. Silent when no plan is active. Stdlib only.
 ### `.claude/hooks/guard_git.py`
 
 `PreToolUse` hook on `Bash`. Refuses a `git commit` or `git push` that would land on
-`main`, splitting compound commands so the second half of a `&&` chain is caught too.
-Allows anything it cannot confidently parse. Stdlib only.
+`main`. Reads the command the way a shell does — `shlex` resolves quoting, so a `;` or `|`
+inside a commit message stays part of the message — then splits it on the real separators
+into one invocation per segment. The grouping delimiters `(`, `)`, `{` and `}` split too, so
+a command hidden inside `(git commit -m "x")` is seen rather than left with `(` sitting
+where its name should be.
+
+Each segment is judged against the branch that will be checked out when it runs. Only `&&`
+guarantees its left side succeeded, so a branch switch carries forward across a run of
+separators that is `&&` and newlines, and across nothing else: `git checkout -b feat/x &&
+git commit` is allowed from `main`, and so is the same pair with the `&&` ending the line,
+while `;`, `|`, `||`, `&`, a bare newline or a mixed run such as `; &&` is refused. A switch
+that may not have taken effect here is distrusted the same way: one made inside a subshell
+that has since closed, or aimed elsewhere by a global `-C`, `--git-dir` or `--work-tree`,
+leaves the branch as it was. What still cannot be read is refused when it names `commit` or
+`push` — matched on word boundaries, so `committee` is not a commit — while `main` is
+checked out, and allowed anywhere else.
+
+Within a segment it finds the command name where a shell would, after the prefix of
+variable assignments and redirections, so `GIT_EDITOR=true git commit` and
+`>log git commit` are seen. Backticks around a substitution are stripped, the executable is
+matched without regard to case, and a short list of wrapper programs — `sudo`, `env`,
+`time`, `nohup`, `doas` — is stepped over. That list is deliberately incomplete: a wrapper
+nobody listed is a miss, which is safe, while scanning a segment for any `git` token would
+refuse `echo git commit`, which is the failure this module treats as worse. Only options are
+skipped after a wrapper, never a bare word, so an option that takes a value hides what
+follows it.
+
+A push's destination is read with the same care. The arguments are walked rather than
+filtered, so an option that takes a value — `-o`, `--push-option`, `--repo`,
+`--receive-pack`, `--exec` — does not leave its value standing where the remote should be,
+and `git push -o ci.skip origin` is seen as the bare push it is. Every ref is then reduced
+to the branch it names: a leading `+` dropped, the destination half of a `src:dst` pair
+taken, `refs/heads/` stripped, backticks removed and `@` read as `HEAD`. Switch targets go
+through the same reduction, so `git checkout refs/heads/main` is a switch to `main`.
+
+A branch switch whose target only the running shell can resolve — `git checkout -`,
+`@{-1}` — leaves the branch *unknown* rather than unchanged, and a `commit` or `push` that
+meets an unknown branch is refused with a message saying so rather than the one about
+`main`. Stdlib only.
 
 | Signature | Description |
 |---|---|
-| `segments(command: str) -> list[list[str]]` | Split a shell command into its invocations. |
-| `git_subcommand(tokens: list[str]) -> tuple[str, list[str]]` | Identify the git subcommand and its arguments. |
-| `push_targets_main(args: list[str], branch: str) -> bool` | Whether a push would update `main`. |
+| `Segment` | Frozen dataclass: `tokens` and the `separator` that preceded them — one of `SEPARATORS`, a newline, or a grouping delimiter (`""` for the first). |
+| `segments(command: str) -> list[Segment] \| None` | Split a command into invocations, or None if it cannot be read. |
+| `git_subcommand(tokens: tuple[str, ...]) -> tuple[str, tuple[str, ...]]` | Identify the git subcommand and its arguments. |
+| `push_targets_main(args: tuple[str, ...], branch: str) -> bool` | Whether a push would update `main`. |
+| `switch_target(subcommand: str, args: tuple[str, ...]) -> str` | The branch a `checkout`/`switch` moves to, `""` when it moves none, or the sentinel `UNRESOLVED` (`"?"`) for a target only the running shell can resolve — `-` and `@{-1}`. |
 | `violation(command: str, branch: str) -> str` | The reason to refuse, or `""` to allow. |
 | `main() -> None` | Entry point: allow or refuse the command. |
 

@@ -81,7 +81,7 @@ untangling nested literals.
 
   ```python
   resolution = "daily"  # "daily", "weekly", "monthly"
-  fill = "forward"      # "forward", "backward", "none"
+  fill = "forward"  # "forward", "backward", "none"
   ```
 
   It applies to enum members too: `period = Period.DAILY  # DAILY, WEEKLY, MONTHLY`.

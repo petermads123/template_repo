@@ -1,6 +1,6 @@
 """SessionStart hook: tell a fresh session where the pipeline left off.
 
-The nine-step workflow deliberately stops after every step, so a session almost
+The ten-step workflow deliberately stops after every step, so a session almost
 always starts in the middle of something. Rather than relying on the user to
 remember the state — or on Claude to guess it — this hook reads the active plan
 file and injects a short brief as session context.
