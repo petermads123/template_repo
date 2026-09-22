@@ -16,100 +16,23 @@ folder under `docs/plans/`, at which point delete the entry here.
 
 ---
 
-## 1. `guard_git.py` fails open on quoted shell separators — **confirmed**
+## 1. `guard_git.py` fails open on quoted shell separators — **shipped**
 
-**Severity: high.** This is the one control that stops a commit landing on `main` before it
-happens, and it can be walked past with ordinary punctuation.
+Graduated to `docs/plans/git-guard/` and merged to `main` on 2026-09-22 as `e155ea4`. The
+full diagnosis, the design and the evidence live in the two round files; repeating them here
+would be two records of one thing, drifting apart.
 
-### Reproduction
+Both defects are fixed, and the rounds closed eight further holes the first diagnosis had
+not found. `sudo -u me git push origin main` is still allowed — a documented limit with a
+test asserting it, not an oversight. Three follow-ups are deferred in
+`docs/plans/git-guard/02-command-recognition.md` §8, of which **R6** is the one worth
+opening first: `current_branch` returns `""` both for a detached HEAD, where allowing a
+commit is correct, and for "git could not answer", where it is the original fail-open shape
+by another road.
 
-Run from the repo root with `.claude/hooks` importable:
-
-```python
-from guard_git import violation, segments
-
-violation('git commit -m "Add parser; drop the old one"', "main")  # -> "" (ALLOWED)
-violation('git commit -m "Handle a|b correctly"', "main")  # -> "" (ALLOWED)
-violation('git commit -m "Fix && polish"', "main")  # -> "" (ALLOWED)
-```
-
-All three commit to `main` with the hook installed and enabled. For comparison,
-`git commit -m "Add the parser"` is correctly refused.
-
-### Root cause
-
-`segments()` splits the command with a regex that knows nothing about quoting:
-
-```python
-SEPARATORS = re.compile(r"&&|\|\||;|\n|\|")
-```
-
-A `;` or `|` inside a commit message is therefore treated as a shell separator.
-`git commit -m "Add parser; drop the old one"` is cut into `git commit -m "Add parser` and
-`drop the old one"`, both with unbalanced quotes. `shlex.split` raises `ValueError` on each
-and the handler drops them:
-
-```python
-except ValueError:
-    continue  # unbalanced quotes: not something to block on
-```
-
-`segments()` returns `[]`, the loop in `violation()` never executes, and the command is
-allowed. Confirmed by printing `segments(...)` for each case above: all return `[]`.
-
-The "allow what cannot be parsed" principle is right in general — a guard that blocks
-legitimate work is worse than one that misses an exotic invocation. The defect is that the
-parser *manufactures* the unparseable input and then fails open on its own damage.
-
-### Second defect, same file
-
-```python
-violation('git checkout -b feat/thing && git commit -m "Add the parser"', "main")
-# -> refused
-```
-
-The hook evaluates against the branch checked out *now*, not the branch that will be
-checked out when `commit` runs. So the standard recovery — branch, then commit, on one
-line — is refused while on `main`. The refusal message itself recommends
-`git checkout -b <type>/<kebab-case-topic>`, so following its advice in a compound command
-trips it. Lower severity than the fail-open, but it is the kind of false positive that ends
-with someone disabling the guard.
-
-### Fix approach
-
-Tokenize **first**, split **second**. `shlex.split` understands quoting, so run it over the
-whole command and partition the resulting token list on bare separator tokens, rather than
-regex-splitting the raw string and tokenizing the fragments.
-
-Two things that need pinning down with tests rather than assumed:
-
-- `shlex.split('git commit -m "a";git push')` glues the separator into a single token
-  (`a;git`) when it is not surrounded by whitespace. Separators adjacent to quoted text
-  need explicit handling.
-- The fail-open path must be kept for genuinely unparseable input (a real unbalanced quote
-  typed by hand), while no longer being reachable from well-formed commands.
-
-For the second defect: when a segment earlier in the same command switches branch
-(`checkout -b`, `checkout <branch>`, `switch -c`, `switch <branch>`), evaluate later
-segments against that branch instead of the current one.
-
-### Test cases to pin
-
-Commit messages containing `;`, `|`, `&&`, a newline, and a literal unbalanced quote; both
-quote styles; `git -C <path> commit`; `git checkout -b x && git commit`;
-`git checkout main && git commit`; `git push` bare on `main` and off it;
-`git push origin main`, `HEAD:main`, `refs/heads/main`, `+main`, `--all`, `--mirror`.
-
-### Routing
-
-**`/feature`** — changes behaviour and needs new tests, two of the four small-change
-disqualifiers. Proposed round 1 scope: fix both defects in `guard_git.py`, add
-`tests/test_guard_git.py` (the first test coverage the hooks have had), and add
-`pythonpath = ["src", ".claude/hooks"]` to `[tool.pytest.ini_options]` so the hooks are
-importable from the suite. `plan_state.py` and `stop_gate.py` coverage is round 2, not the
-same round.
-
----
+This entry stays as a pointer rather than being deleted outright, because the rule above
+says an item's entry goes when it graduates — and a reader who remembers the defect should
+find where it went rather than find nothing.
 
 ## 2. Continuous integration — **rejected**
 
@@ -157,6 +80,11 @@ of state the whole system turns on visible at all times. Routing: `/feature` (ad
 - `.claude/rules/python.md` spends roughly sixty lines mandating `main()` plus the
   `if __name__` guard on every module. Nothing verifies it.
 
+The prose half of this item is **done**: the three hooks that called this a "nine-step
+pipeline", `stop_gate`'s "steps 4 to 9", and `Plan.status` documented as three values when
+`template` is a fourth were all corrected and merged in `e155ea4`. What remains is the two
+*checks* — one active plan, and the `main()` guard rule — neither of which exists.
+
 Routing: the prose fix alone is `/small-change`; adding either check to the stop gate is
 `/feature`.
 
@@ -166,10 +94,10 @@ Routing: the prose fix alone is `/small-change`; adding either check to the stop
 
 | Item | Why | Routing |
 |---|---|---|
-| Tests for `plan_state.py` and `stop_gate.py` | The hooks are type-checked and documented in `STRUCTURE.md` with full signature tables, but `python.md` says every public function has tests and none of them do. Round 2 after item 1. | `/feature` |
+| ~~Tests for `plan_state.py` and `stop_gate.py`~~ — **done**, `e155ea4` | Shipped with the git-guard work rather than as a later round: 291 tests now cover all three substantial hooks, where there were none. | — |
 | `gh` is an undeclared hard dependency | `create-pr` shells out to `gh pr create`/`gh pr edit` and `repo-setup` wants `gh api`. Nothing checks for it, and on Claude Code on the web it does not exist — steps 9 and 10 simply fail there. Either have `repo-setup` verify it, or ship a `.mcp.json` pinning the GitHub MCP server so the PR steps behave identically on every surface. | `/feature` |
 | `CODEOWNERS` | `main_protect.collab.json` can set `require_code_owner_review`, and the collab ruleset is offered without the file that gives it meaning. Also auto-routes the approver named in `CLAUDE.md`. | `/small-change` |
-| Pin the toolchain | `pytest`, `ruff` and `mypy` are unbounded in `[project.optional-dependencies]`. A ruff release that adds rules to `E`/`B`/`SIM` turns the stop gate red on untouched code, and it presents as if your change broke something. | `/small-change` |
+| ~~Pin the toolchain~~ — **done**, `e155ea4` | It happened exactly as predicted while the git-guard work was in flight: a Ruff release added formatting of Python inside Markdown and turned the gate red on `.claude/rules/python.md`, prose nobody had edited. Now pinned to `ruff>=0.16,<0.17`, `mypy>=2.3,<3`, `pytest>=9.1,<10`, with the reason recorded in `pyproject.toml` so a future reader does not undo it. | — |
 | Portability | `.vscode/settings.json` hardcodes `.venv\Scripts\python.exe`, the documented commands are PowerShell, and `settings.json` invokes hooks as bare `python`. `venv_tool` correctly probes both layouts, so the hooks themselves are fine — but where the interpreter is `python3` only, all four hooks fail silently, which is a poor failure mode for the machinery enforcing every rule. | `/feature` |
 | `/bugfix` skill | Ten steps cover building a feature and the routing table has exactly two destinations. A reported bug is neither cosmetic nor a fresh concept, so it all lands in `/feature` today. | `/feature` |
 | `/release` skill | Nothing manages `version = "0.1.0"`. No tag, no changelog. | `/feature` |
