@@ -96,26 +96,25 @@ found anywhere else.
 Covers `.claude/hooks/guard_git.py`, and is the regression suite for the quoting defect
 its parser was rebuilt to fix. `segments` for quoting, every separator, a separator glued
 to a word or to a newline, a run of newlines, a newline inside a quoted message, a `#`
-inside a word,
-and input that cannot be lexed at all; `git_subcommand` for each spelling of the executable and the options that
-hide the subcommand; `push_targets_main` for every refspec shape that reaches `main`;
-`switch_target` for both subcommands, their new-branch options, an option left without a
-value and a file restore; `violation` for the whole behavioural matrix — punctuation in a commit
-message, a branch switch trusted across `&&` and across an `&&` ending a line but distrusted
-across everything else, including a mixed run such as `; &&`, a subshell that has closed and
-another repository reached with `-C`; commands hidden behind grouping delimiters; unreadable
-input, matched on word boundaries so `committee` is not a commit; and every refusal that held
-before the rewrite. `main` is exercised end to end against a throwaway repository: a commit on
-`main` refused with exit 2 and the reason on stderr, a commit allowed after branching and off
-`main`, payloads that are not a git command, an unparseable payload, and a byte-order mark.
+inside a word, and input that cannot be lexed at all; `git_subcommand` for each spelling
+of the executable and the options that hide the subcommand; `push_targets_main` for every
+refspec shape that reaches `main`; `switch_target` for both subcommands, their new-branch
+options, an option left without a value and a file restore; `violation` for the whole
+behavioural matrix — punctuation in a commit message, a branch switch trusted across `&&`
+and across an `&&` ending a line but distrusted across everything else, including a mixed
+run such as `; &&`, a subshell that has closed and another repository reached with `-C`;
+commands hidden behind grouping delimiters; unreadable input, matched on word boundaries
+so `committee` is not a commit; and every refusal that held before the rewrite. `main` is
+exercised end to end against a throwaway repository: a commit on `main` refused with exit
+2 and the reason on stderr, a commit allowed after branching and off `main`, payloads that
+are not a git command, an unparseable payload, and a byte-order mark.
 
 The command-recognition cases follow: a commit or push hidden behind variable assignments,
 behind each redirection form including `2>&1`, inside backticks and `$( )`, and under each
-of the five
-wrapper programs; the executable in five spellings and cases; each push option whose value
-would otherwise be read as the remote; `@` and `refs/heads/main` reduced to the branches
-they name; an unresolvable switch refusing from either branch with its own message; and the
-commands that must stay allowed — `echo git commit`, `grep push log.txt`,
+of the five wrapper programs; the executable in five spellings and cases; each push option
+whose value would otherwise be read as the remote; `@` and `refs/heads/main` reduced to
+the branches they name; an unresolvable switch refusing from either branch with its own
+message; and the commands that must stay allowed — `echo git commit`, `grep push log.txt`,
 `sudo apt install git`, `time ls`, and a commit message naming both `sudo` and `git push`.
 One test asserts a documented miss rather than a fix: `sudo -u me git push` is allowed,
 because only options are skipped after a wrapper and never a bare word.
