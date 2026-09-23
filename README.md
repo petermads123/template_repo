@@ -208,7 +208,8 @@ and never on an approval alone** — a PR reaches `main` either because you pres
 or because you explicitly told Claude to. An approval says the change is wanted, not that it
 should ship now. Once told, the instruction still waives nothing: it must not be stale
 (anything pushed since means you would be merging code you have not seen), no conflict, and
-every review thread resolved.
+every review thread resolved. Once a pull request has merged, by either route, Claude
+deletes its branch as part of closing out, after confirming the head is on `main`.
 
 Note that **GitHub lets nobody request a review from, or approve, their own pull request**.
 In a solo repo, where Claude pushes under your token, every PR is authored by you — so the
