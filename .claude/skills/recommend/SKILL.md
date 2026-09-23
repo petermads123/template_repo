@@ -20,8 +20,8 @@ outcome as a whole.
 
 ## 1. Look at the finished feature, not the diff
 
-Read section 1 and run the showcase. Then get three readings of it that are not yours, in
-parallel — all three are read-only:
+Read section 1 and run the showcase. Then get three readings of it that are not yours —
+four on a fix round — in parallel; all of them are read-only:
 
 ```
 Agent with subagent_type: "brainstormer"   lens: user
@@ -57,7 +57,7 @@ Add your own angle, which the lenses do not cover because only the plan file sho
 
 ## 2. Merge and rank them
 
-Combine the three lists with your own. Drop duplicates, keep the better-evidenced of two
+Combine the lenses' lists with your own. Drop duplicates, keep the better-evidenced of two
 that say the same thing, and note where two lenses disagreed — a recommendation the user
 lens wants and the maintainer lens warns against is worth showing the user as exactly
 that. Then fill section 8, ordered by value to the product, not by ease:
@@ -74,10 +74,16 @@ invented recommendation costs the user real time to evaluate.
 
 ## 3. What does not belong here
 
-**A bug is not a recommendation.** Anything actually broken — found by you or under a
-brainstormer's **Bugs** heading — goes back through `/build` from step 3 and gets fixed
-before the pull request. Do not let a defect leave this step wearing a "future improvement"
-label.
+**A bug in what this round built is not a recommendation.** Anything broken in the code
+this round's section 1 promised — found by you or under a brainstormer's **Bugs** heading —
+goes back through `/build` from step 3 and gets fixed before the pull request. Do not let
+such a defect leave this step wearing a "future improvement" label.
+
+A defect *outside* what this round promised is different: one section 1 put out of scope by
+name, one the `defect-class` lens found elsewhere in the repo, one in code this round never
+touched. Fixing it in the build would be drift — the concept check calls a fix that quietly
+widened exactly that — so it **is** a recommendation, and a round opened on it goes
+through `/fix`, below.
 
 Neither is anything already agreed in section 1 and not built — that is an unmet acceptance
 criterion, and step 6 should have caught it.
@@ -113,7 +119,10 @@ Then, in order:
    came from quoted in full, and what is already on the branch that it must not break.
 4. Commit and push both files, then invoke `/conceptualize` for the follow-up — or `/fix`
    when the recommendation is a defect, so the diagnosis comes first; it finds the round
-   file already open and hands to `/conceptualize` itself.
+   file already open and hands to `/conceptualize` itself. In that case also write
+   "Opened on a bug report — run `/fix` first" under **Builds on** before committing: a
+   session resumed from the marker is sent to step 1, and that line is what tells it a
+   diagnosis is still owed.
 
 The branch and the pull request carry every round. Step 6 of the new round re-checks this
 round's acceptance criteria as a regression pass, and step 9 builds the pull request body

@@ -53,7 +53,8 @@ Otherwise, one entry per problem, most expensive first:
 - **Evidence**: what you ran or read, with its output
 
 End with a one-line verdict: **cause confirmed**, **cause confirmed, class incomplete**,
-**different cause** with the line you arrived at, or **not reproduced**.
+**different cause** with the line you arrived at, **not a defect** with what says the
+current behaviour is intended, or **not reproduced**.
 
 You do not write to the repository. Run what you need from a scratch directory; `/fix`
 applies or rebuts each finding on the record.

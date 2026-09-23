@@ -21,10 +21,12 @@ and only then opens step 1 — which on a fix round has a **Defect** block to fi
 question to ask. It does not fix anything. The fix is the build's, once the concept and the
 plan are agreed like any other.
 
-A **fix round** is one whose section 1 carries a filled Defect block: every round in a
-`fix/` folder, and any later round in another folder that was opened on a bug report. Steps
-1, 2, 3, 5, 6 and 8 behave differently on one — `CLAUDE.md` has the table — and each reads
-that from the plan file: no hook and no marker changes.
+A **fix round** is one whose section 1 carries a filled Defect block, and nothing else
+marks it: a round this skill opens as round 1 takes the `fix/` prefix, a later round opened
+on a bug report gets the block whatever its folder is called, and a follow-up round that is
+not itself a defect has no block even in a `fix/` folder. Steps 1, 2, 3, 5, 6 and 8 behave
+differently on one — `CLAUDE.md` has the table — and each reads that from the plan file:
+no hook and no marker changes.
 
 ## 1. Look before starting
 
@@ -34,13 +36,19 @@ Same as `/feature`:
 ls development/*/*/
 ```
 
-**If a plan is `active` at step 2 or later**, report it and stop, as `/feature` would. A bug
-in the code that plan is building belongs to its build — step 5 fixes what its tests find —
-not to a second pipeline.
+**If a plan is `active` at step 1 whose Builds on says "Opened on a bug report — run
+`/fix` first"** and whose Defect block is empty, it is a round that step 8 or step 10
+opened for this defect — possibly in an earlier session. Diagnose into it: skip nothing
+below, and hand off to `/conceptualize` as usual, which will find the file already there.
 
-**If a plan is `active` at step 1 with section 1 still empty**, it is a round that step 8
-or step 10 just opened for this defect. Diagnose into it: skip nothing below, and hand off
-to `/conceptualize` as usual, which will find the file already there.
+**If any other plan is `active`**, report it and ask whether to resume or park it, as
+`/feature` does. A bug in the code that plan is building belongs to its build — step 5
+fixes what its tests find — not to a second pipeline.
+
+**If no plan is active but the current branch has an open pull request**, the report may
+be about what that branch shipped. Ask. If it is, open the round the way `/watch-pr`
+section 4 does — a new numbered file in that branch's folder, marked as opened on a bug
+report — and diagnose into it, rather than branching a fresh `fix/` round from `main`.
 
 **If the request is not a defect** — the user wants something that does not exist, or wants
 existing behaviour changed rather than corrected — say so and switch to `/feature`. The
@@ -50,8 +58,8 @@ verdict in section 2 catches the cases that only look like bugs.
 
 Read code freely; this is the one place before step 3 where the code is the subject. Write
 nothing into the tree: reproductions run from a scratch script or a one-liner, and the
-plan file does not exist yet. Produce every item below, in this order, and say plainly
-which you could not.
+plan file either does not exist yet or is waiting for step 1 to fill it. Produce every item
+below, in this order, and say plainly which you could not.
 
 ### Reproduce
 
@@ -117,6 +125,19 @@ One of:
 Say the verdict in one line with the evidence that decided it. The three routings are the
 point of diagnosing first: the pipeline should not be asked to fix what is not broken.
 
+**When a round was already opened for this defect** by step 8 or step 10, a verdict other
+than Defect has to deal with that file rather than leave it active and empty:
+
+- *Works as designed* and *Never decided* — the round is real, just not a fix. Hand to
+  `/conceptualize` as a feature round in the same file: it deletes the Defect block and
+  has the concept conversation. Say so.
+- *Prose only* and *Already fixed* — stand the round down. Delete the file, record the
+  outcome where the round came from (the decision column of the previous round's section
+  8, or a reply on the review thread), and if the previous round's marker was stood down
+  to open this one, set it back to `<!-- claude-plan step=9 status=active -->` so the
+  pipeline resumes at the pull request. Commit and push. A live marker left on an empty
+  round would reach `main` with the branch.
+
 ## 3. Have it criticised
 
 ```
@@ -131,7 +152,8 @@ site, and whether the class is complete. It returns ranked findings and a verdic
 Apply or rebut each finding in one sentence, on the record — the list goes into the Defect
 block's **Critique** line with the diagnosis. A rebuttal is a legitimate outcome; a finding
 silently dropped is not. If its verdict is **not reproduced** or **different cause**, go
-back to section 2 before going on.
+back to section 2 before going on; if it is **not a defect**, re-decide the verdict in
+section 2 against what it found, and route accordingly.
 
 ## 4. Hand off to step 1
 

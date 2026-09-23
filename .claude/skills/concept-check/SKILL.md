@@ -49,8 +49,13 @@ Section 1 carries a Defect block, and three of its criteria need evidence of a p
 shape:
 
 - **The reproduction criterion.** The red run step 3 pasted into section 3, and the same
-  test green now. A test that was never seen red is not evidence the bug was there, and a
-  section 3 with no red run means step 3 skipped it — send the work back.
+  test green now. A test that was never seen red is not evidence the bug was there. If
+  section 3 has no red run, step 3 skipped it, and sending the work back cannot recover
+  it — the fix is already committed, and a re-run step 3 would find the reproduction green
+  and halt for the wrong reason. Reconstruct it instead: check the commit before step 3's
+  out into a `git worktree`, run the reproduction test against it, paste that failure into
+  section 3 with a note that step 6 produced it, and remove the worktree. If the test
+  passes there too, the reproduction does not reproduce and section 1 is wrong — halt.
 - **The regression criterion.** A green suite is necessary and not sufficient: the suite
   was written before the bug existed and did not catch it. Cite at least one more thing,
   and say which: every row of the Blast radius checked with its outcome; the showcase

@@ -16,13 +16,19 @@ quietly settles questions the concept has not asked yet. The one thing this step
 choose is the branch, because the scope it settles is what the branch is named for.
 
 **On a fix round the code is the subject, and reading it is required rather than
-forbidden.** A fix round is one whose section 1 carries a **Defect** block: every round in
-a `fix/` folder, and a later round in any folder that was opened on a bug report. `/fix`
-has already reproduced the defect, found its cause, sized the class of inputs it breaks and
-had a `diagnosis-critic` read the diagnosis; that diagnosis arrives with the invocation and
-fills the Defect block before the conversation starts. A concept for a fix names the line
-it fixes. Writing code still waits for step 3. On a feature round, delete the Defect block
-from the round file.
+forbidden.** A fix round is one whose section 1 carries a filled **Defect** block, and
+nothing else marks it. `/fix` has already reproduced the defect, found its cause, sized the
+class of inputs it breaks and had a `diagnosis-critic` read the diagnosis; that diagnosis
+arrives with the invocation and is the Defect block's starting content — it reaches disk
+with the rest of section 1 when the user confirms, like everything else this step
+produces. A concept for a fix names the line it fixes. Writing code still waits for step 3.
+On a feature round, delete the Defect block from the round file.
+
+**A round opened for a defect that has no diagnosis yet** — its Builds on section says
+"Opened on a bug report — run `/fix` first" and the Defect block is empty — is not ready
+for this step. Invoke `/fix`; it diagnoses into the file and hands back here. This is what
+a session resumed after a context reset needs, because the session brief sends step 1 here
+and nothing on disk would otherwise say a diagnosis was owed.
 
 ## 1. Ground yourself
 
@@ -128,8 +134,8 @@ Once the scope is settled, propose the branch, using the convention in `CLAUDE.m
 work *is*, not what it does to the repo. `feat/csv-export`, not `feat/add-csv-module`.
 Include it in the confirmation message so the user reacts to it with the rest.
 
-A fix round's prefix is `fix/`, and the topic names the defect rather than the ticket:
-`fix/guard-git-parsing`, not `fix/bug-12`.
+A round 1 opened by `/fix` takes the `fix/` prefix, and the topic names the defect rather
+than the ticket: `fix/guard-git-parsing`, not `fix/bug-12`.
 
 A later round keeps the branch its folder is named for. There is nothing to choose.
 

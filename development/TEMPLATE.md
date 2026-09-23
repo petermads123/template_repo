@@ -50,7 +50,9 @@ Statuses: `pending`, `in progress`, `done`.
 
 > Round 1 writes "Nothing — this is the first round." and moves on. A later round fills
 > this in before step 1 starts, because its concept is a change to something that already
-> exists and is already on the branch.
+> exists and is already on the branch. A later round opened on a bug report also carries
+> the line "Opened on a bug report — run `/fix` first" until the Defect block is filled,
+> so a session resumed from the marker knows a diagnosis is still owed.
 
 | Round | File | What it delivered |
 |---|---|---|
@@ -71,12 +73,12 @@ What is already on the branch that this round must not break:
 
 ### Defect
 
-> Fix rounds only — every round in a `fix/` folder, and a later round in any folder that
-> was opened on a bug report. Delete this block on a feature round; its presence is what
-> marks a round as a fix round to every step after this one. Filled from the `/fix` diagnosis
-> before the conversation starts, and agreed with the user like the rest of section 1. The
-> root cause is on the halting line: a build that finds a different cause halts rather than
-> fixing what it found.
+> Fix rounds only — a round 1 that `/fix` opened, or a later round opened on a bug report,
+> whatever its folder is called. Delete this block on a feature round; its presence, filled,
+> is the only thing that marks a round as a fix round to every step after this one. Its
+> starting content is the `/fix` diagnosis, agreed with the user like the rest of section 1
+> and written to disk with it. The root cause is on the halting line: a build that finds a
+> different cause halts rather than fixing what it found.
 
 | Field | Value |
 |---|---|
@@ -239,8 +241,10 @@ Drift found, and what was done about it:
 
 ## 8. Recommendations
 
-> Written in step 8. Follow-up work this change makes possible or desirable. Not bugs —
-> a bug found here goes back through `/build` before the pull request.
+> Written in step 8. Follow-up work this change makes possible or desirable. Not bugs in
+> what this round built — those go back through `/build` before the pull request. A defect
+> outside what section 1 promised, such as a class member it put out of scope, is a
+> recommendation here, and its round opens through `/fix`.
 
 | # | Recommendation | Why it helps | Effort | Decision |
 |---|---|---|---|---|

@@ -32,13 +32,14 @@ and only the user knows which one is right. `.claude/hooks/guard_git.py` refuses
 
 ## 1a. On a fix round, reproduce before you fix
 
-Section 1 carries a filled **Defect** block — every round in a `fix/` folder, and a later
-round opened on a bug report. Before touching production code:
+Section 1 carries a filled **Defect** block; nothing else marks a fix round, so a round in
+a `fix/` folder without one is not. Before touching production code:
 
-1. Write the Reproduction row as **one** test in `tests/test_<module>.py`, named for the
-   promise it proves — `test_violation_refuses_a_commit_whose_message_carries_punctuation`,
-   not `test_bug`. No edge cases; those are step 5's. Read `.claude/rules/python.md`
-   first, as for any `.py` file.
+1. Write the Reproduction row as **one** test in `tests/test_<module>.py`, the module's
+   existing test file where there is one, named for the promise it proves —
+   `test_violation_refuses_a_commit_whose_message_carries_punctuation`, not `test_bug`.
+   No edge cases; those are step 5's. Read `.claude/rules/python.md` first, as for any
+   `.py` file.
 2. Run only that test:
 
    ```bash
@@ -47,7 +48,8 @@ round opened on a bug report. Before touching production code:
 
    **It must fail**, and fail the way the Defect block's Observed row says. Paste the
    failure into section 3, verbatim: it is the evidence step 6 cites for the first
-   criterion, and it is the only moment the bug is ever seen red.
+   criterion. Step 6 can reconstruct a missing red run from history, but should not have
+   to.
 3. Then fix, following the implementation guide, and run the same test green.
 
 A reproduction that passes before the fix means the diagnosis is wrong or the test does not

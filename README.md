@@ -220,8 +220,8 @@ reproduced and its output quoted, the root cause as a file and line, the commit 
 introduced it, the other inputs the same cause breaks, and who depends on the current
 behaviour — read a second time by a critic whose job is to find a different cause. Only
 then does step 1 open, and its first question is the one every fix has: this instance, or
-the whole class? The rest of the pipeline is the same, with three differences you will see
-in the trace: the build writes the reproduction as a test and runs it red before fixing,
+the whole class? The rest of the pipeline is the same, with differences you will see in
+the trace: the build writes the reproduction as a test and runs it red before fixing,
 and halts if it is not red; the concept check has to show more than a green suite for
 "nothing else changed"; and the follow-ups get a fourth reader asking where else the same
 cause lives and what should have caught it. If the diagnosis finds that the code does what

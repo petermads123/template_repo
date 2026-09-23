@@ -66,9 +66,10 @@ where that gets decided rather than discovered.
 `test_export_preserves_unicode`, not `test_export_2`. Use `@pytest.mark.parametrize` where
 one assertion holds across many inputs.
 
-On a fix round, step 3 already created this file with the reproduction test in it. Extend
-it and leave that test exactly as written: its red run is recorded in section 3, and step 6
-cites the pair. Every input the Scope row took from the class gets a test of its own.
+On a fix round, step 3 already added the reproduction test to this file, creating it if it
+did not exist. Extend it and leave that test exactly as written: its red run is recorded
+in section 3, and step 6 cites the pair. Every input the Scope row took from the class
+gets a test of its own.
 
 Every intent in the plan's Test intents table gets at least one test, and every acceptance
 criterion ends up covered by at least one test. Record which tests cover which intent in

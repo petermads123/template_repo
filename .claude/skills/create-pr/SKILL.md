@@ -183,7 +183,9 @@ one change that kept growing.
 
 ```markdown
 ## What
-One paragraph from round 1's section 1: what this adds and why.
+One paragraph from round 1's section 1: what this adds and why. On a fix round, the
+Defect block's Observed, Root cause and Scope rows in a line each, so the reviewer sees
+the cause and not only the change.
 For a multi-round branch, one line per round after it: what that round added and which
 recommendation it came from.
 

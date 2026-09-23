@@ -42,17 +42,18 @@ already mid-pipeline it reports the step instead.
 the root cause, sizes the class of inputs the cause breaks and has a `diagnosis-critic` try
 to falsify the cause — all **before** step 1 opens — and routes to `/feature` or
 `/small-change` instead when the diagnosis says it is not a bug. There is no second
-pipeline: a **fix round** is one whose section 1 carries a filled **Defect** block, which
-every round in a `fix/` folder has, and so does a later round in any folder that was opened
-on a bug report. The steps that behave differently read that from the plan file, and no
-hook needs to know:
+pipeline: a **fix round** is one whose section 1 carries a filled **Defect** block, and
+nothing else marks it — a round `/fix` opens as round 1 takes the `fix/` prefix, and a
+later round opened on a bug report gets the block whatever its folder is called, while a
+follow-up round in a `fix/` folder that is not itself a defect does not. The steps that
+behave differently read the block from the plan file, and no hook needs to know:
 
 | Step | On a fix round |
 |---|---|
 | 1 | Starts from the Defect block, asks whether the fix covers this instance or the whole class, and always writes a reproduction criterion first and a regression criterion last |
 | 2 | Plans against the Root cause row, and the `plan-critic` checks the plan removes the cause rather than the site of the symptom |
 | 3 | Writes the reproduction as a test and runs it red before fixing; a reproduction that is already green halts the build |
-| 5 | Extends the file step 3 created and leaves the reproduction test as written |
+| 5 | Extends the test file step 3 added the reproduction to, and leaves that test as written |
 | 6 | Cites the red run and the green run for the reproduction, and more than a green suite for the regression criterion |
 | 8 | Runs a fourth `brainstormer` lens, `defect-class`: the same cause elsewhere, and what let this ship |
 
@@ -87,7 +88,7 @@ chat verbatim as the step returns. That is their window into the work.
 
 ### More eyes where the work diverges
 
-Most steps have one right answer and one agent is enough. Three do not, and there a second
+Most steps have one right answer and one agent is enough. Four do not, and there a second
 reader is cheap insurance against one author's blind spots:
 
 | Step | Extra readers | Why there |
@@ -215,6 +216,7 @@ belongs back at step 1, and saying so — as a halt, from inside the build — i
 | Resuming work already in flight | The step's own skill, or `/feature` to check state |
 | A build that halted, once the question is answered | `/build` |
 | Need edge cases for a function | `test-designer` subagent, `input-space` or `contract` brief |
+| A root cause that needs a second reader before a fix is agreed on it | `diagnosis-critic` subagent, from `/fix` |
 | A plan that needs a second reader | `plan-critic` subagent |
 | Follow-ups for a finished feature | `brainstormer` subagent, one lens per run |
 | STRUCTURE.md looks out of sync with the code | `structure-auditor` subagent |
@@ -248,7 +250,7 @@ above *before touching anything*, and act on the classification:
   refused" — say so in one line, then start `/fix`. It diagnoses before anything is agreed
   and routes back to `/feature` or `/small-change` on its own if it turns out not to be a
   bug.
-- **Genuinely ambiguous** — ask, with `AskUserQuestion`, offering the two routes and what
+- **Genuinely ambiguous** — ask, with `AskUserQuestion`, offering the routes in question and what
   each would mean for this particular request. Do not resolve a coin flip by guessing.
 
 Announce the routing either way. A one-line "small: local rename, no signature or behaviour
