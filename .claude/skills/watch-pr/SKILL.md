@@ -121,6 +121,11 @@ The round runs steps 1 to 9 on the same branch: its step 9 re-verifies the whole
 marks the round `done` and pushes into the same pull request, and its `/watch-pr` resumes
 this watch.
 
+A comment that reports a **defect** in what the branch shipped opens the round the same
+way but invokes `/fix` instead: it finds the just-opened file, reproduces and diagnoses
+before anything is agreed, and hands to `/conceptualize` itself. The folder keeps its
+prefix; the filled Defect block is what makes the round a fix round.
+
 Use the same test as everywhere else. It is not small if it adds or removes a file, changes
 a public signature, changes behavior, or needs a new test. **When it is close, route up** —
 an over-routed comment costs a conversation, an under-routed one puts unplanned, untested

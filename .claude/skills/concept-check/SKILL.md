@@ -43,6 +43,28 @@ Mark honestly. `partially` is a real answer and a useful one; a table of nine `y
 produced without friction usually means the audit was performed on the plan rather than the
 code.
 
+### On a fix round
+
+Section 1 carries a Defect block, and three of its criteria need evidence of a particular
+shape:
+
+- **The reproduction criterion.** The red run step 3 pasted into section 3, and the same
+  test green now. A test that was never seen red is not evidence the bug was there, and a
+  section 3 with no red run means step 3 skipped it — send the work back.
+- **The regression criterion.** A green suite is necessary and not sufficient: the suite
+  was written before the bug existed and did not catch it. Cite at least one more thing,
+  and say which: every row of the Blast radius checked with its outcome; the showcase
+  output unchanged from `main`; or, where the fix rewrote a decision function, a
+  differential of generated inputs against the module on `main` — round 1 of
+  `development/fix/guard-git-parsing/` did this and is the worked example.
+- **The class.** If Scope took *the class*, every input listed there has a test. If it took
+  *this instance*, the rest are named under Explicitly out of scope and none of them was
+  fixed along the way — a fix that quietly widened is drift, even when it is welcome.
+
+Then re-read the Root cause row against the diff. A fix that changes the site of the
+symptom rather than the cause named there passes its own reproduction and leaves the bug in
+place — that is unmet, not partially met.
+
 ## 3. Re-check the earlier rounds
 
 Later rounds only. This round changed code that earlier rounds in the same folder depend

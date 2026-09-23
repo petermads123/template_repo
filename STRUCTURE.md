@@ -167,9 +167,12 @@ development/
 
 Each file holds the concept and acceptance criteria, the plan, the verification and test
 logs, the concept-check audit, the recommendations and the pull request, plus a `Halted`
-section if the build stopped to ask. Every round of a feature shares one branch and one
-pull request; a later round's **Builds on** section names what the earlier rounds
-delivered, and its step 6 re-checks their acceptance criteria as a regression pass.
+section if the build stopped to ask. A fix round's section 1 also carries a **Defect**
+block — reproduction, root cause, class, blast radius, scope — filled from the `/fix`
+diagnosis; its presence is what tells the later steps the round is a fix. Every round
+of a feature shares one branch and one pull request; a later round's **Builds on** section
+names what the earlier rounds delivered, and its step 6 re-checks their acceptance criteria
+as a regression pass.
 
 The first line after the title is the workflow's state and is read by the hooks:
 
@@ -205,6 +208,7 @@ its entry here is deleted in the same change.
 | `rules/python.md` | Coding conventions, auto-loaded for `**/*.py` |
 | `skills/repo-setup/` | `/repo-setup` — one-time setup of a repo made from this template; carries `main_protect.solo.json` and `main_protect.collab.json` |
 | `skills/feature/` | `/feature` — starts or resumes the pipeline |
+| `skills/fix/` | `/fix` — starts the pipeline from a defect: reproduces, finds the root cause, sizes the class, has the diagnosis criticised, decides whether it is a bug at all, then hands to `/conceptualize` as a fix round |
 | `skills/conceptualize/` | `/conceptualize` — step 1, agree the concept |
 | `skills/plan/` | `/plan` — step 2, design it |
 | `skills/implement/` | `/implement` — step 3, write the code (inside `/build`) |
@@ -216,9 +220,10 @@ its entry here is deleted in the same change.
 | `skills/create-pr/` | `/create-pr` — step 9, pull request ready for review |
 | `skills/watch-pr/` | `/watch-pr` — step 10, hourly review watch until merge or close |
 | `skills/small-change/` | `/small-change` — cosmetic edits, outside the pipeline |
+| `agents/diagnosis-critic.md` | Subagent that tries to falsify a defect diagnosis before step 1 agrees a fix on it — re-runs the reproduction, traces the cause independently, checks the class (feeds `/fix`); may run code from a scratch directory but never writes to the tree; pinned to `opus` |
 | `agents/plan-critic.md` | Read-only subagent that reads a plan against its concept and the repo before the user accepts it (feeds step 2); pinned to `opus` |
 | `agents/test-designer.md` | Read-only subagent that finds edge cases; run twice at step 5 with the `input-space` and `contract` briefs |
-| `agents/brainstormer.md` | Read-only subagent that proposes follow-ups through one lens — `user`, `maintainer` or `integrator`; three run in parallel at step 8 |
+| `agents/brainstormer.md` | Read-only subagent that proposes follow-ups through one lens — `user`, `maintainer` or `integrator`, plus `defect-class` on a fix round; three or four run in parallel at step 8 |
 | `agents/structure-auditor.md` | Read-only subagent that reconciles this file (feeds steps 4 and 6) |
 
 ### `.claude/hooks/plan_state.py`

@@ -36,10 +36,24 @@ asks what debt this created or exposed and what the next change will break; the
 data leaves in the wrong shape. Each returns three to five recommendations with evidence,
 and any bug it found under a separate heading.
 
+On a fix round — section 1 carries a Defect block — run a fourth in the same batch:
+
+```
+Agent with subagent_type: "brainstormer"   lens: defect-class
+```
+
+It asks where else the root cause's shape occurs, which input from the Class row was put
+out of scope and is now the nearest bug, and what should have caught this before it
+shipped. Those are the follow-ups a fix produces, and the other three lenses are not
+looking for them.
+
 Add your own angle, which the lenses do not cover because only the plan file shows it:
 
 - **What the build halted on or worked around** — the `Halted` section and section 3's
   deviations are a list of places the plan was thinner than the code needed.
+- **What the scope left behind** — on a fix round, every item of the Defect block's Class
+  row that Explicitly out of scope names is a candidate, and a round opened on one is a
+  fix round too.
 
 ## 2. Merge and rank them
 
@@ -97,7 +111,9 @@ Then, in order:
    marker `<!-- claude-plan step=1 status=active -->`.
 3. Fill its **Builds on** section: what each earlier round delivered, the recommendation it
    came from quoted in full, and what is already on the branch that it must not break.
-4. Commit and push both files, then invoke `/conceptualize` for the follow-up.
+4. Commit and push both files, then invoke `/conceptualize` for the follow-up — or `/fix`
+   when the recommendation is a defect, so the diagnosis comes first; it finds the round
+   file already open and hands to `/conceptualize` itself.
 
 The branch and the pull request carry every round. Step 6 of the new round re-checks this
 round's acceptance criteria as a regression pass, and step 9 builds the pull request body

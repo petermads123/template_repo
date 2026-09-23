@@ -9,8 +9,9 @@ effort: xhigh
 # Feature pipeline
 
 Ten steps, one plan folder per branch, three places where the user decides. This skill is
-the entry point: it either resumes what is in flight or starts something new. It does not
-do the work.
+the entry point for a feature: it either resumes what is in flight or starts something new.
+It does not do the work. A defect enters the same pipeline through `/fix`, which diagnoses
+it first.
 
 ## The pipeline
 
@@ -53,6 +54,10 @@ section 9 names a pull request — a pull request the user has not merged yet is
 do not start a pipeline. Say so and switch to `/small-change`. The test is in `CLAUDE.md`:
 adding or removing a file, changing a public signature, changing behavior or needing a new
 test all mean the pipeline; nothing else does.
+
+**If the request is a defect** — something that exists behaves wrongly — do not start here
+either. Say so and switch to `/fix`: it reproduces the symptom and finds the cause before
+step 1 opens, and it comes back here on its own if the diagnosis says it is not a bug.
 
 ## 2. Hand off to step 1
 

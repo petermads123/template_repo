@@ -28,6 +28,10 @@ Borderline cases worth naming out loud: renaming a *public* name is not small, b
 changes a signature and `STRUCTURE.md`. Renaming a local variable is. Rewording a docstring
 is small; changing what it documents means the behavior changed and it is not.
 
+A defect is never small. Fixing a bug changes behaviour by definition, so it routes to
+`/fix`, which diagnoses it before the pipeline runs. The one exception is the case `/fix`
+itself sends here: the code is right and only the prose describing it is wrong.
+
 This skill runs on `opus` at `high`, like the pipeline's own judgment steps. That is
 deliberate: step 1 above is the single highest-stakes call in the whole setup, because it
 is the one decision made with none of the pipeline's safety nets behind it. Everything

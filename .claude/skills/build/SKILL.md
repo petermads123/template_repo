@@ -43,7 +43,7 @@ can overlap it.
 
 | Step | Skill | Model | Reads | Writes |
 |---|---|---|---|---|
-| 3 | `/implement` | `sonnet` | sections 1 and 2 | the code, `STRUCTURE.md`, section 3 |
+| 3 | `/implement` | `sonnet` | sections 1 and 2 | the code, `STRUCTURE.md`, section 3; on a fix round the reproduction test first, run red |
 | 4 | `/verify` | `sonnet` | section 2 | fixes, section 4 |
 | 5 | `/test` | `sonnet` | section 2's test intents | `tests/`, fixes, section 5 |
 | 6 | `/concept-check` | `sonnet` | section 1 **first**, then the code | section 6 |
@@ -101,9 +101,10 @@ every subagent, and the orchestrator applies them too.
 
 1. **Anything that would amend section 1.** A deviation that invalidates an acceptance
    criterion, a test that reveals a case the concept never decided, a concept-check row that
-   turns out to be wrong rather than unmet, a "better than the concept" finding. The user
-   agreed to section 1; only they change it. Nothing in the block guesses an answer and
-   buries it in code or an assertion.
+   turns out to be wrong rather than unmet, a "better than the concept" finding. On a fix
+   round, a reproduction that is already green before the fix, or a root cause found
+   somewhere other than the Defect block's row. The user agreed to section 1; only they
+   change it. Nothing in the block guesses an answer and buries it in code or an assertion.
 2. **A gate failing twice for the same reason.** A subagent that hits a red gate fixes it
    and re-runs once. If the same failure comes back, it halts rather than trying a third
    time — the second failure means the fix was a guess, and a third attempt would be
