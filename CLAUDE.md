@@ -158,6 +158,11 @@ Once told, the instruction authorises the merge but waives nothing: it must not 
 there is CI, no merge conflict, and every review thread resolved where the ruleset demands
 it. If one fails, say which and wait. Never approve anything yourself.
 
+**Once a pull request has merged, Claude deletes its branch** — whether the approver
+pressed the button or Claude merged on their instruction — after confirming from the
+repository that the branch head is an ancestor of `main`. A branch closed without merging
+is left alone. Step 10 does this as part of closing out; no separate permission is needed.
+
 Where a review request is refused, step 9 **assigns** the approver instead — GitHub permits
 assigning an author even though it refuses to make them a reviewer. It gates nothing, but it
 puts the pull request in their *Assigned* queue rather than only in *Created*.

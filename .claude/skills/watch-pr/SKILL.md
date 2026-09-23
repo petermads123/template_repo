@@ -181,15 +181,24 @@ reason to merge something broken; they told you to merge the thing they last saw
 
 ### After merging
 
-- Delete the branch, if the repo does that.
+- **Delete the branch.** Whoever merged it — the user in the GitHub UI, or Claude on their
+  instruction — deleting the merged branch is part of closing out, and needs no separate
+  permission. First confirm the merge from the repository rather than from the event:
+  `git fetch origin` and `git merge-base --is-ancestor origin/<branch> origin/main`. Only a
+  branch whose head is an ancestor of `main` is deleted; a closed-unmerged branch is left
+  for the user. Then `git push origin --delete <branch>`, and drop the local branch too.
+  A hosted environment may refuse a ref deletion while still accepting pushes; if the
+  delete is refused, say so once and name the branch rather than reporting it deleted —
+  the user can remove it from the repository's Branches page.
 - Cancel the recurring check.
 - Report once: the merge commit, and **every bot finding dismissed along the way**, with the
   reason each was dismissed.
 
 ## 7. Stop conditions
 
-- **Merged or closed** — whether Claude merged it or someone else did, cancel the recurring
-  check and say so once. The pipeline is finished; the plan file already says so.
+- **Merged or closed** — whether Claude merged it or someone else did, delete the branch
+  if it was merged (per **After merging** above), cancel the recurring check and say so
+  once. The pipeline is finished; the plan file already says so.
 - **The user says stop** — unsubscribe, cancel the check, and stop. Immediately, no
   argument.
 
