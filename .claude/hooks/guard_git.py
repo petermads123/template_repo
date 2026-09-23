@@ -41,7 +41,7 @@ shell can resolve leaves the branch unknown rather than unchanged, and a
 `commit` or `push` that meets an unknown branch is refused with a message saying
 so rather than the one about `main`.
 
-Stdlib only: `jq` is not available on this machine and hook commands default to
+Stdlib only: `jq` may not be available and hook commands default to
 Git Bash on Windows, so the usual shell recipe does not work here.
 """
 

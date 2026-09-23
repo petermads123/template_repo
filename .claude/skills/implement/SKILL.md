@@ -37,7 +37,7 @@ a `fix/` folder without one is not. Before touching production code:
 
 1. Write the Reproduction row as **one** test in `tests/test_<module>.py`, the module's
    existing test file where there is one, named for the promise it proves —
-   `test_violation_refuses_a_commit_whose_message_carries_punctuation`, not `test_bug`.
+   `test_rolling_mean_includes_the_last_window`, not `test_bug`.
    No edge cases; those are step 5's. Read `.claude/rules/python.md` first, as for any
    `.py` file.
 2. Run only that test:

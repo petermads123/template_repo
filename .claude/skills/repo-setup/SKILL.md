@@ -64,7 +64,8 @@ git mv src/template_repo src/<package_name>
 |---|---|
 | `pyproject.toml` | `[project] name`, `[project] description` |
 | `tests/test_hello_world.py` | `from <package_name>.hello_world import main` |
-| `STRUCTURE.md` | the tree, the two module headings, the `main()` invocation |
+| `STRUCTURE.md` | the tree, the package heading, the two module headings, the import and `main()` examples |
+| everything else | `git grep template_repo` and clear every hit the rows above did not |
 | `README.md` | the title, the description, both install URLs, the setup checklist |
 
 `[tool.setuptools.packages.find]` points at `src` and `[tool.mypy] files` names directories,

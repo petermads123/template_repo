@@ -56,6 +56,7 @@ behave differently read the block from the plan file, and no hook needs to know:
 | 5 | Extends the test file step 3 added the reproduction to, and leaves that test as written |
 | 6 | Cites the red run and the green run for the reproduction, and more than a green suite for the regression criterion |
 | 8 | Runs a fourth `brainstormer` lens, `defect-class`: the same cause elsewhere, and what let this ship |
+| 9 | Puts the Defect block's Observed, Root cause and Scope rows in the pull request body, so the reviewer sees the cause |
 
 Exactly one plan file across the repo carries `status=active`. When step 8 opens the next
 round, the round before it becomes `done` and the new file takes over. Step 9 marks the
@@ -328,7 +329,8 @@ pytest
 - **Before a turn ends**, `.claude/hooks/stop_gate.py` decides how strict to be from the
   active plan's step. Steps 1 to 7 are advisory: the build carries its own gates at steps
   4, 5 and 7, and a halt has to be able to end the turn on a red tree. From step 8, and
-  whenever no plan is active, it blocks if ruff, mypy or pytest fail, if `STRUCTURE.md`
+  whenever no plan is active, it blocks — when a Python file changed in the tree or on the
+  branch — if ruff, mypy or pytest fail, if `STRUCTURE.md`
   does not mention a module that exists on disk, if a test file sits outside `tests/` where
   `pytest` would never collect it, or if a package directory under `src/` has no
   `__init__.py`. Create `.claude/.skip-gate` to bypass it deliberately.

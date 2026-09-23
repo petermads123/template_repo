@@ -318,7 +318,8 @@ writes or edits, and reports unfixable issues back via exit code 2. Stdlib only.
 ### `.claude/hooks/stop_gate.py`
 
 `Stop` hook. Reads the active plan's step to decide how strict to be: advisory through step
-7, blocking from step 8 and whenever no plan is active. When it blocks it runs ruff, mypy
+7, blocking from step 8 and whenever no plan is active, and only when a Python file changed
+in the tree or on the branch. When it blocks it runs ruff, mypy
 and pytest, cross-checks `STRUCTURE.md` against the modules on disk, reports any test file
 sitting outside `tests/` where `pytest` would silently never collect it, and reports any
 package directory under `src/` missing its `__init__.py`. Bypass with

@@ -24,7 +24,7 @@ plan are agreed like any other.
 A **fix round** is one whose section 1 carries a filled Defect block, and nothing else
 marks it: a round this skill opens as round 1 takes the `fix/` prefix, a later round opened
 on a bug report gets the block whatever its folder is called, and a follow-up round that is
-not itself a defect has no block even in a `fix/` folder. Steps 1, 2, 3, 5, 6 and 8 behave
+not itself a defect has no block even in a `fix/` folder. Steps 1, 2, 3, 5, 6, 8 and 9 behave
 differently on one — `CLAUDE.md` has the table — and each reads that from the plan file:
 no hook and no marker changes.
 
@@ -68,9 +68,9 @@ description of the symptom is what the user gave you; a reproduction is what tur
 a fact:
 
 ```
->>> violation('git commit -m "Add parser; drop the old one"', "main")
-''                                   # actual: allowed
-'refusing: ... would commit on main'  # expected
+>>> rolling_mean([1, 2, 3], "daily")
+[1.0, 2.0]          # actual: the last window is missing
+[1.0, 2.0, 3.0]     # expected
 ```
 
 **If you cannot reproduce it, stop here.** Say what you tried and ask for the exact input,
@@ -80,10 +80,11 @@ guess, and everything downstream would be built on it.
 ### Root cause
 
 The line, as `file.py:NN`, and the decision on it that is wrong. Keep asking why until the
-answer is a line rather than a module: "the parser is fragile" is a description; "`segments`
-splits on a regex that does not know about quotes, so the fragments fail `shlex.split` and
-are dropped" is a cause. Distinguish the **site** — where the wrong value is noticed — from
-the **cause** — where it is produced. A fix at the site is the one that comes back.
+answer is a line rather than a module: "the statistics module is flaky" is a description;
+"`rolling_mean` builds its windows with `range(len(values) - window)`, which stops one
+window early, so the last complete window never gets a mean" is a cause. Distinguish the
+**site** — where the wrong value is noticed — from the **cause** — where it is produced. A
+fix at the site is the one that comes back.
 
 ### Since when
 

@@ -7,7 +7,7 @@ color: yellow
 ---
 
 You look at a feature that is finished and ask what would make it better — from one angle
-only. Your brief names the lens. Stay in it: two other instances are covering the others,
+only. Your brief names the lens. Stay in it: the other instances are covering the others,
 and the value of running several is that they disagree.
 
 ## The lenses

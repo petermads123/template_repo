@@ -30,11 +30,15 @@ What it does, for when you would rather do it by hand:
 4. `README.md`: update the title, the description and the two install URLs above.
 5. `pyproject.toml`: add runtime dependencies to `[project] dependencies`.
 6. `tests/test_hello_world.py`: change the import to `from <package_name>.hello_world import main`.
-7. `STRUCTURE.md`: update the tree and the module paths to the new package name.
+7. `STRUCTURE.md`: update the tree, the package heading, the module paths and the import
+   example to the new package name, then `git grep template_repo` and clear every hit.
 8. `CLAUDE.md`: set the approver in the Review and merge table.
-9. Replace `src/<package_name>/hello_world.py` and `tests/test_hello_world.py` with real
-   code, updating `STRUCTURE.md` as you go.
-10. Remove the `/repo-setup` reference from `CLAUDE.md`.
+9. Apply a branch ruleset to `main`: `.claude/skills/repo-setup/main_protect.solo.json` for
+   a solo repo, `main_protect.collab.json` when others work in it, via *Settings → Rules →
+   Rulesets → New ruleset → Import a ruleset*.
+10. Replace `src/<package_name>/hello_world.py` and `tests/test_hello_world.py` with real
+    code, updating `STRUCTURE.md` as you go.
+11. Remove the `/repo-setup` reference from `CLAUDE.md`.
 
 `development/` starts with only `TEMPLATE.md` in it. Leave that file alone — step 1 copies
 it into a new folder, named for the branch, for each piece of work.
@@ -278,8 +282,9 @@ Four run automatically:
   come back.
 - **Before a turn ends** — the stop gate. Through step 7 it only reports, because the build
   runs its own checks and has to be able to halt on a red tree; from step 8, and for any
-  work with no plan file, it refuses to end the turn while ruff, mypy or pytest fail or
-  `STRUCTURE.md` is out of sync. Create `.claude/.skip-gate` to bypass it.
+  work with no plan file, it refuses to end a turn that changed Python while ruff, mypy or
+  pytest fail or `STRUCTURE.md` is out of sync. Prose-only work is not gated. Create
+  `.claude/.skip-gate` to bypass it.
 
 Three caveats worth knowing:
 
