@@ -119,8 +119,8 @@ twice. The skill file stays on disk — harmless, and still there if a rename is
 Dependencies to add, an editor setting, a convention that differs from the template's.
 Handle what comes back, or route it: anything that adds a file is a `/feature`, a wording
 tweak is a `/small-change`. Do not offer continuous integration unprompted — the template
-deliberately runs its checks in the stop gate and at step 9 instead, and the reason is
-recorded in `docs/BACKLOG.md`.
+deliberately runs its checks in the stop gate and at step 9 instead, because a workflow and
+a required-status rule are more per-repo overhead than a small solo project repays.
 
 ## 7. Finish
 

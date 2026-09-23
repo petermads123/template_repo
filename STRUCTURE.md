@@ -41,7 +41,6 @@ src/                    everything installable; nothing outside it is packaged
   template_repo/        the package itself (rename this to <package_name>)
 tests/                  pytest suite, one test_<module>.py per module
 development/            one folder per branch, one file per round: the pipeline's state
-docs/BACKLOG.md         known defects and proposed setup work, not yet in the pipeline
 .claude/                Claude Code configuration: rules, skills, agents, hooks
 .vscode/                editor config (Ruff as formatter, format on save)
 pyproject.toml          packaging, Ruff, mypy and pytest configuration
@@ -94,9 +93,10 @@ found anywhere else.
 
 ### `tests/test_guard_git.py`
 
-Covers `.claude/hooks/guard_git.py`, and is the regression suite for the parsing defect
-that prompted round 1. `segments` for quoting, every separator, a separator glued to a word or
-to a newline, a run of newlines, a newline inside a quoted message, a `#` inside a word,
+Covers `.claude/hooks/guard_git.py`, and is the regression suite for the quoting defect
+its parser was rebuilt to fix. `segments` for quoting, every separator, a separator glued
+to a word or to a newline, a run of newlines, a newline inside a quoted message, a `#`
+inside a word,
 and input that cannot be lexed at all; `git_subcommand` for each spelling of the executable and the options that
 hide the subcommand; `push_targets_main` for every refspec shape that reaches `main`;
 `switch_target` for both subcommands, their new-branch options, an option left without a
@@ -109,8 +109,9 @@ before the rewrite. `main` is exercised end to end against a throwaway repositor
 `main` refused with exit 2 and the reason on stderr, a commit allowed after branching and off
 `main`, payloads that are not a git command, an unparseable payload, and a byte-order mark.
 
-Round 2's cases follow: a commit or push hidden behind variable assignments, behind each
-redirection form including `2>&1`, inside backticks and `$( )`, and under each of the five
+The command-recognition cases follow: a commit or push hidden behind variable assignments,
+behind each redirection form including `2>&1`, inside backticks and `$( )`, and under each
+of the five
 wrapper programs; the executable in five spellings and cases; each push option whose value
 would otherwise be read as the remote; `@` and `refs/heads/main` reduced to the branches
 they name; an unresolvable switch refusing from either branch with its own message; and the
@@ -160,9 +161,9 @@ One folder per branch, one numbered file per round inside it, created at the clo
 ```
 development/
   TEMPLATE.md                     copied for each new round; never itself active
-  fix/guard-git-parsing/          the folder is the branch name, so it nests one level
-    01-git-guard.md               round 1, the parsing rewrite
-    02-command-recognition.md     round 2, opened from round 1's recommendations R1-R3
+  feat/csv-export/                the folder is the branch name, so it nests one level
+    01-csv-export.md              round 1, shipped
+    02-streaming-writer.md        round 2, opened from round 1's recommendation R2
 ```
 
 Each file holds the concept and acceptance criteria, the plan, the verification and test
@@ -186,17 +187,6 @@ across the whole repo should be `active` — opening a round stands its predeces
 so `main` never carries a live marker. Every step commits and pushes the file with what it
 produced: plan files are the record of why the code looks the way it is, the state any
 session resumes from, and what `/create-pr` builds the pull request body from.
-
-## Backlog: `docs/BACKLOG.md`
-
-Findings from reviewing this repo's own Claude configuration: confirmed defects, proposed
-improvements, and decisions taken against. Deliberately **not** a plan file — it carries no
-`claude-plan` marker and sits outside `development/`, the only directory
-`.claude/hooks/plan_state.py` scans, so it cannot be mistaken for pipeline state.
-
-Each entry records its routing (`/feature` or `/small-change`) so picking one up does not
-mean re-deciding it. An item graduates by becoming a plan folder under `development/`, and
-its entry here is deleted in the same change.
 
 ## Claude configuration: `.claude/`
 

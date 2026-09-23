@@ -60,8 +60,8 @@ shape:
   was written before the bug existed and did not catch it. Cite at least one more thing,
   and say which: every row of the Blast radius checked with its outcome; the showcase
   output unchanged from `main`; or, where the fix rewrote a decision function, a
-  differential of generated inputs against the module on `main` — round 1 of
-  `development/fix/guard-git-parsing/` did this and is the worked example.
+  differential of generated inputs against the module on `main`: import both versions,
+  run every generated input through each, and list the inputs whose answer changed.
 - **The class.** If Scope took *the class*, every input listed there has a test. If it took
   *this instance*, the rest are named under Explicitly out of scope and none of them was
   fixed along the way — a fix that quietly widened is drift, even when it is welcome.
