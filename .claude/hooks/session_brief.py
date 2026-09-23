@@ -8,7 +8,7 @@ session context.
 
 Silent when nothing is in flight: a repo with no active plan starts clean.
 
-Stdlib only: `jq` is not available on this machine and hook commands default to
+Stdlib only: `jq` may not be available and hook commands default to
 Git Bash on Windows, so the usual shell recipe does not work here.
 """
 

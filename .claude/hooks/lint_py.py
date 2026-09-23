@@ -3,7 +3,7 @@
 Reads the hook payload from stdin, formats and auto-fixes the edited file, then
 reports anything Ruff could not fix back to Claude via stderr and exit code 2.
 
-Stdlib only: `jq` is not available on this machine and hook commands default to
+Stdlib only: `jq` may not be available and hook commands default to
 Git Bash on Windows, so the usual shell recipe does not work here.
 
 mypy is deliberately not run here. Single-file mypy re-analyses imports and

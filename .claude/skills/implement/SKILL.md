@@ -10,6 +10,8 @@ effort: max
 
 Transcribe the plan into working code. Production code only — the test suite is step 5, and
 writing it now would blur the line the pipeline draws between "it exists" and "it works".
+The one exception is a fix round's reproduction test, written first and run red, because a
+fix does not "exist" until the reproduction fails; section 1a below.
 
 This step runs unattended, as a subagent of `/build`. Nobody answers a question asked here.
 What the plan settles, do; what it does not settle and section 1 does not either, halt on —
@@ -27,6 +29,33 @@ git branch --show-current
 A mismatch is a halt, not something to fix by switching — the build is on the wrong branch,
 and only the user knows which one is right. `.claude/hooks/guard_git.py` refuses commits on
 `main` outright, so a missed branch is caught rather than discovered later.
+
+## 1a. On a fix round, reproduce before you fix
+
+Section 1 carries a filled **Defect** block; nothing else marks a fix round, so a round in
+a `fix/` folder without one is not. Before touching production code:
+
+1. Write the Reproduction row as **one** test in `tests/test_<module>.py`, the module's
+   existing test file where there is one, named for the promise it proves —
+   `test_rolling_mean_includes_the_last_window`, not `test_bug`.
+   No edge cases; those are step 5's. Read `.claude/rules/python.md` first, as for any
+   `.py` file.
+2. Run only that test:
+
+   ```bash
+   pytest tests/test_<module>.py -k <test_name>
+   ```
+
+   **It must fail**, and fail the way the Defect block's Observed row says. Paste the
+   failure into section 3, verbatim: it is the evidence step 6 cites for the first
+   criterion. Step 6 can reconstruct a missing red run from history, but should not have
+   to.
+3. Then fix, following the implementation guide, and run the same test green.
+
+A reproduction that passes before the fix means the diagnosis is wrong or the test does not
+reproduce the symptom — either way section 1 is wrong, and that is a **halt**, not a test to
+adjust until it fails. A failure of a different shape from the one the Defect block
+describes is the same halt. Step 5 extends this file and leaves this test as written.
 
 ## 2. Write the code
 
@@ -135,11 +164,12 @@ Report it with the criterion it breaks and what you would have needed decided.
 
 ## 5. Commit and push
 
-The code, `STRUCTURE.md` and the plan file, in one commit unless the work genuinely
-separates. Subject in the imperative, under 72 characters, saying what changes rather than
-what you did — `Add CSV export for record collections` — with the round file named in the
-body. Then push. The tree must be clean when this step ends: a step that leaves work
-uncommitted leaves nothing for the next session to resume from.
+The code, `STRUCTURE.md` and the plan file — and on a fix round the reproduction test — in
+one commit unless the work genuinely separates. Subject in the imperative, under 72
+characters, saying what changes rather than what you did — `Add CSV export for record
+collections` — with the round file named in the body. Then push. The tree must be clean
+when this step ends: a step that leaves work uncommitted leaves nothing for the next
+session to resume from.
 
 The tree does not have to be green yet. Step 4 runs the tools; the stop gate is advisory
 through step 7 for exactly this reason.

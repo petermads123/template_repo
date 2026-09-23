@@ -19,7 +19,10 @@ settles becomes a halt. Plan accordingly.
 ## 1. Re-read the concept
 
 Section 1 of the plan file, in full, including Out of scope. Everything below is planned
-against the acceptance criteria — they are the contract, not your memory of the chat.
+against the acceptance criteria — they are the contract, not your memory of the chat. On a
+fix round, the Defect block too: the plan removes the cause named in its Root cause row,
+not the site where the symptom shows, and Risks says what the build does if the cause turns
+out to be elsewhere — halt.
 
 ## 2. Survey what exists
 

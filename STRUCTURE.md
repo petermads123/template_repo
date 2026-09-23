@@ -41,7 +41,6 @@ src/                    everything installable; nothing outside it is packaged
   template_repo/        the package itself (rename this to <package_name>)
 tests/                  pytest suite, one test_<module>.py per module
 development/            one folder per branch, one file per round: the pipeline's state
-docs/BACKLOG.md         known defects and proposed setup work, not yet in the pipeline
 .claude/                Claude Code configuration: rules, skills, agents, hooks
 .vscode/                editor config (Ruff as formatter, format on save)
 pyproject.toml          packaging, Ruff, mypy and pytest configuration
@@ -94,27 +93,28 @@ found anywhere else.
 
 ### `tests/test_guard_git.py`
 
-Covers `.claude/hooks/guard_git.py`, and is the regression suite for the parsing defect
-that prompted round 1. `segments` for quoting, every separator, a separator glued to a word or
-to a newline, a run of newlines, a newline inside a quoted message, a `#` inside a word,
-and input that cannot be lexed at all; `git_subcommand` for each spelling of the executable and the options that
-hide the subcommand; `push_targets_main` for every refspec shape that reaches `main`;
-`switch_target` for both subcommands, their new-branch options, an option left without a
-value and a file restore; `violation` for the whole behavioural matrix — punctuation in a commit
-message, a branch switch trusted across `&&` and across an `&&` ending a line but distrusted
-across everything else, including a mixed run such as `; &&`, a subshell that has closed and
-another repository reached with `-C`; commands hidden behind grouping delimiters; unreadable
-input, matched on word boundaries so `committee` is not a commit; and every refusal that held
-before the rewrite. `main` is exercised end to end against a throwaway repository: a commit on
-`main` refused with exit 2 and the reason on stderr, a commit allowed after branching and off
-`main`, payloads that are not a git command, an unparseable payload, and a byte-order mark.
+Covers `.claude/hooks/guard_git.py`, and is the regression suite for the quoting defect
+its parser was rebuilt to fix. `segments` for quoting, every separator, a separator glued
+to a word or to a newline, a run of newlines, a newline inside a quoted message, a `#`
+inside a word, and input that cannot be lexed at all; `git_subcommand` for each spelling
+of the executable and the options that hide the subcommand; `push_targets_main` for every
+refspec shape that reaches `main`; `switch_target` for both subcommands, their new-branch
+options, an option left without a value and a file restore; `violation` for the whole
+behavioural matrix — punctuation in a commit message, a branch switch trusted across `&&`
+and across an `&&` ending a line but distrusted across everything else, including a mixed
+run such as `; &&`, a subshell that has closed and another repository reached with `-C`;
+commands hidden behind grouping delimiters; unreadable input, matched on word boundaries
+so `committee` is not a commit; and every refusal that held before the rewrite. `main` is
+exercised end to end against a throwaway repository: a commit on `main` refused with exit
+2 and the reason on stderr, a commit allowed after branching and off `main`, payloads that
+are not a git command, an unparseable payload, and a byte-order mark.
 
-Round 2's cases follow: a commit or push hidden behind variable assignments, behind each
-redirection form including `2>&1`, inside backticks and `$( )`, and under each of the five
-wrapper programs; the executable in five spellings and cases; each push option whose value
-would otherwise be read as the remote; `@` and `refs/heads/main` reduced to the branches
-they name; an unresolvable switch refusing from either branch with its own message; and the
-commands that must stay allowed — `echo git commit`, `grep push log.txt`,
+The command-recognition cases follow: a commit or push hidden behind variable assignments,
+behind each redirection form including `2>&1`, inside backticks and `$( )`, and under each
+of the five wrapper programs; the executable in five spellings and cases; each push option
+whose value would otherwise be read as the remote; `@` and `refs/heads/main` reduced to
+the branches they name; an unresolvable switch refusing from either branch with its own
+message; and the commands that must stay allowed — `echo git commit`, `grep push log.txt`,
 `sudo apt install git`, `time ls`, and a commit message naming both `sudo` and `git push`.
 One test asserts a documented miss rather than a fix: `sudo -u me git push` is allowed,
 because only options are skipped after a wrapper and never a bare word.
@@ -160,16 +160,19 @@ One folder per branch, one numbered file per round inside it, created at the clo
 ```
 development/
   TEMPLATE.md                     copied for each new round; never itself active
-  fix/guard-git-parsing/          the folder is the branch name, so it nests one level
-    01-git-guard.md               round 1, the parsing rewrite
-    02-command-recognition.md     round 2, opened from round 1's recommendations R1-R3
+  feat/csv-export/                the folder is the branch name, so it nests one level
+    01-csv-export.md              round 1, shipped
+    02-streaming-writer.md        round 2, opened from round 1's recommendation R2
 ```
 
 Each file holds the concept and acceptance criteria, the plan, the verification and test
 logs, the concept-check audit, the recommendations and the pull request, plus a `Halted`
-section if the build stopped to ask. Every round of a feature shares one branch and one
-pull request; a later round's **Builds on** section names what the earlier rounds
-delivered, and its step 6 re-checks their acceptance criteria as a regression pass.
+section if the build stopped to ask. A fix round's section 1 also carries a **Defect**
+block — reproduction, root cause, class, blast radius, scope — filled from the `/fix`
+diagnosis; its presence is what tells the later steps the round is a fix. Every round
+of a feature shares one branch and one pull request; a later round's **Builds on** section
+names what the earlier rounds delivered, and its step 6 re-checks their acceptance criteria
+as a regression pass.
 
 The first line after the title is the workflow's state and is read by the hooks:
 
@@ -184,17 +187,6 @@ so `main` never carries a live marker. Every step commits and pushes the file wi
 produced: plan files are the record of why the code looks the way it is, the state any
 session resumes from, and what `/create-pr` builds the pull request body from.
 
-## Backlog: `docs/BACKLOG.md`
-
-Findings from reviewing this repo's own Claude configuration: confirmed defects, proposed
-improvements, and decisions taken against. Deliberately **not** a plan file — it carries no
-`claude-plan` marker and sits outside `development/`, the only directory
-`.claude/hooks/plan_state.py` scans, so it cannot be mistaken for pipeline state.
-
-Each entry records its routing (`/feature` or `/small-change`) so picking one up does not
-mean re-deciding it. An item graduates by becoming a plan folder under `development/`, and
-its entry here is deleted in the same change.
-
 ## Claude configuration: `.claude/`
 
 | Path | Role |
@@ -205,6 +197,7 @@ its entry here is deleted in the same change.
 | `rules/python.md` | Coding conventions, auto-loaded for `**/*.py` |
 | `skills/repo-setup/` | `/repo-setup` — one-time setup of a repo made from this template; carries `main_protect.solo.json` and `main_protect.collab.json` |
 | `skills/feature/` | `/feature` — starts or resumes the pipeline |
+| `skills/fix/` | `/fix` — starts the pipeline from a defect: reproduces, finds the root cause, sizes the class, has the diagnosis criticised, decides whether it is a bug at all, then hands to `/conceptualize` as a fix round |
 | `skills/conceptualize/` | `/conceptualize` — step 1, agree the concept |
 | `skills/plan/` | `/plan` — step 2, design it |
 | `skills/implement/` | `/implement` — step 3, write the code (inside `/build`) |
@@ -216,9 +209,10 @@ its entry here is deleted in the same change.
 | `skills/create-pr/` | `/create-pr` — step 9, pull request ready for review |
 | `skills/watch-pr/` | `/watch-pr` — step 10, hourly review watch until merge or close |
 | `skills/small-change/` | `/small-change` — cosmetic edits, outside the pipeline |
+| `agents/diagnosis-critic.md` | Subagent that tries to falsify a defect diagnosis before step 1 agrees a fix on it — re-runs the reproduction, traces the cause independently, checks the class (feeds `/fix`); may run code from a scratch directory but never writes to the tree; pinned to `opus` |
 | `agents/plan-critic.md` | Read-only subagent that reads a plan against its concept and the repo before the user accepts it (feeds step 2); pinned to `opus` |
 | `agents/test-designer.md` | Read-only subagent that finds edge cases; run twice at step 5 with the `input-space` and `contract` briefs |
-| `agents/brainstormer.md` | Read-only subagent that proposes follow-ups through one lens — `user`, `maintainer` or `integrator`; three run in parallel at step 8 |
+| `agents/brainstormer.md` | Read-only subagent that proposes follow-ups through one lens — `user`, `maintainer` or `integrator`, plus `defect-class` on a fix round; three or four run in parallel at step 8 |
 | `agents/structure-auditor.md` | Read-only subagent that reconciles this file (feeds steps 4 and 6) |
 
 ### `.claude/hooks/plan_state.py`
@@ -324,7 +318,8 @@ writes or edits, and reports unfixable issues back via exit code 2. Stdlib only.
 ### `.claude/hooks/stop_gate.py`
 
 `Stop` hook. Reads the active plan's step to decide how strict to be: advisory through step
-7, blocking from step 8 and whenever no plan is active. When it blocks it runs ruff, mypy
+7, blocking from step 8 and whenever no plan is active, and only when a Python file changed
+in the tree or on the branch. When it blocks it runs ruff, mypy
 and pytest, cross-checks `STRUCTURE.md` against the modules on disk, reports any test file
 sitting outside `tests/` where `pytest` would silently never collect it, and reports any
 package directory under `src/` missing its `__init__.py`. Bypass with

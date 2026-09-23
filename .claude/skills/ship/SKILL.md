@@ -62,7 +62,7 @@ git push -u origin <branch>
 On a network failure, retry up to four times with 2s, 4s, 8s then 16s backoff. Do not
 retry on a rejection — a rejection means something is wrong rather than slow, so read it.
 
-**This repository is public. Pushing is publishing.** Nothing in the diff should be
+**If this repository is public, pushing is publishing.** Nothing in the diff should be
 anything the user would not want read by a stranger.
 
 ## Stop here

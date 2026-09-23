@@ -27,9 +27,11 @@ Agent with subagent_type: "test-designer"   brief: contract
 
 Both are read-only, so run them in parallel. Give each the signature, the docstring, the
 body, the plan file's path, and its brief by name; ask each for at most fifteen cases — a
-longer list is padding. The **input-space** designer works the parameters: limits, either
-side of them, shapes the author did not imagine. The **contract** designer works the
-promises: the docstring, the `Raises:`, the acceptance criteria that name the function,
+longer list is padding. On a fix round, also point both at the Defect block: its Class row
+is the input-space designer's starting list, and its Expected row names the promise the
+contract designer works from. The **input-space** designer works the parameters: limits,
+either side of them, shapes the author did not imagine. The **contract** designer works
+the promises: the docstring, the `Raises:`, the acceptance criteria that name the function,
 and what its callers rely on. Each returns a ranked list of concrete inputs with expected
 results, plus any contradiction it found between what the function promises and what it
 does.
@@ -63,6 +65,11 @@ where that gets decided rather than discovered.
 `tests/test_<module>.py`, one per module. A test name says what it proves:
 `test_export_preserves_unicode`, not `test_export_2`. Use `@pytest.mark.parametrize` where
 one assertion holds across many inputs.
+
+On a fix round, step 3 already added the reproduction test to this file, creating it if it
+did not exist. Extend it and leave that test exactly as written: its red run is recorded
+in section 3, and step 6 cites the pair. Every input the Scope row took from the class
+gets a test of its own.
 
 Every intent in the plan's Test intents table gets at least one test, and every acceptance
 criterion ends up covered by at least one test. Record which tests cover which intent in

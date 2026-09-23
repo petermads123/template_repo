@@ -64,7 +64,8 @@ git mv src/template_repo src/<package_name>
 |---|---|
 | `pyproject.toml` | `[project] name`, `[project] description` |
 | `tests/test_hello_world.py` | `from <package_name>.hello_world import main` |
-| `STRUCTURE.md` | the tree, the two module headings, the `main()` invocation |
+| `STRUCTURE.md` | the tree, the package heading, the two module headings, the import and `main()` examples |
+| everything else | `git grep template_repo` and clear every hit the rows above did not |
 | `README.md` | the title, the description, both install URLs, the setup checklist |
 
 `[tool.setuptools.packages.find]` points at `src` and `[tool.mypy] files` names directories,
@@ -119,8 +120,8 @@ twice. The skill file stays on disk — harmless, and still there if a rename is
 Dependencies to add, an editor setting, a convention that differs from the template's.
 Handle what comes back, or route it: anything that adds a file is a `/feature`, a wording
 tweak is a `/small-change`. Do not offer continuous integration unprompted — the template
-deliberately runs its checks in the stop gate and at step 9 instead, and the reason is
-recorded in `docs/BACKLOG.md`.
+deliberately runs its checks in the stop gate and at step 9 instead, because a workflow and
+a required-status rule are more per-repo overhead than a small solo project repays.
 
 ## 7. Finish
 

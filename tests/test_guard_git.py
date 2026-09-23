@@ -254,7 +254,7 @@ def test_switch_target_is_empty_when_the_option_has_no_value() -> None:
     assert switch_target("checkout", ("-b",)) == ""
 
 
-# --- violation: the defect this round closes (T1) ----------------------------
+# --- violation: punctuation inside a quoted commit message --------------------
 
 
 @pytest.mark.parametrize(
@@ -278,7 +278,7 @@ def test_violation_allows_those_same_commits_off_main() -> None:
     assert not refused('git commit -m "Add parser; drop the old one"', OTHER)
 
 
-# --- violation: branch switches (T2, T3) -------------------------------------
+# --- violation: branch switches ----------------------------------------------
 
 
 @pytest.mark.parametrize("switch", ["checkout -b", "checkout -B", "switch -c"])
@@ -317,7 +317,7 @@ def test_violation_carries_a_switch_through_an_intervening_command() -> None:
     assert not refused(command, PROTECTED)
 
 
-# --- violation: unreadable input (T4) ----------------------------------------
+# --- violation: unreadable input ---------------------------------------------
 
 
 @pytest.mark.parametrize("word", ["commit", "push"])
@@ -337,7 +337,7 @@ def test_violation_allows_unreadable_input_naming_nothing_risky() -> None:
     assert not refused('echo "unbalanced', PROTECTED)
 
 
-# --- violation: everything that already held (T5) ----------------------------
+# --- violation: everything that already held ---------------------------------
 
 
 def test_violation_refuses_a_plain_commit_on_main() -> None:
@@ -431,7 +431,7 @@ def test_violation_trusts_and_glued_to_a_newline() -> None:
     assert not refused('git checkout -b feat/x &&\ngit commit -m "m"', PROTECTED)
 
 
-# --- violation: regressions the test-designer found in the rewrite -----------
+# --- violation: regressions found while the parser was rebuilt ---------------
 
 
 @pytest.mark.parametrize(
@@ -583,11 +583,11 @@ def test_main_tolerates_a_byte_order_mark(
 
 
 # =============================================================================
-# Round 2: recognising the command
+# Recognising the command
 # =============================================================================
 
 
-# --- U1: a variable-assignment prefix ----------------------------------------
+# --- a variable-assignment prefix --------------------------------------------
 
 
 @pytest.mark.parametrize(
@@ -611,7 +611,7 @@ def test_violation_allows_an_assignment_prefixing_something_harmless() -> None:
     assert not refused("GIT_EDITOR=true git status", PROTECTED)
 
 
-# --- U2: a redirection prefix ------------------------------------------------
+# --- a redirection prefix ----------------------------------------------------
 
 
 @pytest.mark.parametrize(
@@ -632,7 +632,7 @@ def test_violation_finds_a_commit_behind_both_prefixes() -> None:
     assert refused('GIT_EDITOR=true >log git commit -m "m"', PROTECTED)
 
 
-# --- U3: command substitution ------------------------------------------------
+# --- command substitution ----------------------------------------------------
 
 
 def test_violation_finds_a_push_inside_backticks() -> None:
@@ -647,7 +647,7 @@ def test_violation_finds_a_push_inside_a_dollar_substitution() -> None:
     assert refused("$(git push origin main)", OTHER)
 
 
-# --- U4: wrapper programs ----------------------------------------------------
+# --- wrapper programs --------------------------------------------------------
 
 
 @pytest.mark.parametrize("wrapper", ["sudo", "env", "time", "nohup", "doas"])
@@ -676,7 +676,7 @@ def test_violation_allows_a_wrapper_running_something_else() -> None:
     assert not refused("sudo apt install git", PROTECTED)
 
 
-# --- U5: how git is spelled --------------------------------------------------
+# --- how git is spelled ------------------------------------------------------
 
 
 @pytest.mark.parametrize(
@@ -688,7 +688,7 @@ def test_violation_matches_the_executable_without_regard_to_case(
     assert refused(f'{executable} commit -m "m"', PROTECTED)
 
 
-# --- U6: refspec shapes ------------------------------------------------------
+# --- refspec shapes ----------------------------------------------------------
 
 
 @pytest.mark.parametrize(
@@ -725,7 +725,7 @@ def test_violation_refuses_a_commit_after_switching_to_main_by_full_ref() -> Non
     assert refused('git checkout refs/heads/main && git commit -m "m"', OTHER)
 
 
-# --- U7: a switch that cannot be resolved ------------------------------------
+# --- a switch that cannot be resolved ----------------------------------------
 
 
 @pytest.mark.parametrize("target", ["-", "@{-1}"])
@@ -759,7 +759,7 @@ def test_violation_does_not_carry_an_unresolvable_switch_across_a_weak_join() ->
     assert not refused('git checkout - ; git commit -m "m"', OTHER)
 
 
-# --- U8: the false positives this round must not introduce -------------------
+# --- the false positives command recognition must not introduce --------------
 
 
 @pytest.mark.parametrize(

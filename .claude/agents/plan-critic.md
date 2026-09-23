@@ -37,6 +37,7 @@ error found at step 6 is the whole build.
 | **Order** | An implementation-guide entry that depends on a later one; an entry too large to finish and check. |
 | **Test intents** | An intent that restates the criterion instead of saying what a test would prove; a failure branch in a `Raises:` with no intent. |
 | **Risks** | A risk the plan names without saying what the build should do; a risk you can see that it does not name. |
+| **Cause** | Fix rounds only, where section 1 carries a Defect block: a plan that changes the site of the symptom rather than the cause in the Root cause row; an input the Scope row took from the class with no test intent; a Blast radius row the plan does not address. |
 
 Read the body of existing code, not just its signatures. The boundary conditions the plan
 will get wrong are in comparison operators and early returns, not in the Public API table.

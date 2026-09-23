@@ -38,6 +38,26 @@ accepted at step 8 opens the next round on the same branch.
 `/feature <what to build>` starts the pipeline by opening step 1. In a session that is
 already mid-pipeline it reports the step instead.
 
+`/fix <symptom>` starts the same pipeline from a defect. It reproduces the symptom, finds
+the root cause, sizes the class of inputs the cause breaks and has a `diagnosis-critic` try
+to falsify the cause — all **before** step 1 opens — and routes to `/feature` or
+`/small-change` instead when the diagnosis says it is not a bug. There is no second
+pipeline: a **fix round** is one whose section 1 carries a filled **Defect** block, and
+nothing else marks it — a round `/fix` opens as round 1 takes the `fix/` prefix, and a
+later round opened on a bug report gets the block whatever its folder is called, while a
+follow-up round in a `fix/` folder that is not itself a defect does not. The steps that
+behave differently read the block from the plan file, and no hook needs to know:
+
+| Step | On a fix round |
+|---|---|
+| 1 | Starts from the Defect block, asks whether the fix covers this instance or the whole class, and always writes a reproduction criterion first and a regression criterion last |
+| 2 | Plans against the Root cause row, and the `plan-critic` checks the plan removes the cause rather than the site of the symptom |
+| 3 | Writes the reproduction as a test and runs it red before fixing; a reproduction that is already green halts the build |
+| 5 | Extends the test file step 3 added the reproduction to, and leaves that test as written |
+| 6 | Cites the red run and the green run for the reproduction, and more than a green suite for the regression criterion |
+| 8 | Runs a fourth `brainstormer` lens, `defect-class`: the same cause elsewhere, and what let this ship |
+| 9 | Puts the Defect block's Observed, Root cause and Scope rows in the pull request body, so the reviewer sees the cause |
+
 Exactly one plan file across the repo carries `status=active`. When step 8 opens the next
 round, the round before it becomes `done` and the new file takes over. Step 9 marks the
 newest round `done` in the commit that opens the pull request, so nothing on `main` ever
@@ -69,15 +89,16 @@ chat verbatim as the step returns. That is their window into the work.
 
 ### More eyes where the work diverges
 
-Most steps have one right answer and one agent is enough. Three do not, and there a second
+Most steps have one right answer and one agent is enough. Four do not, and there a second
 reader is cheap insurance against one author's blind spots:
 
 | Step | Extra readers | Why there |
 |---|---|---|
+| `/fix`, before 1 | one `diagnosis-critic` | A wrong root cause ships a fix that passes its own reproduction while the bug stays |
 | 2 Plan | one `plan-critic` | The plan is the last thing anyone re-thinks before the build runs unattended |
 | 5 Test | two `test-designer` briefs, `input-space` and `contract` | Edge cases from the parameters and from the promises are different lists |
 | 6 Concept check | none extra | Running as its own subagent already makes it an independent read |
-| 8 Recommend | three `brainstormer` lenses, `user`, `maintainer`, `integrator` | Follow-ups are opinion; three opinions that disagree are worth more than one |
+| 8 Recommend | three `brainstormer` lenses, `user`, `maintainer`, `integrator`, plus `defect-class` on a fix round | Follow-ups are opinion; three opinions that disagree are worth more than one |
 
 Read-only agents run in parallel; anything that writes runs alone. The calling step merges
 what comes back, applies or rebuts each finding on the record, and stays the one voice in
@@ -93,6 +114,7 @@ subagent; effort cannot be passed, so the subagent reads it from its skill file 
 
 | Step | Model | Effort | Why |
 |---|---|---|---|
+| `/fix` diagnosis | `opus` | `xhigh` | A wrong root cause costs the whole build and ships a fix that does not fix |
 | 1 Conceptualize | `opus` | `xhigh` | Shaping the concept is the most expensive thing to get wrong |
 | 2 Plan | `opus` | `high` | The design fork, and signatures step 4 checks literally |
 | 3–7 `/build` | `opus` | `medium` | Orchestration: reads the marker, spawns, relays, halts |
@@ -105,7 +127,8 @@ subagent; effort cannot be passed, so the subagent reads it from its skill file 
 | 9 Pull request | `sonnet` | `max` | Verification and writing, both well-specified |
 | 10 Review | `opus` | `medium` | Most check-ins find nothing; the judgment is fix-or-new-round |
 
-`/feature` carries step 1's settings because it opens step 1 in the same turn.
+`/feature` carries step 1's settings because it opens step 1 in the same turn, and so does
+`/fix`, whose diagnosis is the same judgment made one step earlier.
 `/small-change` runs `opus` at `high`: bypassing the pipeline is a judgment call made
 without any of its safety nets, so the step that decides whether a change really is small
 gets the clever model.
@@ -189,10 +212,12 @@ belongs back at step 1, and saying so — as a halt, from inside the build — i
 | Situation | Use |
 |---|---|
 | New module, new public function, behavior change, anything needing a design decision | `/feature` |
+| Something that exists behaves wrongly — wrong output, a crash, a guard that lets something through | `/fix` |
 | Rename, docstring wording, plot styling, message text, formatting | `/small-change` |
 | Resuming work already in flight | The step's own skill, or `/feature` to check state |
 | A build that halted, once the question is answered | `/build` |
 | Need edge cases for a function | `test-designer` subagent, `input-space` or `contract` brief |
+| A root cause that needs a second reader before a fix is agreed on it | `diagnosis-critic` subagent, from `/fix` |
 | A plan that needs a second reader | `plan-critic` subagent |
 | Follow-ups for a finished feature | `brainstormer` subagent, one lens per run |
 | STRUCTURE.md looks out of sync with the code | `structure-auditor` subagent |
@@ -209,6 +234,10 @@ It is **not** a small change if it does any of these:
 
 Any one of them routes to `/feature`. Everything else is `/small-change`.
 
+A defect fails the third line every time — fixing a bug changes behaviour by definition —
+and takes `/fix` rather than `/feature`, because the question a bug raises first is not
+small-or-large but bug-or-not, and only a diagnosis answers that.
+
 ### Routing is Claude's job, not the user's
 
 **The user never has to type a slash command.** When they describe work in prose — "I want
@@ -218,7 +247,11 @@ above *before touching anything*, and act on the classification:
 - **Clearly small** — say so in one line with the reason, then make the change under
   `/small-change`.
 - **Clearly not small** — say so in one line with the reason, then start `/feature`.
-- **Genuinely ambiguous** — ask, with `AskUserQuestion`, offering the two routes and what
+- **A defect** — "this returns the wrong thing", "this crashes on", "this should have been
+  refused" — say so in one line, then start `/fix`. It diagnoses before anything is agreed
+  and routes back to `/feature` or `/small-change` on its own if it turns out not to be a
+  bug.
+- **Genuinely ambiguous** — ask, with `AskUserQuestion`, offering the routes in question and what
   each would mean for this particular request. Do not resolve a coin flip by guessing.
 
 Announce the routing either way. A one-line "small: local rename, no signature or behaviour
@@ -296,7 +329,8 @@ pytest
 - **Before a turn ends**, `.claude/hooks/stop_gate.py` decides how strict to be from the
   active plan's step. Steps 1 to 7 are advisory: the build carries its own gates at steps
   4, 5 and 7, and a halt has to be able to end the turn on a red tree. From step 8, and
-  whenever no plan is active, it blocks if ruff, mypy or pytest fail, if `STRUCTURE.md`
+  whenever no plan is active, it blocks — when a Python file changed in the tree or on the
+  branch — if ruff, mypy or pytest fail, if `STRUCTURE.md`
   does not mention a module that exists on disk, if a test file sits outside `tests/` where
   `pytest` would never collect it, or if a package directory under `src/` has no
   `__init__.py`. Create `.claude/.skip-gate` to bypass it deliberately.

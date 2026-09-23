@@ -15,6 +15,22 @@ concept is right — and only then does it create anything on disk.
 quietly settles questions the concept has not asked yet. The one thing this step does
 choose is the branch, because the scope it settles is what the branch is named for.
 
+**On a fix round the code is the subject, and reading it is required rather than
+forbidden.** A fix round is one whose section 1 carries a filled **Defect** block, and
+nothing else marks it. `/fix` has already reproduced the defect, found its cause, sized the
+class of inputs it breaks and had a `diagnosis-critic` read the diagnosis; that diagnosis
+arrives with the invocation and is the Defect block's starting content — it reaches disk
+with the rest of section 1 when the user confirms, like everything else this step
+produces. A concept for a fix names the line it fixes. Writing code still waits for step 3.
+On a feature round, delete the Defect block from the round file.
+
+**A round opened for a defect that has no diagnosis yet** — its Builds on section says
+"Opened on a bug report — run `/fix` first", the Defect block is empty, and no diagnosis
+arrived with this invocation — is not ready for this step. Invoke `/fix`; it diagnoses
+into the file and hands back here with the diagnosis in the message. This is what a
+session resumed after a context reset needs, because the session brief sends step 1 here
+and nothing on disk would otherwise say a diagnosis was owed.
+
 ## 1. Ground yourself
 
 Read `STRUCTURE.md` and skim whatever it names as relevant. A concept that ignores what
@@ -49,6 +65,23 @@ Push back once where it is warranted: an input shape that will be awkward to use
 connection that couples two things that were separate, scope that is really two features.
 Say it in a sentence or two, then follow the user's call.
 
+**On a fix round** the conversation starts from the Defect block rather than from a first
+reading, and Why is already answered there — do not restate it. Cover instead:
+
+- **Scope.** The one fork every fix has: *this instance* or *the class*. The Defect block
+  lists what else the same cause breaks; ask, with `AskUserQuestion`, whether this round
+  takes all of it or only the reported input, and record the answer and its reason in the
+  Scope row. Whatever the class holds that is not taken goes under Explicitly out of scope
+  **by name**, so step 8 finds it rather than the next bug report.
+- **Blast radius decisions.** A caller, a test or a document that depends on the current
+  wrong behaviour is a decision to make here — change it, or keep it and say why — not a
+  surprise for step 3, which cannot ask.
+- **What it is.** One paragraph on the fix, naming the cause it removes. "Rewrite the
+  window loop" is a plan; "every complete window gets a mean, including the last" is a
+  concept.
+- **Verdict.** If the diagnosis says *works as designed* or *never decided*, this is not a
+  fix round at all — say so and switch to a feature concept, deleting the Defect block.
+
 ## 3. Write the acceptance criteria
 
 The most important output of this step. Numbered, observable from outside the code, and
@@ -67,9 +100,28 @@ split. If there is one, the concept is probably too vague to plan.
 In a later round, these cover only what *this* round adds. The earlier rounds' criteria are
 not restated here — they stay where they were written and are re-checked in step 6.
 
+On a fix round two criteria are always present. The **first** is the reproduction passing,
+phrased from the Defect block:
+
+> **A1** — Given `[1, 2, 3]` and `"daily"`, `rolling_mean` returns `[1.0, 2.0, 3.0]`, where
+> today it drops the last window and returns `[1.0, 2.0]`.
+
+The **last** is that nothing else changed, phrased so step 6 can evidence it with more than
+a green suite — name what must still hold and how it can be shown:
+
+> **A5** — Still returns `[]` for fewer samples than the window and still raises
+> `ValueError` for an unknown resolution; shown by the existing suite and by a differential
+> of generated inputs against the module on `main`.
+
+If the scope is *the class*, each input in the class gets its own criterion between those
+two. Step 3 writes A1 as a test and runs it red before touching the code; a reproduction
+that is already green halts the build, because it means this section is wrong.
+
 These criteria are also the **halting line** for the build: steps 3 to 7 run unattended,
 and the one thing that stops them is a finding that would change this section. Write each
-criterion so that a subagent can tell whether a surprise falls inside it or outside it.
+criterion so that a subagent can tell whether a surprise falls inside it or outside it. On
+a fix round the Root cause row is on the same line: a build that finds the cause elsewhere
+halts rather than fixing what it found.
 
 ## 4. Close the open questions
 
@@ -83,6 +135,9 @@ Once the scope is settled, propose the branch, using the convention in `CLAUDE.m
 `feat/`, `fix/`, `refactor/`, `docs/`, `test/` or `chore/` plus a kebab-case topic: what the
 work *is*, not what it does to the repo. `feat/csv-export`, not `feat/add-csv-module`.
 Include it in the confirmation message so the user reacts to it with the rest.
+
+A round 1 opened by `/fix` takes the `fix/` prefix, and the topic names the defect rather
+than the ticket: `fix/rolling-mean-last-window`, not `fix/bug-12`.
 
 A later round keeps the branch its folder is named for. There is nothing to choose.
 
@@ -119,7 +174,10 @@ place in the pipeline to change your mind and the most expensive one to rush.
 
    Set the title, fill the Feature, Round, Branch and Started rows, write "Nothing — this
    is the first round." under **Builds on**, delete the quoted instructions, and write
-   everything from the conversation into section 1.
+   everything from the conversation into section 1 — the Defect block from the diagnosis
+   and the conversation on a fix round, or deleted whole on a feature round. On a round
+   that was opened on a bug report, delete the "Opened on a bug report — run `/fix`
+   first" line from **Builds on** now that the block is filled.
 
 3. Mark step 1 `done` in the Progress table and set the marker to
    `<!-- claude-plan step=2 status=active -->`.

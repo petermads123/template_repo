@@ -16,7 +16,7 @@ file and scales its strictness:
 - **Steps 8 to 10**: strict, same as no plan. Step 7 is where the block
   promises a green tree, and nothing after it is allowed to take that back.
 
-Stdlib only: `jq` is not available on this machine and hook commands default to
+Stdlib only: `jq` may not be available and hook commands default to
 Git Bash on Windows, so the usual shell recipe does not work here.
 
 Escape hatch: create `.claude/.skip-gate` to bypass this deliberately.

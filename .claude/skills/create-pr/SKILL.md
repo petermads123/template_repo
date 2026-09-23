@@ -114,7 +114,7 @@ Show the user, and wait for an explicit yes:
 The tree was already required to be clean in 2a, so there should be nothing uncommitted to
 report. If there is, something was written after the gates ran: go back to section 2.
 
-**This repository is public. Opening a pull request is publishing.** Do not push, do not
+**If this repository is public, opening a pull request is publishing.** Do not push, do not
 create the pull request, and do not run anything with a remote side effect until the user
 has answered.
 
@@ -154,6 +154,11 @@ flight. Neither is acceptable, so:
    does not gate anything, but it is the closest thing that works. Say which of the two
    happened. Never let a failed reviewer request stop the pull request being opened.
 
+**If the branch already has an open pull request** — a later round opened from step 10, or
+a fix round opened on a bug reported against what the branch shipped — there is nothing to
+open. Push, update the existing pull request's body from every round in the folder, skip
+the review request, say so, and go straight to section 5 so `/watch-pr` resumes.
+
 **Not a draft.** Everything ahead of a reviewer has already happened: the branch was
 verified whole in section 2, audited against its concept in step 6, and the user said yes
 in section 3. A draft would understate that and leave them a button to press before anyone
@@ -183,9 +188,11 @@ one change that kept growing.
 
 ```markdown
 ## What
-One paragraph from round 1's section 1: what this adds and why.
-For a multi-round branch, one line per round after it: what that round added and which
-recommendation it came from.
+One paragraph from round 1's section 1: what this adds and why. For a fix round, whichever
+round carries the Defect block, add the Defect block's Observed, Root cause and Scope rows
+in a line each, so the reviewer sees the cause and not only the change. For a multi-round
+branch, one line per round after it: what that round added and which recommendation it
+came from.
 
 ## Acceptance criteria
 The table from section 6 of each round — criterion, met, evidence.
