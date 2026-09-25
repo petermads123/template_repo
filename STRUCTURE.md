@@ -107,7 +107,11 @@ commands hidden behind grouping delimiters; unreadable input, matched on word bo
 so `committee` is not a commit; and every refusal that held before the rewrite. `main` is
 exercised end to end against a throwaway repository: a commit on `main` refused with exit
 2 and the reason on stderr, a commit allowed after branching and off `main`, payloads that
-are not a git command, an unparseable payload, and a byte-order mark.
+are not a git command, an unparseable payload, and a byte-order mark, plus a commit on
+`main` sent from the PowerShell tool and a check that `settings.json` registers the hook for
+both shell tools. `violation` is also run over PowerShell's own forms: `;` chains,
+`if ($?) { }` blocks, here-string messages, backtick continuations and `$env:` assignments,
+refused on `main` and allowed elsewhere, and pushes to `main` refused from any branch.
 
 The command-recognition cases follow: a commit or push hidden behind variable assignments,
 behind each redirection form including `2>&1`, inside backticks and `$( )`, and under each
@@ -252,8 +256,8 @@ Stdlib only.
 
 ### `.claude/hooks/guard_git.py`
 
-`PreToolUse` hook on `Bash`. Refuses a `git commit` or `git push` that would land on
-`main`. Reads the command the way a shell does — `shlex` resolves quoting, so a `;` or `|`
+`PreToolUse` hook on `Bash` and `PowerShell`. Refuses a `git commit` or `git push` that
+would land on `main`. Reads the command the way a shell does — `shlex` resolves quoting, so a `;` or `|`
 inside a commit message stays part of the message — then splits it on the real separators
 into one invocation per segment. The grouping delimiters `(`, `)`, `{` and `}` split too, so
 a command hidden inside `(git commit -m "x")` is seen rather than left with `(` sitting

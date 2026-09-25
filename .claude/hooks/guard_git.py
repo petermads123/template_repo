@@ -41,6 +41,12 @@ shell can resolve leaves the branch unknown rather than unchanged, and a
 `commit` or `push` that meets an unknown branch is refused with a message saying
 so rather than the one about `main`.
 
+It runs for the PowerShell tool as well as Bash, and reads both the same way.
+The git invocations that matter parse identically in either shell: quoted
+arguments, `;` chains, `{ }` blocks and here-string messages. PowerShell 5.1
+has no `&&`, so there a branch switch never carries into the next command, and
+a commit on `main` is refused even straight after `git checkout -b`.
+
 Stdlib only: `jq` may not be available and hook commands default to
 Git Bash on Windows, so the usual shell recipe does not work here.
 """
@@ -312,7 +318,7 @@ def segments(command: str) -> list[Segment] | None:
     """Split a shell command into its individual invocations.
 
     Args:
-        command: The full command line the Bash tool is about to run.
+        command: The full command line the shell tool is about to run.
 
     Returns:
         One segment per invocation, in order, or None if the command could not
@@ -512,7 +518,7 @@ def violation(command: str, branch: str) -> str:
 
 
 def main() -> None:
-    """Allow or refuse the Bash command about to run."""
+    """Allow or refuse the Bash or PowerShell command about to run."""
     # lstrip the BOM: some shells prepend one when piping to a native command.
     raw = sys.stdin.read().lstrip("﻿").strip()
     try:

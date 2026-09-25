@@ -481,6 +481,55 @@ def test_violation_still_refuses_unreadable_input_on_a_real_word() -> None:
     assert refused('git commit -m "unbalanced', PROTECTED)
 
 
+# --- PowerShell syntax: the hook also runs for the PowerShell tool -----------
+
+POWERSHELL_HERE_STRING_COMMIT = "git commit -m @'\nAdd parser\n\nWith a body line.\n'@"
+
+
+@pytest.mark.parametrize(
+    "command",
+    [
+        "git add -A; git commit -m 'Add parser'",
+        "git status; if ($?) { git commit -m 'm' }",
+        POWERSHELL_HERE_STRING_COMMIT,
+        "git commit `\n  -m 'continued on the next line'",
+        "$env:GIT_EDITOR = 'true'; git commit",
+        "git checkout -b feat/x; git commit -m 'no && in PowerShell 5.1'",
+    ],
+)
+def test_violation_refuses_powershell_commits_on_main(command: str) -> None:
+    assert refused(command, PROTECTED)
+
+
+@pytest.mark.parametrize(
+    "command",
+    [
+        "git add -A; git commit -m 'Add parser'",
+        "git status; if ($?) { git commit -m 'm' }",
+        POWERSHELL_HERE_STRING_COMMIT,
+        "git commit `\n  -m 'continued on the next line'",
+        "$env:GIT_EDITOR = 'true'; git commit",
+        "git push -u origin feat/x",
+        "if ($?) { git push origin HEAD }",
+    ],
+)
+def test_violation_allows_powershell_work_off_main(command: str) -> None:
+    assert not refused(command, OTHER)
+
+
+@pytest.mark.parametrize(
+    "command",
+    [
+        "git status; if ($?) { git push origin main }",
+        "git push origin HEAD:main",
+    ],
+)
+def test_violation_refuses_powershell_pushes_to_main_from_anywhere(
+    command: str,
+) -> None:
+    assert refused(command, OTHER)
+
+
 # --- main: the hook's real entry point ---------------------------------------
 
 
@@ -541,6 +590,34 @@ def test_main_allows_a_commit_off_main(
     }
 
     assert run_hook(monkeypatch, payload) == 0
+
+
+def test_main_blocks_a_commit_on_main_from_powershell(
+    monkeypatch: pytest.MonkeyPatch, repo_on_main: Path
+) -> None:
+    payload = {
+        "tool_name": "PowerShell",
+        "tool_input": {"command": "git add -A; git commit -m 'Add parser'"},
+        "cwd": str(repo_on_main),
+    }
+
+    assert run_hook(monkeypatch, payload) == 2
+
+
+def test_the_hook_is_registered_for_both_shell_tools() -> None:
+    settings = json.loads(
+        (Path(__file__).parents[1] / ".claude" / "settings.json").read_text(
+            encoding="utf-8"
+        )
+    )
+    matchers = [
+        entry["matcher"]
+        for entry in settings["hooks"]["PreToolUse"]
+        if any("guard_git.py" in hook["command"] for hook in entry["hooks"])
+    ]
+
+    assert len(matchers) == 1
+    assert set(matchers[0].split("|")) >= {"Bash", "PowerShell"}
 
 
 @pytest.mark.parametrize(

@@ -323,11 +323,11 @@ pytest
 
 - **At session start**, `.claude/hooks/session_brief.py` reports the active plan and the
   step it is on. Silent when nothing is in flight.
-- **Before every `Bash` call**, `.claude/hooks/guard_git.py` refuses a commit or push that
-  would land on `main`, including inside a compound command. `settings.json` pre-approves
-  the git commands the pipeline needs — add, commit, push, fetch, checkout, switch, merge —
-  so an unattended build never stalls on a permission prompt; the guard is what makes that
-  safe.
+- **Before every `Bash` or `PowerShell` call**, `.claude/hooks/guard_git.py` refuses a
+  commit or push that would land on `main`, including inside a compound command.
+  `settings.json` pre-approves the git commands the pipeline needs — add, commit, push,
+  fetch, checkout, switch, merge — so an unattended build never stalls on a permission
+  prompt; the guard is what makes that safe.
 - **After every `Write`/`Edit` of a `.py` file**, `.claude/hooks/lint_py.py` runs
   `ruff format` and `ruff check --fix` on that file. Formatting is handled for you; only
   unfixable errors come back.
