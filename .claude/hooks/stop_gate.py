@@ -28,7 +28,7 @@ import json
 import re
 import subprocess
 import sys
-from pathlib import Path
+from pathlib import Path, PurePosixPath
 
 from plan_state import GATE_FROM_STEP, Plan, active_plan, current_branch, git_lines
 
@@ -212,7 +212,11 @@ def missing_init_files(project_dir: Path) -> list[str]:
     tracked = tracked_python_files(project_dir)
     prefix = f"{SRC_DIR}/"
 
-    packages = {str(Path(path).parent) for path in tracked if path.startswith(prefix)}
+    # Git reports paths with `/` on every platform. `PurePosixPath` keeps them that
+    # way, where `Path` would rebuild them with `\` on Windows and never match.
+    packages = {
+        str(PurePosixPath(path).parent) for path in tracked if path.startswith(prefix)
+    }
     return [
         f"`{package}/` holds modules but no `__init__.py`, so it is not a package "
         "and will not install."
