@@ -241,12 +241,14 @@ Drift found, and what was done about it:
 
 ## 8. Recommendations
 
-> Written in step 8. Follow-up work this change makes possible or desirable. Not bugs in
-> what this round built — those go back through `/build` before the pull request. A defect
-> outside what section 1 promised, such as a class member it put out of scope, is a
-> recommendation here, and its round opens through `/fix`.
+> Written in step 8. Only follow-ups that are critical and belong to this work, which most
+> rounds do not have: replace the table with `None.` when there are none. Lesser ideas are
+> one-line notes in `DEVELOPMENT.md`, not rows here. Not bugs in what this round built —
+> those go back through `/build` before the pull request. A critical defect outside what
+> section 1 promised, such as a class member it put out of scope, is a recommendation here,
+> and its round opens through `/fix`.
 
-| # | Recommendation | Why it helps | Effort | Decision |
+| # | Recommendation | Why it is critical | Effort | Decision |
 |---|---|---|---|---|
 | R1 | | | | |
 

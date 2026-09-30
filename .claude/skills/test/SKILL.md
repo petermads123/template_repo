@@ -18,7 +18,11 @@ your brief.
 ## 1. Find the cases
 
 For each public function, delegate edge-case discovery rather than guessing at it — to two
-designers at once, with different briefs, so the list is not one reader's blind spots:
+designers at once, with different briefs, so the list is not one reader's blind spots.
+Inside `/build` a subagent cannot start another agent, so the orchestrator runs both just
+before this step and their reports are in your brief: start from the merge below. If the
+brief says one failed or returned nothing, find that brief's cases yourself and say so in
+the trace. Run standalone, start them yourself:
 
 ```
 Agent with subagent_type: "test-designer"   brief: input-space

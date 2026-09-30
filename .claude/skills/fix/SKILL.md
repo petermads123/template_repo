@@ -102,8 +102,9 @@ Two lists. **Other inputs the same cause breaks**: enumerate them and run the on
 matter, because they are the raw material of the acceptance criteria and the substance of
 the scope question. **The same shape elsewhere**: grep for the pattern — a second
 comparison that fails the same way, a second parser with the same blind spot. What is found
-here is either in this round's scope or a recommendation at step 8, and step 1 decides
-which.
+here is either in this round's scope or left for step 8, and step 1 decides which; step 8
+raises it as a recommendation only if it is critical, and otherwise at most notes it in
+`DEVELOPMENT.md`.
 
 ### Blast radius
 

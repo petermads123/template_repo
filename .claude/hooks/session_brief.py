@@ -1,6 +1,7 @@
 """SessionStart hook: tell a fresh session where the pipeline left off.
 
-The ten-step workflow stops for the user after steps 1, 2 and 8, and the build
+The ten-step workflow stops for the user after steps 1 and 2, after step 8
+when it has a critical follow-up, and before step 9 publishes, and the build
 block in between can halt to ask, so a session often starts in the middle of
 something. Rather than relying on the user to remember the state — or on Claude
 to guess it — this hook reads the active plan file and injects a short brief as
@@ -81,8 +82,9 @@ def brief(project_dir: Path, plan: Plan) -> str:
         )
 
     lines.append(
-        "\nRead the plan file before doing anything to it. Steps 1, 2 and 8 wait "
-        "for the user; steps 3 to 7 run as one block under `/build`, which "
+        "\nRead the plan file before doing anything to it. Steps 1 and 2 wait "
+        "for the user, step 8 only when it has a critical follow-up, and step 9 "
+        "before it publishes; steps 3 to 7 run as one block under `/build`, which "
         "resumes from the step above and halts only to ask."
     )
     return "\n".join(lines)

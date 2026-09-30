@@ -53,10 +53,14 @@ shape:
   section 3 has no red run, step 3 skipped it, and sending the work back cannot recover
   it — the fix is already committed, and a re-run step 3 would find the reproduction green
   and halt for the wrong reason. Reconstruct it instead, with the test as it is now and the
-  module as it was: `git checkout <commit before step 3's> -- <module path>`, run the
-  reproduction test, paste the failure into section 3 with a note that step 6 produced it,
-  then `git checkout HEAD -- <module path>` and confirm the tree is clean. Only `checkout`
-  is used, because it is pre-approved and the build must not stall on a prompt. If the
+  module as it was: `git checkout <base> -- <module path>`, where `<base>` is the commit
+  that first set this round's marker to step 3, before any of step 3's work — the first
+  line of
+  `git log --reverse --format='%h %s' -S 'step=3 status=active' -- <round file>`.
+  Run the reproduction test, paste the failure into section 3 with a note that step 6
+  produced it, then `git checkout HEAD -- <module path>` and confirm the tree is clean.
+  Only `checkout` is used, because it is pre-approved and the build must not stall on a
+  prompt. If the
   test passes against the old module too, the reproduction does not reproduce and section
   1 is wrong — halt.
 - **The regression criterion.** A green suite is necessary and not sufficient: the suite
@@ -102,8 +106,12 @@ Then go looking, adversarially, for the ways the user would be disappointed on o
   concept recognise this output as the feature they agreed to? And does the showcase read
   as a worked example — named inputs, one call, a named result — so a reader learns how to
   use the feature rather than just that it runs?
-- **Structure** — run the `structure-auditor` subagent once more. Steps 3 and 5 both edit
-  signatures, and this is the last chance to catch the drift before step 7 closes the round.
+- **Structure** — apply the `structure-auditor`'s report once more. Inside `/build` the
+  orchestrator runs it just before this step, after step 5's edits, and the report is in
+  your brief, since a subagent cannot start another agent; if the brief says it failed,
+  compare by hand and say so in the trace. Run standalone, start it yourself. Steps 3 and 5
+  both edit signatures, and this is the last chance to catch the drift before step 7 closes
+  the round.
 
 ## 5. Act on what you find
 

@@ -31,7 +31,7 @@ accepted at step 8 opens the next round on the same branch.
 | 5 | Test | `/build` → `/test` | Edge-case suite, pytest green | — |
 | 6 | Concept check | `/build` → `/concept-check` | Audit against step 1, not step 2 | — |
 | 7 | Ship | `/build` → `/ship` | Round closed, whole tree green | — |
-| 8 | Recommend | `/recommend` | Ranked follow-ups, decided with the user | the user |
+| 8 | Recommend | `/recommend` | Critical follow-ups only, usually none; lesser ideas noted in `DEVELOPMENT.md` | the user, only if there is one |
 | 9 | Pull request | `/create-pr` | Whole-branch re-verification, then a PR to `main` | the user, before publishing |
 | 10 | Review | `/watch-pr` | Hourly check until the PR merges or closes | — |
 
@@ -55,7 +55,7 @@ behave differently read the block from the plan file, and no hook needs to know:
 | 3 | Writes the reproduction as a test and runs it red before fixing; a reproduction that is already green halts the build |
 | 5 | Extends the test file step 3 added the reproduction to, and leaves that test as written |
 | 6 | Cites the red run and the green run for the reproduction, and more than a green suite for the regression criterion |
-| 8 | Runs a fourth `brainstormer` lens, `defect-class`: the same cause elsewhere, and what let this ship |
+| 8 | Runs one `brainstormer`, lens `defect-class`: the same cause elsewhere, and what let this ship; held to the same critical-only bar |
 | 9 | Puts the Defect block's Observed, Root cause and Scope rows in the pull request body, so the reviewer sees the cause |
 
 Exactly one plan file across the repo carries `status=active`. When step 8 opens the next
@@ -65,11 +65,12 @@ says a build is in flight and no commit exists only to tidy up afterwards.
 
 ### Three gates, one unattended block
 
-The user decides three times: they confirm the concept (step 1), accept the plan (step 2),
-and decide the recommendations (step 8), plus a yes before step 9 publishes. Everything
-between the plan and the recommendations — **steps 3 to 7** — is `/build`: one skill that
-runs the five steps in order without asking, each in its own subagent on the model that
-step pins, committing and pushing after each.
+The user decides at most three times: they confirm the concept (step 1), accept the plan
+(step 2), and decide any critical follow-up (step 8), plus a yes before step 9 publishes.
+Most rounds have no critical follow-up, and then step 8 records `None.` and hands straight
+to step 9. Everything between the plan and step 8 — **steps 3 to 7** — is `/build`: one
+skill that runs the five steps in order without asking, each in its own subagent on the
+model that step pins, committing and pushing after each.
 
 The build **halts** and hands back to the user on exactly two things:
 
@@ -98,11 +99,13 @@ reader is cheap insurance against one author's blind spots:
 | 2 Plan | one `plan-critic` | The plan is the last thing anyone re-thinks before the build runs unattended |
 | 5 Test | two `test-designer` briefs, `input-space` and `contract` | Edge cases from the parameters and from the promises are different lists |
 | 6 Concept check | none extra | Running as its own subagent already makes it an independent read |
-| 8 Recommend | three `brainstormer` lenses, `user`, `maintainer`, `integrator`, plus `defect-class` on a fix round | Follow-ups are opinion; three opinions that disagree are worth more than one |
+| 8 Recommend, fix round only | one `brainstormer`, lens `defect-class` | The same cause elsewhere is the one follow-up a fix reliably has, and its author is the last to see it |
 
 Read-only agents run in parallel; anything that writes runs alone. The calling step merges
 what comes back, applies or rebuts each finding on the record, and stays the one voice in
-the code and the plan file.
+the code and the plan file. A step's subagent cannot start another agent, so inside
+`/build` the orchestrator runs step 5's designers, and the `structure-auditor` before steps
+4 and 6, and hands their reports over in the step's brief.
 
 ### Each step picks its own model
 
@@ -123,12 +126,14 @@ subagent; effort cannot be passed, so the subagent reads it from its skill file 
 | 5 Test | `sonnet` | `max` | Edge cases and the bugs they expose |
 | 6 Concept check | `sonnet` | `max` | A different model from the one that wrote the plan |
 | 7 Ship | `sonnet` | `max` | Gates on the whole round, diff review; procedural |
-| 8 Recommend | `opus` | `xhigh` | Judging what is worth building next |
+| 8 Recommend | `opus` | `high` | Judging whether anything is critical enough to hold the pull request |
 | 9 Pull request | `sonnet` | `max` | Verification and writing, both well-specified |
 | 10 Review | `opus` | `medium` | Most check-ins find nothing; the judgment is fix-or-new-round |
 
 `/feature` carries step 1's settings because it opens step 1 in the same turn, and so does
-`/fix`, whose diagnosis is the same judgment made one step earlier.
+`/fix`, whose diagnosis is the same judgment made one step earlier. For the same reason
+`/recommend`, opened by `/build`, and the `/create-pr` it hands on to run on the build's
+turn model; their rows apply when the user invokes them directly.
 `/small-change` runs `opus` at `high`: bypassing the pipeline is a judgment call made
 without any of its safety nets, so the step that decides whether a change really is small
 gets the clever model.
@@ -200,10 +205,12 @@ the same breath as the merge.
 
 ### The gates are the point
 
-**Steps 1, 2 and 8 end on a question, and wait for the answer.** Never take a user's gate
-for them: not because the answer looks obvious, not because they seem to want speed. The
-user's confirmation at step 1 opens step 2 in the same turn, and their acceptance at step 2
-opens the build — those are the user passing a gate, not Claude skipping one.
+**Steps 1 and 2 end on a question, and so does step 8 when it has a critical follow-up;
+each waits for the answer.** Step 8 with nothing critical asks nothing and hands on to step
+9, whose question before publishing still waits. Never take a user's gate for them: not
+because the answer looks obvious, not because they seem to want speed. The user's
+confirmation at step 1 opens step 2 in the same turn, and their acceptance at step 2 opens
+the build — those are the user passing a gate, not Claude skipping one.
 
 The gates are where the work is cheap to redirect: a concept costs a conversation to
 change, a plan a revision, and a build that halts costs whatever it built. A build that
@@ -224,7 +231,7 @@ belongs back at step 1, and saying so — as a halt, from inside the build — i
 | Need edge cases for a function | `test-designer` subagent, `input-space` or `contract` brief |
 | A root cause that needs a second reader before a fix is agreed on it | `diagnosis-critic` subagent, from `/fix` |
 | A plan that needs a second reader | `plan-critic` subagent |
-| Follow-ups for a finished feature | `brainstormer` subagent, one lens per run |
+| Ideas for what to build next, when the user asks for them | `brainstormer` subagent, one lens per run |
 | STRUCTURE.md looks out of sync with the code | `structure-auditor` subagent |
 | Broad "where is X" search across the repo | built-in `Explore` subagent |
 

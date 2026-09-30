@@ -1,6 +1,6 @@
 ---
 name: create-pr
-description: Step 9 of the feature pipeline. Verify the whole branch in one pass — clean tree, current base, the full test suite, every module showcase and every round's plan — then confirm with the user, mark the plan done, and open a pull request to main, ready for review. Use when step 8 is done and the branch is ready for review; step 8 invokes it itself when it found nothing critical.
+description: Step 9 of the feature pipeline. Verify the whole branch in one pass — clean tree, current base, the full test suite, every module showcase and every round's plan — then confirm with the user, mark the plan done, and open a pull request to main, ready for review. Use when step 8 is done and the branch is ready for review; step 8 invokes it itself unless it opened a next round or sent a bug back to the build.
 argument-hint: [slug, if more than one plan exists]
 model: sonnet
 effort: max
@@ -40,12 +40,19 @@ failure this ordering exists to prevent.
 Before the gates run, also remove from `DEVELOPMENT.md` any entry this branch resolved but
 that step 8's cleaning missed — a fix pushed from `/watch-pr` after the last step 8, say —
 and commit it. The gates below then test the tree that actually ships. Before deleting an
-entry, search for its heading, since code comments and `STRUCTURE.md` point at entries by
-heading, and update or remove each pointer in the same commit:
+entry, find what points at it: code comments and `STRUCTURE.md` usually point at the file
+as a whole and sometimes at an entry's heading, so search for both, and update or remove
+each sentence that relies on the entry in the same commit:
 
 ```bash
-git grep -n -F "<heading text>" -- . ":(exclude)DEVELOPMENT.md"
+git grep -n -F -e '<heading text>' -e 'DEVELOPMENT.md' -- . ':(exclude)DEVELOPMENT.md' ':(exclude)development' ':(exclude).claude' ':(exclude)CLAUDE.md'
 ```
+
+Single quotes keep a heading's backticks literal in bash and PowerShell alike; a heading
+with a single quote in it needs `'\''` in bash or `''` in PowerShell. Exit status 1 means
+no match, not an error.
+
+Plan files under `development/` are a historical record; leave them as written.
 
 ### 2b. Catch up with the base
 
@@ -122,6 +129,16 @@ Show the user, and wait for an explicit yes:
 - the result of every check in section 2, including the pass count,
 - the proposed title and the full body.
 
+If the user answers with work to do on the branch first, rather than yes, publish nothing.
+That work is a step 8 `next round` — the user's request, not a recommendation, so the
+critical bar does not apply. In the newest round, replace section 8's `None.` (or add to its
+table) with a row quoting the request, `user's request` under *Why it is critical*, decided
+`next round`, and follow `/recommend`'s *Opening the next round*. A defect in what the
+newest round's section 1 promised goes back to `/build` as `/recommend` §3 describes
+instead; any other defect goes through `/fix`. A purely cosmetic request can
+instead go through `/small-change` on this branch, after which section 2 runs again from the
+top.
+
 The tree was already required to be clean in 2a, so there should be nothing uncommitted to
 report. If there is, something was written after the gates ran: go back to section 2.
 
@@ -180,9 +197,9 @@ Treat it that way — an unanswered confirmation is not a yes, and neither is si
 
 ## 5. Hand off to step 10
 
-Invoke `/watch-pr`. That is the one place in the pipeline where a step starts the next one
-without being asked: the alternative is a published pull request that nobody is watching
-because the user did not know to say so.
+Invoke `/watch-pr` without being asked, as step 8 invokes this step unless it opened a next
+round or sent a bug back to the build: the alternative is a published pull request that
+nobody is watching because the user did not know to say so.
 
 The plan is `done`, so the session brief goes quiet from here; the pull request thread is
 the record of the review, and `/feature` with no argument reports the last round and its
@@ -221,9 +238,9 @@ Group by round when there is more than one.
 - Anything run by hand, with its actual result
 
 ## Follow-ups
-Deferred recommendations from section 8 of every round, with their reasons, or "None"
-when no round had one. Drop any that a later round went on to implement. Also name, in a
-line each, the `DEVELOPMENT.md` entries this branch added and left open.
+Deferred recommendations from section 8 of every round, with their reasons. Drop any that
+a later round went on to implement. Also name, in a line each, the `DEVELOPMENT.md` entries
+this branch added and left open.
 
 ## Notes
 Trade-offs, deliberate omissions, anything a reviewer should know — including anything the

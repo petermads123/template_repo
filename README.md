@@ -152,7 +152,7 @@ pipeline opens by itself, and you rarely need to know it is there.
 | `/small-change <what to change>` | Cosmetic edits with none of the pipeline: a local rename, a docstring reword, message text, plot styling, formatting. Refuses anything that adds or removes a file, changes a public signature, changes behaviour or needs a new test. |
 | `/repo-setup` | Once, in the first conversation after creating a repo from this template. Names the repo, renames the package, offers the branch ruleset, then removes itself from `CLAUDE.md`. |
 | `/build` | Resume a build that halted to ask you something, once you have answered. |
-| `/recommend` | Re-open the follow-up decisions at step 8, if a session ended with them undecided. |
+| `/recommend` | Re-open step 8, if a session ended with a critical follow-up undecided. |
 | `/create-pr` | Open the pull request for a finished branch, if you did not do it in the session that finished it. |
 | `/watch-pr` | Resume watching an open pull request in a fresh session. |
 
@@ -161,8 +161,9 @@ saying which and why in one line. The routing rules are in `CLAUDE.md`.
 
 ### The implementation pipeline
 
-Anything that is not cosmetic goes through ten steps. You decide three times — the concept,
-the plan, and the follow-ups — and the build in between runs on its own. The state lives on
+Anything that is not cosmetic goes through ten steps. You decide at most three times — the
+concept, the plan, and any critical follow-up at step 8, which most rounds do not have —
+plus a yes before step 9 publishes, and the build in between runs on its own. The state lives on
 disk rather than in the conversation, and every step commits and pushes it, so a feature
 survives closing the session and coming back tomorrow — one folder per branch, one numbered
 file per round:
@@ -184,7 +185,7 @@ development/
 | 5 | `/build` → `/test` | The edge-case suite, and fixes for what it finds | — |
 | 6 | `/build` → `/concept-check` | An audit against step 1, criterion by criterion | — |
 | 7 | `/build` → `/ship` | The round closed, whole tree green | — |
-| 8 | `/recommend` | Ranked follow-ups, decided with you | you |
+| 8 | `/recommend` | Critical follow-ups only, usually none; lesser ideas noted in `DEVELOPMENT.md` | you, only if there is one |
 | 9 | `/create-pr` | A full re-verification of the whole branch, then a pull request to `main` | you, before it publishes |
 | 10 | `/watch-pr` | An hourly check of the open PR, acting on comments, until it merges or closes | — |
 
@@ -200,8 +201,8 @@ the diff.
 Where the work genuinely diverges, more than one agent reads it: a diagnosis critic tries
 to falsify the root cause before a fix is agreed, a plan critic reads the plan against the
 concept before you accept it, two test designers with different briefs find the edge cases
-at step 5, and three brainstormers with different lenses propose the follow-ups at step 8.
-The calling step merges what they find and stays the single voice.
+at step 5, and on a fix round one more reader asks at step 8 where else the same cause
+lives. The calling step merges what they find and stays the single voice.
 
 Step 9 requests your review on the PR it opens. **Claude never merges on its own judgment,
 and never on an approval alone** — a PR reaches `main` either because you pressed the button
@@ -218,7 +219,8 @@ review route is unavailable, step 9 assigns you instead, and the merge signal is
 
 Start with `/feature <what to build>` — it opens step 1. Your confirmation of the concept
 opens step 2 in the same turn, and your acceptance of the plan opens the build. After the
-build, step 8 ends on a question, and step 9 asks before it publishes.
+build, step 8 asks you only if it found something critical, and step 9 asks before it
+publishes.
 
 A bug starts with `/fix <symptom>` instead, and gets a diagnosis before step 1: the symptom
 reproduced and its output quoted, the root cause as a file and line, the commit that
@@ -228,8 +230,8 @@ then does step 1 open, and its first question is the one every fix has: this ins
 the whole class? The rest of the pipeline is the same, with differences you will see in
 the trace: the build writes the reproduction as a test and runs it red before fixing,
 and halts if it is not red; the concept check has to show more than a green suite for
-"nothing else changed"; and the follow-ups get a fourth reader asking where else the same
-cause lives and what should have caught it. If the diagnosis finds that the code does what
+"nothing else changed"; and step 8 gets a reader asking where else the same cause lives
+and what should have caught it. If the diagnosis finds that the code does what
 was agreed and you want something different, `/fix` says so and hands over to `/feature`.
 
 **You do not have to type the commands.** Describe the work in prose — "I want to add CSV
@@ -251,9 +253,10 @@ because they are judgment; implementation, verification, tests, the concept chec
 pull request run on Sonnet at max effort because the thinking has already been done and
 written down. Steps 3 to 7 run as subagents for exactly this reason — a skill's model
 override lasts the whole turn, so five steps chained in one turn would all run on the first
-one's model. `/small-change` runs on Opus too — deciding a change is small enough to skip
-the pipeline is the one judgment made without the pipeline to catch it. `CLAUDE.md` has
-the table.
+one's model. The one exception is the end of the build: `/build` opens `/recommend` in its
+own turn, so step 8 and the `/create-pr` it hands on to run on the build's model.
+`/small-change` runs on Opus too — deciding a change is small enough to skip the pipeline
+is the one judgment made without the pipeline to catch it. `CLAUDE.md` has the table.
 
 Step 9 is not a formality. It is the only point where the branch is verified as a whole:
 step 7 checked one round at one moment, so on a multi-round branch nothing has yet proved
@@ -264,9 +267,10 @@ and no commit ever exists just to tidy up afterwards.
 
 Two things are worth knowing about the shape of it. **Step 6 audits against step 1, not
 step 2**: a plan can drift from its concept a little at each step while passing every check
-along the way, and this is where that gets caught. And **step 8 is where new scope belongs**
-— ideas that turn up during steps 1 to 7 are a distraction, but with the finished feature in
-front of you they are a decision. A recommendation you accept opens a new numbered file in
+along the way, and this is where that gets caught. And **step 8 is deliberately small**:
+it raises a follow-up only when leaving it undone would make what ships wrong or unsafe,
+and most rounds have none. Lesser ideas become one-line notes in `DEVELOPMENT.md` rather
+than questions for you. A recommendation you accept opens a new numbered file in
 the same folder and goes back through steps 1 to 7 on the same branch, so one pull request
 can carry several deliberate passes over one feature. Step 6 of a later round re-checks the
 earlier rounds' acceptance criteria, so a follow-up cannot quietly regress what it builds on.

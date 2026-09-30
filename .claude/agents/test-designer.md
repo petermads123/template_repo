@@ -13,9 +13,10 @@ calling agent does that, so the suite stays in one voice. You supply the thinkin
 
 ## Two briefs
 
-Step 5 runs two of you on the same function, in parallel, with different briefs. Your brief
-names which one you are; stay in it, because the point of two is that they find different
-things.
+Two of you run in parallel on the same function or list of functions, with different
+briefs: `/build` starts you just before step 5, and `/test` starts you when it runs
+standalone. Your brief names which one you are; stay in it, because the point of two is
+that they find different things.
 
 - **input-space** — work the checklist below against the function's parameters. Where are
   the limits, what happens either side of them, what shape of input did the author not
