@@ -66,6 +66,10 @@ request's. "Flake" is not a root cause, and never skip or disable a test to get 
 That last row is not a failure. A review comment you cannot classify is exactly the thing a
 person should read, and guessing at it is worse than saying so.
 
+A comment that is valid but that the user or reviewer agrees to leave for later, rather than
+fix now or take through a round, gets a one-line `DEVELOPMENT.md` entry instead of any of the
+four rows above. See §5 for when that entry is committed.
+
 A fix pushed from here is pushed with no active plan, so the stop gate holds its strict
 line: the four checks must be green before the turn ends. That is right — a review fix is
 the one change on the branch nothing else re-verifies.
@@ -141,6 +145,13 @@ The pull request thread is the record: every fix names its commit in a reply, ev
 dismissal says why, every round says where it went. Nothing is written to the plan file
 from here — it was closed at step 9, and a commit that only updates a log after the review
 started is the bookkeeping this pipeline was redesigned to avoid.
+
+`DEVELOPMENT.md` is the one file this step does write to, for a deferral recorded per §3.
+The entry rides with the next fix commit this step makes on the branch when there is one due
+soon; otherwise commit it on its own, subject naming the thread it came from. If a deferral
+arrives together with an instruction to merge, push the entry first and ask once more for
+re-confirmation, naming the prose-only commit that just went in — §6's staleness rule is not
+relaxed for a commit this step made itself.
 
 Quiet check-ins are recorded nowhere. A log of "nothing had changed" nineteen times is noise.
 

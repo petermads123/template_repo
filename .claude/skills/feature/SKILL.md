@@ -8,7 +8,8 @@ effort: xhigh
 
 # Feature pipeline
 
-Ten steps, one plan folder per branch, three places where the user decides. This skill is
+Ten steps, one plan folder per branch, at most three places where the user decides (step
+8 only when it finds something critical), plus a yes before step 9 publishes. This skill is
 the entry point for a feature: it either resumes what is in flight or starts something new.
 It does not do the work. A defect enters the same pipeline through `/fix`, which diagnoses
 it first.
@@ -24,7 +25,7 @@ it first.
 | 5 | Test | `/build` → `/test` | Edge-case suite, pytest green | — |
 | 6 | Concept check | `/build` → `/concept-check` | Audit against step 1, not step 2 | — |
 | 7 | Ship | `/build` → `/ship` | Round complete on the branch | — |
-| 8 | Recommend | `/recommend` | Ranked follow-ups | the user |
+| 8 | Recommend | `/recommend` | Critical follow-ups, usually none | the user, only if there is one |
 | 9 | Pull request | `/create-pr` | PR to `main`, ready for review | the user, before publishing |
 | 10 | Review | `/watch-pr` | Hourly check until the PR merges or closes | — |
 
@@ -74,5 +75,6 @@ the shape of the feature actually gets decided.
 `/feature` with no argument, or in a fresh session, reports the state and stops — including
 which round of which branch is in flight, what the earlier rounds delivered, and whether a
 build halted and on what. The step's own skill re-enters it: `/plan` to revise a plan,
-`/build` to resume a halted build, `/recommend` to decide the list, `/watch-pr` to resume a
-watch. Re-running a step is normal and cheap. Skipping one is neither.
+`/build` to resume a halted build, `/recommend` to decide a critical follow-up left
+undecided, `/watch-pr` to resume a watch. Re-running a step is normal and cheap. Skipping
+one is neither.

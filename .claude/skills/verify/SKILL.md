@@ -49,14 +49,22 @@ Report a table of the result. For each mismatch, say which it is:
 
 ## 3. Check STRUCTURE.md
 
-Run the auditor rather than eyeballing it:
+Use the `structure-auditor` rather than eyeballing it: it catches the signature drift the
+stop gate cannot see. Inside `/build` a subagent cannot start another agent, so the
+orchestrator runs it just before this step and its report is in your brief. Run
+standalone, start it yourself:
 
 ```
 Agent with subagent_type: "structure-auditor"
 ```
 
-It catches the signature drift the stop gate cannot see. Apply the edits it returns — it is
-read-only by design.
+Apply the edits it returns — it is read-only by design. Inside `/build` its report
+describes the code as step 3 left it, before the fixes you made under sections 1 and 2 of
+this skill: check
+each edit against the code as it stands, skip one your changes superseded, and update
+`STRUCTURE.md` by hand for anything you added, removed or re-signed, saying so in the trace.
+If the brief says the auditor failed or returned nothing, compare `STRUCTURE.md` with the
+code by hand, and say so in the trace.
 
 ## 4. Run every new module standalone
 

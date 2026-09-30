@@ -49,13 +49,23 @@ a `fix/` folder without one is not. Before touching production code:
    **It must fail**, and fail the way the Defect block's Observed row says. Paste the
    failure into section 3, verbatim: it is the evidence step 6 cites for the first
    criterion. Step 6 can reconstruct a missing red run from history, but should not have
-   to.
+   to. Then commit and push the test and the plan file by explicit path, subject
+   `WIP step 3: reproduction, red`, before touching production code.
 3. Then fix, following the implementation guide, and run the same test green.
 
 A reproduction that passes before the fix means the diagnosis is wrong or the test does not
 reproduce the symptom — either way section 1 is wrong, and that is a **halt**, not a test to
 adjust until it fails. A failure of a different shape from the one the Defect block
 describes is the same halt. Step 5 extends this file and leaves this test as written.
+
+A re-run is the one exception. When your brief says an earlier run was interrupted and its
+partial work already holds the fix, or step 6 or step 8 set the marker back to step 3 after
+the fix was committed (the bottom of section 6 says what is unmet), a green reproduction is
+expected. If section 3 already holds the red run, leave it. Otherwise confirm it red against
+this round's base, as step 6 would — the commit that first set this round's marker to step
+3, the first line of
+`git log --reverse --format='%h %s' -S 'step=3 status=active' -- <round file>` — and paste
+that run into section 3. Then fix what section 6 names, and carry on.
 
 ## 2. Write the code
 
@@ -164,10 +174,12 @@ Report it with the criterion it breaks and what you would have needed decided.
 
 ## 5. Commit and push
 
-The code, `STRUCTURE.md` and the plan file — and on a fix round the reproduction test — in
-one commit unless the work genuinely separates. Subject in the imperative, under 72
-characters, saying what changes rather than what you did — `Add CSV export for record
-collections` — with the round file named in the body. Then push. The tree must be clean
+The code, `STRUCTURE.md` and the plan file in one commit unless the work genuinely
+separates; on a fix round the reproduction test is already in your first checkpoint (§1a).
+The work-in-progress checkpoints your `/build` brief asks for come before this, the step's
+closing commit. Subject in the imperative, under 72 characters, saying what changes rather
+than what you did — `Add CSV export for record collections` — with the round file named in
+the body. Then push. The tree must be clean
 when this step ends: a step that leaves work uncommitted leaves nothing for the next
 session to resume from.
 

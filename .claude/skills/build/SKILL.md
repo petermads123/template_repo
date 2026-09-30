@@ -32,6 +32,25 @@ stop. If it is 8 or later the build is finished; say so and stop. If a `Halted` 
 exists in the file, read it: the build is resuming, and the user's answer to it is in the
 conversation or in the file.
 
+Then look for an interrupted run:
+
+```bash
+git status --short
+git log --oneline main..HEAD
+```
+
+A step was interrupted — by a restart or a usage limit, before its final commit — if the
+tree has changes, or if the log, read from the top down to the first subject that does not
+start `WIP step N:` (N being the marker's step), shows any such commits. Those are its
+checkpoints, and after a fresh container they may be all that is left. Do not stash, reset
+or commit anything yourself: the uncommitted changes and the checkpoints are that step's
+partial work, and its brief hands them to it (item 6 below).
+
+One change is not partial work: the user's answer to a halt. When the plan file has a
+`Halted` section whose answer is not yet committed, record it as section 4 says and commit
+and push it by explicit path, subject `Halt answered at step N: <short>`, before this check
+counts anything.
+
 The Branch row must match the checked-out branch. If it does not, stop and say so — the
 branch was created at step 1 and nothing since should have moved.
 
@@ -53,6 +72,26 @@ The model column is the skill's own frontmatter; pass it as the `model` argument
 `Agent` tool. Effort cannot be passed to a subagent, so the `effort: max` those skills pin
 is a statement of intent the subagent reads in its skill file rather than a setting.
 
+### The readers you run for a step
+
+A subagent cannot start another agent. So the extra readers three steps rely on are run by
+you, just before you spawn the step, and their reports go into its brief. All of them are
+read-only; run the two designers in parallel.
+
+| Before step | Agent | Brief |
+|---|---|---|
+| 4 | `structure-auditor` | the plan file's path; reconcile `STRUCTURE.md` with the code as step 3 left it |
+| 5 | `test-designer`, twice | `input-space` and `contract`, one each: the plan file's path, the public functions in section 2's Public API table (it reads their code itself), at most fifteen cases per function; on a fix round, the Defect block's Class and Expected rows, as `/test` describes |
+| 6 | `structure-auditor` | as before step 4, against the code as step 5 left it |
+
+A large Public API table may be split by module into several designer pairs.
+
+Put each report into the step's brief verbatim, under a heading naming the agent and its
+brief. If a report is too long to paste, write it to a file outside the repository and give
+the path; never write it into the tree, where it would dirty it. Do not summarise or filter
+a report: judging it is the step's job. If a reader fails or returns nothing, say so in the
+brief; the step then does that check itself and says so in its trace.
+
 ### The subagent's brief
 
 Every subagent gets the same shape of prompt:
@@ -63,7 +102,21 @@ Every subagent gets the same shape of prompt:
    automatically in the main session; a subagent has to be told.
 3. The halting rules below, verbatim, and that it must **not** proceed to the next step:
    it finishes its own step, commits, pushes, sets the marker, and reports.
-4. The report contract:
+4. Before steps 4, 5 and 6, the readers' reports, as above.
+5. Work-in-progress commits. Commit and push at each natural checkpoint, then carry on. A
+   checkpoint is a module written, a test file passing, a fix gone green. Stage by explicit
+   path, with subject `WIP step N: <what>`. A restart then costs minutes rather than the
+   step. The step's final commit and its marker change follow as usual. On a fix round,
+   step 3's first checkpoint is the reproduction test with its red run pasted into section
+   3, committed before any production code changes.
+6. When the step resumes an interrupted run (section 1), this note, with the files, the
+   commits, or both named:
+
+   > An earlier run of this step was interrupted. The uncommitted changes in <files>, and
+   > the commits <hashes>, are its partial work. Read them and continue from them. Do not
+   > discard, reset or rewrite them before you have read them.
+
+7. The report contract:
 
 ```
 STATUS: done | halt
@@ -85,8 +138,9 @@ After each subagent returns:
 
 - **`STATUS: done`** — confirm the marker advanced to the next step and the tree is clean
   (`git status --short` empty; the step committed and pushed). If either is false the step
-  did not finish: run it once more with the discrepancy named, and halt if that also fails.
-  Then relay the trace and start the next step.
+  did not finish: run it once more with the discrepancy named, and with item 6's note if it
+  left changes or `WIP step N:` commits behind. Halt if that also fails. Then relay the
+  trace and start the next step.
 - **`STATUS: halt`** — go to section 4.
 
 A step that sends the work backwards is normal and stays inside the block: step 6 finding
@@ -126,7 +180,8 @@ that needed changing, a missing `STRUCTURE.md` entry, `main` having moved.
 
 When the user answers, `/build` resumes from the marker's step. If their answer changes
 section 1, they are amending the concept: update section 1 (and section 2 where it follows),
-record the change in the `Halted` section, delete nothing, then resume. A halt answered by
+record the change in the `Halted` section, delete nothing, commit and push that by explicit
+path, subject `Halt answered at step N: <short>`, then resume. A halt answered by
 "do it anyway" is also an answer; record that.
 
 ## 5. On reaching step 8
@@ -136,10 +191,14 @@ branch is pushed. Report once: every step's trace is already in the chat, so thi
 commit list from `git log main..HEAD --oneline`, the pass count from section 5, and the
 criteria table from section 6.
 
-Then invoke `/recommend`. It is the one step that ends on a question to the user, and it
-runs on its own model like every other step — but it is the user's gate, not the block's,
-so it is opened rather than skipped. Step 8's ranked list is the last thing this turn
-produces.
+Then invoke `/recommend` in this session, not as a subagent: it may start the
+`defect-class` reader, ask the user and open `/create-pr`, none of which a subagent can do.
+So it runs in this turn, on this turn's model rather than its own pin, and so does the
+`/create-pr` it hands on to. It is the user's step, not the block's, so it is opened rather
+than skipped. It asks the user only when it finds something critical. If it finds a bug in
+this round's own code it sends the work back to step 3 and invokes `/build` again;
+otherwise it records that there is nothing and hands on to `/create-pr`, which asks before
+it publishes.
 
 ## What this skill never does
 

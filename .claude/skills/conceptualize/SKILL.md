@@ -33,8 +33,10 @@ and nothing on disk would otherwise say a diagnosis was owed.
 
 ## 1. Ground yourself
 
-Read `STRUCTURE.md` and skim whatever it names as relevant. A concept that ignores what
-already exists produces a plan that duplicates it.
+Read `STRUCTURE.md` and skim whatever it names as relevant. Also read `DEVELOPMENT.md`: an
+open entry this feature touches is part of its context, and a question the feature raises
+that cannot be answered yet may belong there too. A concept that ignores what already exists
+produces a plan that duplicates it.
 
 **If this is a later round** — step 8 or step 10 opened a second or third file in the
 branch's folder — read every earlier round in that folder first, then fill in the **Builds
@@ -129,6 +131,11 @@ Fill the Open questions list as they come up, and empty it before the step ends.
 unanswered question here becomes a decision made by accident in step 3 — and in this
 pipeline nobody is watching step 3.
 
+A question the user genuinely cannot answer yet, and that this round does not depend on, is
+not left open either: turn it into a stated assumption in section 1 and a `DEVELOPMENT.md`
+entry recording the question and where it is tracked. It is written alongside section 1 in
+*Stop here, then create* below — nothing reaches disk before the user confirms.
+
 ## 5. Name the branch
 
 Once the scope is settled, propose the branch, using the convention in `CLAUDE.md` —
@@ -177,7 +184,9 @@ place in the pipeline to change your mind and the most expensive one to rush.
    everything from the conversation into section 1 — the Defect block from the diagnosis
    and the conversation on a fix round, or deleted whole on a feature round. On a round
    that was opened on a bug report, delete the "Opened on a bug report — run `/fix`
-   first" line from **Builds on** now that the block is filled.
+   first" line from **Builds on** now that the block is filled. If step 4 above turned an
+   unanswerable question into a stated assumption, write its `DEVELOPMENT.md` entry now too,
+   alongside section 1.
 
 3. Mark step 1 `done` in the Progress table and set the marker to
    `<!-- claude-plan step=2 status=active -->`.
@@ -187,8 +196,13 @@ place in the pipeline to change your mind and the most expensive one to rush.
    always resume from the remote.
 
    ```bash
-   git add development/ && git commit -m "..." && git push -u origin <branch>
+   git add development/ DEVELOPMENT.md && git commit -m "..." -- development/ DEVELOPMENT.md && git push -u origin <branch>
    ```
+
+   The pathspec on the commit keeps anything else that happens to be staged out of the
+   branch's first commit. `DEVELOPMENT.md` is harmless to name even when this round added no
+   entry to it: a pathspec naming a file with nothing staged under it is a no-op, not an
+   error.
 
 5. **Invoke `/plan`** in the same turn. The user's confirmation is the gate between the two
    steps, and they have just passed it; the plan is what they see next, and it ends on its

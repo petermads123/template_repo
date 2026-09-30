@@ -44,6 +44,7 @@ development/            one folder per branch, one file per round: the pipeline'
 .claude/                Claude Code configuration: rules, skills, agents, hooks
 .vscode/                editor config (Ruff as formatter, format on save)
 pyproject.toml          packaging, Ruff, mypy and pytest configuration
+DEVELOPMENT.md          development-side open questions and things to fix later (see CLAUDE.md)
 README.md               human setup guide
 CLAUDE.md               routing map for Claude
 STRUCTURE.md            this file
@@ -197,7 +198,7 @@ session resumes from, and what `/create-pr` builds the pull request body from.
 |---|---|
 | `settings.json` | Registers the four hooks; pre-approves ruff/mypy/pytest, `python -m`, and the git commands the pipeline uses (read-only ones plus add, commit, push, fetch, checkout, switch, merge, mv) so an unattended build never stalls on a prompt — `guard_git.py` is what keeps that safe |
 | — | Every skill pins `model` and `effort` in its frontmatter; the table in `CLAUDE.md` says which and why |
-| `skills/build/` | `/build` — steps 3 to 7 as one unattended block: a subagent per step on its pinned model, commit and push after each, halting rules, trace relay, resume from the marker |
+| `skills/build/` | `/build` — steps 3 to 7 as one unattended block: a subagent per step on its pinned model, the step's readers (`structure-auditor`, `test-designer`) run by the orchestrator and handed over in the brief, work-in-progress commits, commit and push after each, halting rules, trace relay, resume from the marker or an interrupted run |
 | `rules/python.md` | Coding conventions, auto-loaded for `**/*.py` |
 | `skills/repo-setup/` | `/repo-setup` — one-time setup of a repo made from this template; carries `main_protect.solo.json` and `main_protect.collab.json` |
 | `skills/feature/` | `/feature` — starts or resumes the pipeline |
@@ -209,14 +210,14 @@ session resumes from, and what `/create-pr` builds the pull request body from.
 | `skills/test/` | `/test` — step 5, edge-case suite |
 | `skills/concept-check/` | `/concept-check` — step 6, audit against the concept |
 | `skills/ship/` | `/ship` — step 7, close the round: whole-tree gates and diff review (inside `/build`) |
-| `skills/recommend/` | `/recommend` — step 8, ranked follow-ups |
+| `skills/recommend/` | `/recommend` — step 8: critical follow-ups only, usually none, decided with the user; lesser ideas noted in `DEVELOPMENT.md`; with nothing critical it hands on to `/create-pr` |
 | `skills/create-pr/` | `/create-pr` — step 9, pull request ready for review |
 | `skills/watch-pr/` | `/watch-pr` — step 10, hourly review watch until merge or close |
 | `skills/small-change/` | `/small-change` — cosmetic edits, outside the pipeline |
 | `agents/diagnosis-critic.md` | Subagent that tries to falsify a defect diagnosis before step 1 agrees a fix on it — re-runs the reproduction, traces the cause independently, checks the class (feeds `/fix`); may run code from a scratch directory but never writes to the tree; pinned to `opus` |
 | `agents/plan-critic.md` | Read-only subagent that reads a plan against its concept and the repo before the user accepts it (feeds step 2); pinned to `opus` |
 | `agents/test-designer.md` | Read-only subagent that finds edge cases; run twice at step 5 with the `input-space` and `contract` briefs |
-| `agents/brainstormer.md` | Read-only subagent that proposes follow-ups through one lens — `user`, `maintainer` or `integrator`, plus `defect-class` on a fix round; three or four run in parallel at step 8 |
+| `agents/brainstormer.md` | Read-only subagent that proposes at most three follow-ups through one lens — `user`, `maintainer`, `integrator` or `defect-class` — or none; step 8 runs only `defect-class`, on a fix round, and the others run when the user asks what to build next |
 | `agents/structure-auditor.md` | Read-only subagent that reconciles this file (feeds steps 4 and 6) |
 
 ### `.claude/hooks/plan_state.py`
