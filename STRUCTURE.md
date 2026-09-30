@@ -44,6 +44,7 @@ development/            one folder per branch, one file per round: the pipeline'
 .claude/                Claude Code configuration: rules, skills, agents, hooks
 .vscode/                editor config (Ruff as formatter, format on save)
 pyproject.toml          packaging, Ruff, mypy and pytest configuration
+DEVELOPMENT.md          development-side open questions and things to fix later (see CLAUDE.md)
 README.md               human setup guide
 CLAUDE.md               routing map for Claude
 STRUCTURE.md            this file

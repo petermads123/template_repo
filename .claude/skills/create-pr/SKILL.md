@@ -1,6 +1,6 @@
 ---
 name: create-pr
-description: Step 9 of the feature pipeline. Verify the whole branch in one pass — clean tree, current base, the full test suite, every module showcase and every round's plan — then confirm with the user, mark the plan done, and open a pull request to main, ready for review. Use when the recommendations are decided and the branch is ready for review.
+description: Step 9 of the feature pipeline. Verify the whole branch in one pass — clean tree, current base, the full test suite, every module showcase and every round's plan — then confirm with the user, mark the plan done, and open a pull request to main, ready for review. Use when step 8 is done and the branch is ready for review; step 8 invokes it itself when it found nothing critical.
 argument-hint: [slug, if more than one plan exists]
 model: sonnet
 effort: max
@@ -36,6 +36,16 @@ git status --short
 here means something was edited outside the pipeline. Commit what belongs and remove what
 does not, then continue. Do not run the suite first and reconcile afterwards — that is the
 failure this ordering exists to prevent.
+
+Before the gates run, also remove from `DEVELOPMENT.md` any entry this branch resolved but
+that step 8's cleaning missed — a fix pushed from `/watch-pr` after the last step 8, say —
+and commit it. The gates below then test the tree that actually ships. Before deleting an
+entry, search for its heading, since code comments and `STRUCTURE.md` point at entries by
+heading, and update or remove each pointer in the same commit:
+
+```bash
+git grep -n -F "<heading text>" -- . ":(exclude)DEVELOPMENT.md"
+```
 
 ### 2b. Catch up with the base
 
@@ -90,8 +100,9 @@ stale file.
 ### 2f. Every round finished
 
 Confirm **every round in this branch's folder**: steps 1 to 8 marked `done`, section 6
-with no unmet criteria, section 8 with a decision against every recommendation, no
-`Halted` section left unanswered. An undecided recommendation means step 8 is not finished.
+with no unmet criteria, section 8 reading `None.` or with a decision against every
+recommendation, no `Halted` section left unanswered. An undecided recommendation means
+step 8 is not finished.
 
 On a multi-round branch, also confirm the newest round's **Earlier rounds still hold**
 regression table is filled in. An empty one means step 6 skipped the regression pass, and
@@ -210,8 +221,9 @@ Group by round when there is more than one.
 - Anything run by hand, with its actual result
 
 ## Follow-ups
-Deferred recommendations from section 8 of every round, with their reasons. Drop any that
-a later round went on to implement.
+Deferred recommendations from section 8 of every round, with their reasons, or "None"
+when no round had one. Drop any that a later round went on to implement. Also name, in a
+line each, the `DEVELOPMENT.md` entries this branch added and left open.
 
 ## Notes
 Trade-offs, deliberate omissions, anything a reviewer should know — including anything the

@@ -288,6 +288,15 @@ the failure this section exists to prevent.
 the conventions are already in context — you do not need to invoke anything to get them.
 A subagent does not get that for free: the build's steps read the file themselves.
 
+## Development notes: `DEVELOPMENT.md`
+
+A file at the repo root for development-side open questions and things to fix later. Steps
+1, 8 and 10 add entries — step 8's are the ideas that fell short of a critical
+recommendation — and step 9 checks the branch removed the ones it resolved. Step 8 ends
+every round by cleaning the file: entries the branch resolved are removed, duplicates are
+merged, and only open items are left. The change that resolves an entry deletes it — the
+procedure for adding and cleaning entries lives in the skills, not here.
+
 ## Branches
 
 Never commit to `main`; it is protected on the remote and `.claude/hooks/guard_git.py`
