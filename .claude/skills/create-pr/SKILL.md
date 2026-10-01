@@ -3,7 +3,7 @@ name: create-pr
 description: Step 9 of the feature pipeline. Verify the whole branch in one pass — clean tree, current base, the full test suite, every module showcase and every round's plan — then confirm with the user, mark the plan done, and open a pull request to main, ready for review. Use when step 8 is done and the branch is ready for review; step 8 invokes it itself unless it opened a next round or sent a bug back to the build.
 argument-hint: [slug, if more than one plan exists]
 model: sonnet
-effort: max
+effort: high
 ---
 
 # Step 9 — Pull request

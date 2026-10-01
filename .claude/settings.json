@@ -5,7 +5,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "python \"$CLAUDE_PROJECT_DIR/.claude/hooks/session_brief.py\"",
+            "command": "\"$(command -v python3 || command -v python)\" \"$CLAUDE_PROJECT_DIR/.claude/hooks/session_brief.py\"",
             "timeout": 30
           }
         ]
@@ -17,7 +17,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "python \"$CLAUDE_PROJECT_DIR/.claude/hooks/guard_git.py\"",
+            "command": "\"$(command -v python3 || command -v python)\" \"$CLAUDE_PROJECT_DIR/.claude/hooks/guard_git.py\"",
             "timeout": 30
           }
         ]
@@ -29,7 +29,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "python \"$CLAUDE_PROJECT_DIR/.claude/hooks/lint_py.py\"",
+            "command": "\"$(command -v python3 || command -v python)\" \"$CLAUDE_PROJECT_DIR/.claude/hooks/lint_py.py\"",
             "timeout": 90
           }
         ]
@@ -40,7 +40,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "python \"$CLAUDE_PROJECT_DIR/.claude/hooks/stop_gate.py\"",
+            "command": "\"$(command -v python3 || command -v python)\" \"$CLAUDE_PROJECT_DIR/.claude/hooks/stop_gate.py\"",
             "timeout": 320
           }
         ]

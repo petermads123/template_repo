@@ -69,7 +69,7 @@ can overlap it.
 | 7 | `/ship` | `sonnet` | everything | section 7 |
 
 The model column is the skill's own frontmatter; pass it as the `model` argument to the
-`Agent` tool. Effort cannot be passed to a subagent, so the `effort: max` those skills pin
+`Agent` tool. Effort cannot be passed to a subagent, so the `effort: high` those skills pin
 is a statement of intent the subagent reads in its skill file rather than a setting.
 
 ### The readers you run for a step

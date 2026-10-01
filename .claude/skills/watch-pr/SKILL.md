@@ -2,7 +2,7 @@
 name: watch-pr
 description: Step 10 of the feature pipeline. Re-check the open pull request roughly hourly, act on review comments and CI, and decide whether a comment is a small fix or needs another round through the pipeline. Merges only when the user explicitly says to, never on an approval alone. Runs until the pull request is merged or closed. Use after the pull request is opened, or to resume watching one.
 argument-hint: [slug, if more than one plan exists]
-model: opus
+model: sonnet
 effort: medium
 ---
 

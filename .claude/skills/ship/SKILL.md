@@ -3,7 +3,7 @@ name: ship
 description: Step 7 of the feature pipeline. Close the round — confirm every gate still holds on the whole tree, review everything the round committed for things that should not be there, record the commits, and push. Runs inside /build as a subagent, after the concept check passes; does not open a pull request.
 argument-hint: [slug, if more than one plan exists]
 model: sonnet
-effort: max
+effort: high
 ---
 
 # Step 7 — Ship

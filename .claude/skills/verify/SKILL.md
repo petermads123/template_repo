@@ -3,7 +3,7 @@ name: verify
 description: Step 4 of the feature pipeline. The static half of verification — ruff, mypy, module showcases, and a literal check that the code matches the planned public signatures and that STRUCTURE.md is in sync. Runs inside /build as a subagent, after implementing and before writing tests.
 argument-hint: [slug, if more than one plan exists]
 model: sonnet
-effort: max
+effort: high
 ---
 
 # Step 4 — Verify
