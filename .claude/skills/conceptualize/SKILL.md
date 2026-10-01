@@ -3,7 +3,7 @@ name: conceptualize
 description: Step 1 of the feature pipeline. Discuss and agree what a feature is, what it connects to, and the observable criteria that define it as done; then name the branch, create its plan folder and first round file, and commit. Use at the start of a feature, or to revise a concept before planning.
 argument-hint: [what to build]
 model: opus
-effort: xhigh
+effort: high
 ---
 
 # Step 1 — Conceptualize

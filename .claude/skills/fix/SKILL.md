@@ -3,7 +3,7 @@ name: fix
 description: Start the pipeline from a defect — wrong output, a crash, a guard that lets something through. Diagnoses before anything is agreed: reproduces the symptom, finds the root cause, sizes the class of inputs it breaks, has a second reader try to falsify the cause, and decides whether it is a defect at all; then hands the diagnosis to /conceptualize as a fix round. Use for any reported bug, whether the user names the skill or describes the symptom in prose.
 argument-hint: [the symptom]
 model: opus
-effort: xhigh
+effort: high
 ---
 
 # Fix

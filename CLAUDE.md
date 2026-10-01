@@ -117,18 +117,18 @@ subagent; effort cannot be passed, so the subagent reads it from its skill file 
 
 | Step | Model | Effort | Why |
 |---|---|---|---|
-| `/fix` diagnosis | `opus` | `xhigh` | A wrong root cause costs the whole build and ships a fix that does not fix |
-| 1 Conceptualize | `opus` | `xhigh` | Shaping the concept is the most expensive thing to get wrong |
+| `/fix` diagnosis | `opus` | `high` | A wrong root cause costs the whole build and ships a fix that does not fix |
+| 1 Conceptualize | `opus` | `high` | Shaping the concept is the most expensive thing to get wrong |
 | 2 Plan | `opus` | `high` | The design fork, and signatures step 4 checks literally |
 | 3–7 `/build` | `opus` | `medium` | Orchestration: reads the marker, spawns, relays, halts |
-| 3 Implement | `sonnet` | `max` | Transcribing a plan that has already done the thinking |
-| 4 Verify | `sonnet` | `max` | Mechanical checks plus classifying each mismatch |
-| 5 Test | `sonnet` | `max` | Edge cases and the bugs they expose |
-| 6 Concept check | `sonnet` | `max` | A different model from the one that wrote the plan |
-| 7 Ship | `sonnet` | `max` | Gates on the whole round, diff review; procedural |
+| 3 Implement | `sonnet` | `high` | Transcribing a plan that has already done the thinking |
+| 4 Verify | `sonnet` | `high` | Mechanical checks plus classifying each mismatch |
+| 5 Test | `sonnet` | `high` | Edge cases and the bugs they expose |
+| 6 Concept check | `sonnet` | `high` | A different model from the one that wrote the plan |
+| 7 Ship | `sonnet` | `high` | Gates on the whole round, diff review; procedural |
 | 8 Recommend | `opus` | `high` | Judging whether anything is critical enough to hold the pull request |
-| 9 Pull request | `sonnet` | `max` | Verification and writing, both well-specified |
-| 10 Review | `opus` | `medium` | Most check-ins find nothing; the judgment is fix-or-new-round |
+| 9 Pull request | `sonnet` | `high` | Verification and writing, both well-specified |
+| 10 Review | `sonnet` | `medium` | Most check-ins find nothing; the judgment is fix-or-new-round |
 
 `/feature` carries step 1's settings because it opens step 1 in the same turn, and so does
 `/fix`, whose diagnosis is the same judgment made one step earlier. For the same reason
@@ -138,7 +138,7 @@ turn model; their rows apply when the user invokes them directly.
 without any of its safety nets, so the step that decides whether a change really is small
 gets the clever model.
 
-`max` is the top effort level; every Sonnet step uses it. Aliases rather than pinned IDs, so
+Every Sonnet step runs at `high`, and `max` (the top level) is unused. Aliases rather than pinned IDs, so
 a newer Opus or Sonnet is picked up without editing a dozen files. `ultracode` is a
 session-level effort setting and not valid in frontmatter, where the levels are `low`,
 `medium`, `high`, `xhigh` and `max`.

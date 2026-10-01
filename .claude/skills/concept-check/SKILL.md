@@ -3,7 +3,7 @@ name: concept-check
 description: Step 6 of the feature pipeline. Audit the finished implementation against the concept agreed in step 1 — not against the plan — marking each acceptance criterion met or unmet with evidence. Runs inside /build as a subagent, after the tests pass; a different model from the one that planned the work.
 argument-hint: [slug, if more than one plan exists]
 model: sonnet
-effort: max
+effort: high
 ---
 
 # Step 6 — Concept check

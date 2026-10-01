@@ -3,7 +3,7 @@ name: implement
 description: Step 3 of the feature pipeline. Write the production code from the plan, updating STRUCTURE.md in the same change, recording any deviation from the plan, and committing. Runs inside /build as a subagent; tests come later, in step 5.
 argument-hint: [slug, if more than one plan exists]
 model: sonnet
-effort: max
+effort: high
 ---
 
 # Step 3 — Implement
