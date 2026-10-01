@@ -3,7 +3,7 @@ name: small-change
 description: Make a small, low-risk edit — renaming a local variable, rewording a docstring or message, adjusting plot styling or formatting. Use for cosmetic changes that do not alter behavior, add or remove files, change a public signature, or need a new test. Applies whether the user names the skill or just describes such a change in prose. Anything that does any of those routes to the feature pipeline instead.
 argument-hint: [what to change]
 model: opus
-effort: high
+effort: medium
 ---
 
 # Small change
@@ -32,8 +32,8 @@ A defect is never small. Fixing a bug changes behaviour by definition, so it rou
 `/fix`, which diagnoses it before the pipeline runs. The one exception is the case `/fix`
 itself sends here: the code is right and only the prose describing it is wrong.
 
-This skill runs on `opus` at `high`, like the pipeline's own judgment steps. That is
-deliberate: step 1 above is the single highest-stakes call in the whole setup, because it
+This skill runs on `opus` at `medium`: the edits are tiny, so the effort is kept modest,
+but the model stays clever for the call below. That is deliberate: step 1 above is the single highest-stakes call in the whole setup, because it
 is the one decision made with none of the pipeline's safety nets behind it. Everything
 downstream of a wrong "yes, that's small" is skipped rather than caught.
 

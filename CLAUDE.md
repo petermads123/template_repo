@@ -134,7 +134,7 @@ subagent; effort cannot be passed, so the subagent reads it from its skill file 
 `/fix`, whose diagnosis is the same judgment made one step earlier. For the same reason
 `/recommend`, opened by `/build`, and the `/create-pr` it hands on to run on the build's
 turn model; their rows apply when the user invokes them directly.
-`/small-change` runs `opus` at `high`: bypassing the pipeline is a judgment call made
+`/small-change` runs `opus` at `medium`: bypassing the pipeline is a judgment call made
 without any of its safety nets, so the step that decides whether a change really is small
 gets the clever model.
 
