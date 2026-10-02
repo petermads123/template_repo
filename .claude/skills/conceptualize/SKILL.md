@@ -148,6 +148,10 @@ than the ticket: `fix/rolling-mean-last-window`, not `fix/bug-12`.
 
 A later round keeps the branch its folder is named for. There is nothing to choose.
 
+Whatever branch the session happens to be on is not a proposal. A hosted session starts on
+a branch the environment named before the scope existed; it is a placeholder, and the name
+chosen here replaces it when the round file is created below.
+
 ## Stop here, then create
 
 Ask the user to confirm the concept, quoting the acceptance criteria and the branch name in
@@ -159,17 +163,42 @@ place in the pipeline to change your mind and the most expensive one to rush.
 **Only once they confirm**, in this order:
 
 1. Create the branch from `main`, unless this is a later round — then the branch already
-   exists and is checked out.
+   exists and is checked out. This is the first moment the branch exists under its agreed
+   name, and that holds even when the session is already sitting on some other branch.
 
    ```bash
    git fetch origin main
    git checkout -b <type>/<topic> origin/main
    ```
 
-   Where the environment dictates the branch — a hosted session that may only push to a
-   branch it was given — keep the conventional name for the **folder** and write the branch
-   you actually push to in the Branch row. The folder is the feature's name; the row is
-   where its commits go.
+   **A session placeholder is not the branch.** A hosted session usually starts on a
+   branch the environment created before anyone knew the scope — `claude/<random-words>`
+   or similar. Recognise it by its name not following the `type/kebab-case` convention and
+   by it carrying no commits beyond `origin/main`:
+
+   ```bash
+   git branch --show-current
+   git log --oneline origin/main..HEAD
+   ```
+
+   Branch off `origin/main` as above all the same, and push to `<type>/<topic>`, not to
+   the placeholder. The branch name quoted in the confirmation message is what makes that
+   permitted: say there that the work will go to `<type>/<topic>` rather than to the
+   session's assigned branch, so the user's yes covers it. Then drop the local placeholder
+   with `git branch -D <placeholder>` — it has no commits, and nothing of the pipeline's
+   was pushed to it. A placeholder that already exists on the remote is left there; delete
+   it only if the user asks.
+
+   If the placeholder *does* carry commits beyond `origin/main`, it is not a placeholder —
+   it holds someone's work. Stop and ask whether to branch from it, from `main`, or to use
+   it as is.
+
+   **Only if the push to `<type>/<topic>` is refused** — an environment that lets the
+   session push to its assigned branch and nowhere else — fall back to that branch: switch
+   to it, fast-forward it to the commit (`git merge --ff-only <type>/<topic>`), push it,
+   and write it in the Branch row. The folder keeps the conventional name either way: the
+   folder is the feature's name; the row is where its commits go. Tell the user the
+   fallback happened, in one line.
 
 2. Create the folder and the round file (round 1 shown; a later round's file already
    exists, created by the step that opened it):
@@ -198,6 +227,8 @@ place in the pipeline to change your mind and the most expensive one to rush.
    ```bash
    git add development/ DEVELOPMENT.md && git commit -m "..." -- development/ DEVELOPMENT.md && git push -u origin <branch>
    ```
+
+   `<branch>` is the Branch row: `<type>/<topic>` unless the fallback in item 1 applied.
 
    The pathspec on the commit keeps anything else that happens to be staged out of the
    branch's first commit. `DEVELOPMENT.md` is harmless to name even when this round added no
