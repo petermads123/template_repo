@@ -67,6 +67,11 @@ names the branch, creates the plan folder and the first round file, and commits.
 created here, because the folder is named for the branch and the branch is not chosen
 until the scope is — naming it now would guess at a scope step 1 has not settled yet.
 
+The same goes for a branch the session already started on. A hosted session is usually
+handed one before anyone has said what the work is — `claude/<random-words>` — and it is a
+placeholder, not the feature's branch. Commit nothing to it and do not propose its name;
+step 1 names the branch from the agreed scope and moves the work onto it.
+
 Do not shortcut step 1 by writing a concept unilaterally and asking for a yes. It is where
 the shape of the feature actually gets decided.
 

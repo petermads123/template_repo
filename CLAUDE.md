@@ -320,9 +320,11 @@ refuses the command. Branch names are `type/kebab-case`:
 
 Examples: `feat/csv-export`, `fix/greet-unicode-crash`, `refactor/split-solver-module`,
 `chore/bump-ruff`. The branch is chosen and created at the close of step 1, and its plan
-folder is named for it: `development/feat/csv-export/`. Where the environment dictates a
-different branch to push to, the folder keeps the conventional name and the plan's Branch
-row records the real one.
+folder is named for it: `development/feat/csv-export/`. A branch a hosted session starts
+on — `claude/<random-words>` — is a placeholder named before the scope existed: nothing is
+committed to it, and step 1 branches the agreed name off `main` and pushes there instead.
+Only if the environment refuses that push does the work fall back to the session's branch;
+the folder then keeps the conventional name and the plan's Branch row records the real one.
 
 ## Commands
 

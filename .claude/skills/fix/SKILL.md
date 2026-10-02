@@ -50,6 +50,12 @@ be about what that branch shipped. Ask. If it is, open the round the way `/watch
 section 4 does — a new numbered file in that branch's folder, marked as opened on a bug
 report — and diagnose into it, rather than branching a fresh `fix/` round from `main`.
 
+**If the session started on a branch the environment named** — `claude/<random-words>`
+in a hosted session — that is a placeholder, not the fix's branch, and it does not count
+as "the current branch" above unless it really has an open pull request. Commit nothing
+to it; the diagnosis writes nothing to the tree anyway, and step 1 names the `fix/` branch
+once the scope is agreed and moves the round onto it.
+
 **If the request is not a defect** — the user wants something that does not exist, or wants
 existing behaviour changed rather than corrected — say so and switch to `/feature`. The
 verdict in section 2 catches the cases that only look like bugs.
