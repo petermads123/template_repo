@@ -43,12 +43,6 @@ rounds 1 to 3 (step 6 re-checks them), the 1042 guard tests, and in particular `
 `git checkout -b feat/x && git commit`, the `!`/`coproc` rule, loop widening and substitution
 extraction.
 
----|---|---|
-
-> <the recommendation, quoted from that round's section 8>
-
-What is already on the branch that this round must not break:
-
 ---
 
 ## 1. Concept
