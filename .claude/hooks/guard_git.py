@@ -192,11 +192,12 @@ UNRESOLVED = "?"
 RISKY_SUBCOMMANDS = ("commit", "push")
 RISKY_PATTERN = re.compile(r"\b(?:" + "|".join(RISKY_SUBCOMMANDS) + r")\b")
 
-#: Character pairs that open a construct `_prepare` does not read: an ANSI-C
-#: string, a PowerShell here-string, a PowerShell block comment and a
-#: backtick-escaped quote. All are looked for outside quotes; `` `" `` is also
-#: looked for inside double quotes, where PowerShell uses it. A command that
-#: carries one is judged by `violation` with suspicion rather than trusted.
+#: Openers of constructs `_prepare` does not read: an ANSI-C string, a
+#: PowerShell here-string, a PowerShell block comment, a backtick-escaped quote
+#: and bash 5.3's `${ cmd; }` / `${| cmd; }` function substitution. All are
+#: looked for outside quotes, each matched as a prefix; `` `" `` and the `${`
+#: forms are also looked for inside double quotes. A command that carries one
+#: is judged by `violation` with suspicion rather than trusted.
 UNMODELLED_OPENERS: tuple[str, ...] = (
     "$'",
     "@'",

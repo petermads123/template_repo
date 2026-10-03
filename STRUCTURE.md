@@ -302,7 +302,7 @@ refuse `echo git commit`, which is the failure this module treats as worse. Only
 skipped after a wrapper, never a bare word, so an option that takes a value hides what
 follows it.
 
-`shlex` is not a shell, so a private pass (`_prepare`) runs in front of it and removes what
+`shlex` is not a shell, so a private pass runs in front of it and removes what
 bash never runs: a `#` at the start of a word comments out the rest of its line, a
 backslash-newline joins two lines, and a heredoc body (`<<WORD`, `<<-WORD`, quoted or not,
 never `<<<`) is dropped up to its delimiter line, leaving the `<<` and its word so the
@@ -322,7 +322,7 @@ comments, backtick-escaped quotes, bash 5.3's `${ cmd; }`. It does not guess: wi
 `push` is refused with its own message, and anywhere else it is judged as parsed.
 
 Bash runs a command substitution before the command around it, wherever it sits in a word,
-so `_prepare` takes each one out — `$( )` quoted or not, backticks, `<( )` and `>( )`, and
+so the pass takes each one out — `$( )` quoted or not, backticks, `<( )` and `>( )`, and
 the ones in an unquoted heredoc body — and writes it, between two private marks (`\x1d`,
 `\x1e`, blanked if the input carries them), in front of the simple command that contains
 it. The word keeps a placeholder, `_`. `segments` reads the marks as `Segment.depth`, so

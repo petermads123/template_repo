@@ -1,6 +1,6 @@
 # The git guard judges command substitutions inside a word
 
-<!-- claude-plan step=4 status=active -->
+<!-- claude-plan step=5 status=active -->
 
 | Field | Value |
 |---|---|
@@ -16,7 +16,7 @@
 | 1 | Conceptualize | `/conceptualize` | with the user | done |
 | 2 | Plan | `/plan` | with the user | done |
 | 3 | Implement | `/implement` | in `/build` | done |
-| 4 | Verify | `/verify` | in `/build` | pending |
+| 4 | Verify | `/verify` | in `/build` | done |
 | 5 | Test | `/test` | in `/build` | pending |
 | 6 | Concept check | `/concept-check` | in `/build` | pending |
 | 7 | Ship | `/ship` | in `/build` | pending |
@@ -443,6 +443,38 @@ The command is allowed (empty reason) while bash runs git: the shape the Defect 
 
 | Check | Result |
 |---|---|
+| `ruff check .` | `All checks passed!` |
+| `ruff format --check .` | `11 files already formatted` |
+| `mypy` | `Success: no issues found in 11 source files` |
+| `pytest` | `501 passed in 6.26s` |
+| Plan completeness | every signature in the Public API table exists as written (table below) |
+| `STRUCTURE.md` | in sync after two edits from the `structure-auditor` (private helper name `_prepare` removed from prose in two places); the `UNMODELLED_OPENERS` code comment, which still listed four constructs, now names funsub |
+| `python -m <package>.<module>` | not applicable: the hooks are executable scripts (entry point `main()`, no showcase), and `template_repo` is not installed here |
+
+Plan completeness, checked by importing the module and comparing literally:
+
+| Entry | Result |
+|---|---|
+| `Segment(tokens: tuple[str, ...], separator: str, depth: int = 0)`, frozen | matches; `Segment(("a",), "") == Segment(("a",), "", 0)` |
+| `SUBSTITUTED = "$("` | matches |
+| `segments(command: str) -> list[Segment] \| None` | matches |
+| `violation(command: str, branch: str) -> str` | matches |
+| `UNMODELLED_OPENERS` | equals the ten-element tuple of the plan exactly |
+
+Step 3 deviations (section 3), classified:
+
+| Deviation | Class |
+|---|---|
+| `test_unmodelled_openers_is_the_documented_set` updated to the new tuple | Deviation, recorded; mechanical consequence of the plan's own change, no criterion touched |
+| Fifth A9 test rewrites (one stayed green, rewritten to pin the new position) | Deviation, recorded; within A9 |
+| Standalone `}` opens no slot; no slot after `&`/`|` of a redirection | Deviation, recorded; refines guide step 3 without changing behaviour a criterion pins |
+| `segments()` splits a token with a mark glued to non-operator punctuation | Deviation, recorded; needed so a group is judged |
+| Runaway-input guards (depth 30, `failed` set, heredoc-in-substitution flag) | Unplanned but private, justified in section 3 |
+| Refusal order main, push, unresolved | Deviation, recorded; as guide step 7 |
+
+None amends section 1.
+
+---|---|
 | `ruff check .` | |
 | `ruff format --check .` | |
 | `mypy` | |
