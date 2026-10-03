@@ -2938,3 +2938,12 @@ def test_violation_cannot_resolve_a_switch_inside_a_substitution() -> None:
 def test_violation_judges_a_substitution_in_a_detached_head() -> None:
     assert violation('echo "$(git push origin HEAD:main)"', "").startswith(PUSH_REASON)
     assert violation('echo "$(git commit -m x)"', "") == ""
+
+
+# --- reserved words that take a command next ---------------------------------
+
+
+def test_violation_refuses_a_commit_after_if_on_main() -> None:
+    command = "if git commit -m x; then echo ok; fi"
+
+    assert violation(command, PROTECTED).startswith(COMMIT_REASON)

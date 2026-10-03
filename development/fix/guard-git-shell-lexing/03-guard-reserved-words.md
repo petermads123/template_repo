@@ -328,6 +328,21 @@ re-checked. The differential runs at step 6:
 > planned" is a complete and good entry. On a fix round, also the reproduction test's red
 > run, pasted here before the fix was written — step 6 cites it.
 
+### Reproduction, red (before any production change)
+
+`pytest tests/test_guard_git.py -k test_violation_refuses_a_commit_after_if_on_main`:
+
+```
+tests/test_guard_git.py::test_violation_refuses_a_commit_after_if_on_main FAILED [100%]
+>       assert violation(command, PROTECTED).startswith(COMMIT_REASON)
+E       AssertionError: assert False
+E        +  where '' = violation('if git commit -m x; then echo ok; fi', 'main')
+FAILED tests/test_guard_git.py::test_violation_refuses_a_commit_after_if_on_main
+====================== 1 failed, 762 deselected in 0.32s =======================
+```
+
+The guard allows (returns `''`) the commit on `main`, as the Defect block's Observed row says.
+
 ---
 
 ## 4. Verification log
