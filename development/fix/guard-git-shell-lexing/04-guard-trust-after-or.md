@@ -1,6 +1,6 @@
 # The git guard does not trust a switch that `||` may skip
 
-<!-- claude-plan step=2 status=active -->
+<!-- claude-plan step=3 status=active -->
 
 | Field | Value |
 |---|---|
@@ -14,7 +14,7 @@
 | # | Step | Skill | Runs | Status |
 |---|---|---|---|---|
 | 1 | Conceptualize | `/conceptualize` | with the user | done |
-| 2 | Plan | `/plan` | with the user | pending |
+| 2 | Plan | `/plan` | with the user | done |
 | 3 | Implement | `/implement` | in `/build` | pending |
 | 4 | Verify | `/verify` | in `/build` | pending |
 | 5 | Test | `/test` | in `/build` | pending |
