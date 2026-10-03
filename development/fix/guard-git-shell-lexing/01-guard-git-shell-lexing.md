@@ -1,6 +1,6 @@
 # The git guard reads commands the way the shell does
 
-<!-- claude-plan step=6 status=active -->
+<!-- claude-plan step=7 status=active -->
 
 | Field | Value |
 |---|---|
@@ -18,7 +18,7 @@
 | 3 | Implement | `/implement` | in `/build` | done |
 | 4 | Verify | `/verify` | in `/build` | done |
 | 5 | Test | `/test` | in `/build` | done |
-| 6 | Concept check | `/concept-check` | in `/build` | pending |
+| 6 | Concept check | `/concept-check` | in `/build` | done |
 | 7 | Ship | `/ship` | in `/build` | pending |
 | 8 | Recommend | `/recommend` | with the user | pending |
 | 9 | Pull request | `/create-pr` | with the user | pending |
@@ -357,9 +357,16 @@ Edge cases considered and deliberately skipped, with reasons:
 
 | # | Criterion | Met | Evidence |
 |---|---|---|---|
-| A1 | | | |
+| A1 | Reported heredoc allowed on `main` | yes | Section 3 red run (`pytest -k stray_quote` against the old module: `assert not True`, refused as unreadable); step 6 re-ran it against `origin/main`'s `guard_git.py` (fails, plus the body-substitution stray-quote test) and green against the branch: `test_violation_allows_a_heredoc_with_a_stray_quote_on_main`. Probe: allow. |
+| A2 | Heredoc bodies read as bash does (as amended at Halt 1) | yes | Probed 10 shapes on the final guard, all as specified: quoted bodies (`'EOF'`, `"EOF"`, `\EOF`) allow; `<<-` tab close with apostrophe allow; unquoted `$(git commit)` refused on `main`, backtick push refused from `main` and `feat/x`; command after heredoc refused; `git commit -F - <<'EOF'` refused on `main`, allowed on `feat/x`. Suite: heredoc tests in section 5 (T2). |
+| A3 | `#` read as bash does | yes | `# it's fine`/commit/`# that's it` refused; `echo ok # git commit -m x` allowed; `echo ok#1 && git commit -m m` refused. Tests: T3 group. |
+| A4 | Backslash-newline joined | yes | `git \`NL`commit` refused; `git \`NL`push origin main` refused from `main` and `feat/x`. Tests: T4 group. |
+| A5 | Rare forms play safe | yes | `$'...'`, `@'` here-string, `<# #>`, backtick-quote and unquoted-heredoc-body bypasses all refused on `main`; `echo $'x'; ls` allowed on `main`; the `$'` bypass allowed on `feat/x`. Tests: T5 group, `test_unmodelled_openers_is_the_documented_set`. PowerShell forms judged by `violation()` only (no `pwsh`). |
+| A6 | Nothing else changes | yes | (1) `git diff origin/main -- tests/test_guard_git.py` has 804 insertions and no removed line, so the 220 original tests are untouched; the original file also passes 219/220 when run from a scratch dir (the one failure is a relative-path lookup of `settings.json`, an artefact of running from there), and the full suite is 500 green with ruff, format and mypy clean. (2) T6 differential below. |
 
-Drift found, and what was done about it:
+**T6 differential** (scratchpad `diff/driver.py`; baseline `git show origin/main:.claude/hooks/guard_git.py` saved as `guard_git_base.py`, byte-identical to origin/main, loaded with `.claude/hooks` on `sys.path` and registered in `sys.modules` before exec). Corpus: 274 `(command, branch)` pairs recorded from the original 220-test suite by a scratch pytest plugin (`-p rec_plugin`, nothing in the tree), 139 distinct commands. Variants per command: ` # '` appended, `# c`NL prefixed, `\`NL after the first space and after every space, placed after `cat <<EOF >/dev/null`/`hello`/`EOF`, and `echo $'x'; ` prefixed. 962 distinct inputs, each on `main` and `feat/x`: 1924 decisions compared, 1649 identical, 275 differ. **Every unmodified corpus command (variant `orig`) has the same decision on both guards.** All 275 differences contain a word-start `#`, a backslash-newline, an unquoted `<<` or an unmodelled opener (none without). Directions: 178 old allow to new refuse on `main`, 72 old allow to new refuse on `feat/x`, 25 old refuse to new allow on `main`. Each was accepted by one of: bash with `git` shadowed (stubbed `PATH`, a function that logs the branch and follows `checkout -b`/`switch -c`) shows the new decision is what bash does (198); the new decision equals the old guard's on the same command with the construct stripped by hand (68; mostly PowerShell shapes or `GIT`/`/usr/bin/GIT` spellings that the bash oracle cannot run); or the `main` play-safe refusal for an unmodelled opener (9). **Unaccepted differences: 0.** The comparison of `segments` tokens differs on 652 of the variants, all containing a trigger, none without. The accepted `&&` plus `$'...'` cost is among the 9 play-safe refusals.
+
+Drift found, and what was done about it: none. Out of scope held (`bash -c "git commit -m x"` is still allowed, as before; no dialect switch; `$'`/PowerShell forms play safe rather than being read). Surface: only `UNMODELLED_OPENERS` added, as planned and documented. Fix-round check: the Root cause row (raw text handed to `shlex`) is addressed at its cause, a pass in front of `shlex` for the constructs it does not model, not at the symptom site; the class listed in the Defect block has a test per member. `structure-auditor`'s report was against the stale session-start copy; STRUCTURE.md on disk already carries the lexing paragraph, the `UNMODELLED_OPENERS` row, updated `segments`/`violation` rows and the shell-lexing test bullets, so no edit was needed. Known misses recorded in section 5 stay for step 8 (hex-escaped or split-quote subcommand spellings behind an unmodelled opener, a push to `main` from another branch hidden by an unmodelled construct).
 
 ### Earlier rounds still hold
 
