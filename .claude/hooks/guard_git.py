@@ -182,7 +182,18 @@ RISKY_PATTERN = re.compile(r"\b(?:" + "|".join(RISKY_SUBCOMMANDS) + r")\b")
 #: backtick-escaped quote. All are looked for outside quotes; `` `" `` is also
 #: looked for inside double quotes, where PowerShell uses it. A command that
 #: carries one is judged by `violation` with suspicion rather than trusted.
-UNMODELLED_OPENERS: tuple[str, ...] = ("$'", "@'", '@"', "<#", "`'", '`"')
+UNMODELLED_OPENERS: tuple[str, ...] = (
+    "$'",
+    "@'",
+    '@"',
+    "<#",
+    "`'",
+    '`"',
+    "${ ",
+    "${\t",
+    "${\n",
+    "${|",
+)
 
 #: Characters after which a `#` starts a word, and so a comment. The carriage
 #: return is not one: bash's blanks are the space and the tab only. A `)` is one
@@ -673,20 +684,34 @@ def _body_substitutions(body: str) -> list[str]:
     return found
 
 
+#: How deep `_scan` follows command substitutions inside one another before it
+#: stops extracting and plays safe. Far past anything written by hand; it keeps
+#: the recursion inside Python's own limit.
+_MAX_NESTING = 30
+
+#: The first characters of `UNMODELLED_OPENERS`, so `_scan` tests only where one
+#: could start.
+_OPENER_STARTS = frozenset(opener[0] for opener in UNMODELLED_OPENERS)
+
+
 def _prepare(command: str) -> tuple[str, bool]:
     """Remove what a shell never runs and `shlex` cannot read.
 
     Walks the command once, tracking quotes as bash does. Outside quotes it
     drops a `#` comment up to its newline, deletes a backslash-newline so the
     lines join, and drops each heredoc body up to its delimiter line, leaving
-    the `<<` operator and its delimiter word. Everything else passes through
-    unchanged, so a command with none of these constructs lexes as before.
+    the `<<` operator and its delimiter word. Every command substitution --
+    `$( )` quoted or not, backticks, `<( )` and `>( )`, and those in an
+    unquoted heredoc body -- is taken out of its word and written, wrapped in
+    two private marks, in front of the simple command that contains it, because
+    bash runs it first; the word keeps a placeholder, `_`. Everything else
+    passes through unchanged, so a command with none of these constructs lexes
+    as before.
 
     The walk keeps a stack of what it is inside, because the rules change there:
     a `#` is not a comment inside `${...}` or right after the `)` that closes a
-    `$(...)` (the word goes on), quotes nest inside `"$(...)"`, a `<<` inside
-    `$((...))` or `((...))` is a shift, and a comment inside backticks ends at
-    the closing backtick.
+    `$(...)` (the word goes on), quotes nest inside `"$(...)"`, and a `<<`
+    inside `$((...))` or `((...))` is a shift.
 
     Args:
         command: The full command line.
@@ -696,13 +721,61 @@ def _prepare(command: str) -> tuple[str, bool]:
         scan does not read, one of `UNMODELLED_OPENERS`.
     """
     command = command.replace(_OPEN, " ").replace(_CLOSE, " ")
-    out: list[str] = []
+    text, unmodelled, _, _ = _scan(command, 0, "", set(), 0)
+    return text, unmodelled
+
+
+def _scan(
+    command: str, start: int, closer: str, failed: set[int], nesting: int
+) -> tuple[str, bool, int, bool]:
+    """Walk part of a command for `_prepare`, stopping at a closing `)` if asked.
+
+    Args:
+        command: The full command text; indices refer to it.
+        start: Where to begin.
+        closer: `")"` to stop at the `)` that closes the `$( )` or `<( )` the
+            walk starts inside, or `""` to walk to the end.
+        failed: Positions of substitutions already found never to close, so a
+            run of unclosed ones is not walked again and again.
+        nesting: How many substitutions deep this walk is.
+
+    Returns:
+        The prepared text, whether an unmodelled construct was met, the index
+        just past what was consumed, and whether the closer arrived -- always
+        True for a walk to the end.
+    """
+    out: list[str] = [""]  # the first item is the slot of the first command
+    slot = 0
     queue: list[tuple[str, bool, bool]] = []
+    queue_slots: list[int] = []
     frames: list[str] = []  # "dq", "cmd" ($( or <( ), "paren", "brace", "bt"
     unmodelled = False
     boundary = True  # whether a `#` here would start a word
-    index = 0
+    index = start
     length = len(command)
+
+    def fresh() -> None:
+        """Reserve the slot in front of a new simple command."""
+        nonlocal slot
+        out.append("")
+        slot = len(out) - 1
+
+    def place(text: str, flag: bool, target: int) -> None:
+        """Write one extracted substitution into a command's slot."""
+        nonlocal unmodelled
+        if _lex(text) is not None:  # one bash cannot run either is dropped
+            out[target] += _OPEN + text + _CLOSE
+            unmodelled = unmodelled or flag
+
+    def inside(position: int) -> tuple[str, bool, int] | None:
+        """Prepare the substitution whose text begins at `position`."""
+        if position - 2 in failed or nesting >= _MAX_NESTING:
+            return None
+        text, flag, end, closed = _scan(command, position, ")", failed, nesting + 1)
+        if not closed:
+            failed.add(position - 2)
+            return None
+        return text, flag, end
 
     while index < length:
         char = command[index]
@@ -710,8 +783,12 @@ def _prepare(command: str) -> tuple[str, bool]:
         top = frames[-1] if frames else ""
         in_double = top == "dq"
 
-        if pair in UNMODELLED_OPENERS and (not in_double or pair == '`"'):
-            unmodelled = True
+        if char in _OPENER_STARTS:
+            for opener in UNMODELLED_OPENERS:
+                if command.startswith(opener, index) and (
+                    not in_double or opener == '`"' or opener.startswith("${")
+                ):
+                    unmodelled = True
 
         if char == "\\":
             if pair == "\\\n":
@@ -739,17 +816,27 @@ def _prepare(command: str) -> tuple[str, bool]:
             continue
         if char == "$" and pair in ("$(", "${"):
             if pair == "${":
-                frames.append("brace")
-                boundary = False
-            else:
-                if command[index + 2 : index + 3] == "(":
-                    arith = _arith_end(command, index + 1)
-                    if arith is not None:
-                        out.append(command[index:arith])
-                        index, boundary = arith, False
-                        continue
-                frames.append("cmd")
-                boundary = True
+                funsub = command[index + 2 : index + 3] in (" ", "\t", "\n", "|")
+                if not funsub:  # bash 5.3's `${ cmd; }` is flagged, not a parameter
+                    frames.append("brace")
+                boundary = funsub
+                out.append(pair)
+                index += 2
+                continue
+            if command[index + 2 : index + 3] == "(":
+                arith = _arith_end(command, index + 1)
+                if arith is not None:
+                    out.append(command[index:arith])
+                    index, boundary = arith, False
+                    continue
+            found = inside(index + 2)
+            if found is not None:
+                place(found[0], found[1], slot)
+                out.append("_")
+                index, boundary = found[2], False
+                continue
+            frames.append("cmd")
+            boundary = True
             out.append(pair)
             index += 2
             continue
@@ -757,9 +844,25 @@ def _prepare(command: str) -> tuple[str, bool]:
             if top == "bt":
                 frames.pop()
                 boundary = False
-            else:
-                frames.append("bt")
-                boundary = True
+                out.append(char)
+                index += 1
+                continue
+            end = _quoted_end(command, index)
+            if end is not None and nesting < _MAX_NESTING:
+                inner = re.sub(r"\\([$`\\])", r"\1", command[index + 1 : end - 1])
+                text, flag, _, _ = _scan(inner, 0, "", set(), nesting + 1)
+                place(text, flag, slot)
+                if in_double:
+                    # PowerShell reads the backtick as its escape character, so
+                    # the text stays for it to be judged that way as well.
+                    out.append(command[index:end])
+                    unmodelled = unmodelled or '`"' in command[index:end]
+                else:
+                    out.append("_")
+                index, boundary = end, False
+                continue
+            frames.append("bt")
+            boundary = True
             out.append(char)
             index += 1
             continue
@@ -780,8 +883,12 @@ def _prepare(command: str) -> tuple[str, bool]:
             stops = [command.find("\n", index)]
             if top == "bt":
                 stops.append(command.find("`", index))
-            found = [stop for stop in stops if stop != -1]
-            index = min(found) if found else length
+            found_stops = [stop for stop in stops if stop != -1]
+            index = min(found_stops) if found_stops else length
+        elif pair in ("<(", ">(") and (found := inside(index + 2)) is not None:
+            place(found[0], found[1], slot)
+            out.append("_")  # the whole construct, `<` or `>` included
+            index, boundary = found[2], False
         elif command[index : index + 3] == "<<<":
             out.append("<<<")
             index, boundary = index + 3, True
@@ -795,6 +902,7 @@ def _prepare(command: str) -> tuple[str, bool]:
             delimiter, quoted, end = word
             out.append(command[index:end])
             queue.append((delimiter, dash, quoted))
+            queue_slots.append(slot)
             index, boundary = end, False
         elif char == "\n":
             out.append(char)
@@ -802,13 +910,17 @@ def _prepare(command: str) -> tuple[str, bool]:
             boundary = True
             if queue:
                 index, bodies = _heredoc_bodies(command, index, queue)
-                queue = []
-                for body in bodies:
+                owners = [
+                    s
+                    for (_, _, quoted), s in zip(queue, queue_slots, strict=True)
+                    if not quoted
+                ]
+                queue, queue_slots = [], []
+                for body, owner in zip(bodies, owners, strict=True):
                     for inner in _body_substitutions(body):
-                        text, opener = _prepare(inner)
-                        if _lex(text) is not None:
-                            out.append(text + "\n")  # a command of its own
-                            unmodelled = unmodelled or opener
+                        text, flag, _, _ = _scan(inner, 0, "", set(), nesting + 1)
+                        place(text, flag, owner)
+            fresh()
         elif char == "(":
             arith = _arith_end(command, index) if pair == "((" else None
             if arith is not None:
@@ -819,20 +931,35 @@ def _prepare(command: str) -> tuple[str, bool]:
             frames.append("cmd" if previous in ("<", ">") else "paren")
             out.append(char)
             index, boundary = index + 1, True
+            if frames[-1] == "paren":
+                fresh()
         elif char == ")":
+            if closer == ")" and not frames:
+                if queue:
+                    unmodelled = True  # its body follows the substitution
+                return "".join(out), unmodelled, index + 1, True
             popped = frames.pop() if top in ("cmd", "paren") else "paren"
             out.append(char)
             index, boundary = index + 1, popped == "paren"
+            fresh()
         elif char == "}" and top == "brace":
             frames.pop()
             out.append(char)
             index, boundary = index + 1, False
         else:
+            previous = command[index - 1 : index] if index else ""
+            following = command[index + 1 : index + 2]
             out.append(char)
             index += 1
+            starts_command = (
+                (char in ";&|" and previous not in ("<", ">") and following != ">")
+                or (char == "{" and boundary and following in (" ", "\t", "\n"))
+            ) and top != "brace"
             boundary = char in _COMMENT_BOUNDARY
+            if starts_command:
+                fresh()
 
-    return "".join(out), unmodelled
+    return "".join(out), unmodelled, length, closer == ""
 
 
 def _lex(prepared: str) -> list[str] | None:
@@ -888,11 +1015,13 @@ def segments(command: str) -> list[Segment] | None:
             current.clear()
 
     for token in tokens:
-        if not _is_separator(token):
+        if not _is_separator(token) and _OPEN not in token and _CLOSE not in token:
             current.append(token)
             continue
         for piece in re.split(f"([{_OPEN}{_CLOSE}])", token):
-            if piece == _OPEN:
+            if piece and piece not in (_OPEN, _CLOSE) and not _is_separator(piece):
+                current.append(piece)  # a mark glued to punctuation that is no operator
+            elif piece == _OPEN:
                 flush()
                 depth += 1
                 if after_close:
@@ -1035,8 +1164,8 @@ def violation(command: str, branch: str) -> str:
     if unmodelled and branch == PROTECTED and RISKY_PATTERN.search(command):
         return (
             "Refused: this command uses syntax this guard does not read — "
-            "`$'...'`, a PowerShell here-string, block comment or "
-            "backtick-escaped quote — and it names `commit` or `push` while "
+            "`$'...'`, a bash 5.3 `${ cmd; }`, a PowerShell here-string, "
+            "block comment or backtick-escaped quote — and it names `commit` or `push` while "
             f"`{PROTECTED}` is checked out.\n"
             "Rewrite it without that syntax, or move onto a branch first:\n"
             "    git checkout -b <type>/<kebab-case-topic>"
@@ -1055,21 +1184,32 @@ def violation(command: str, branch: str) -> str:
             )
         return ""
 
-    effective = branch
+    # `ok` is every branch HEAD could be on if each command of the current `&&`
+    # chain succeeded, `possible` every branch it could be on at all. Only a
+    # switch that an `&&` guards replaces `ok`; the others only widen `possible`.
+    ok = {branch}
+    possible = {branch}
+    # One frame per substitution being run: the branches the containing command
+    # could start on, and the branches the substitution has switched to.
+    frames: list[tuple[set[str], set[str]]] = []
     for segment in parsed:
-        if segment.separator != GUARANTEEING:
-            effective = branch  # the switch before this one may not have run
+        popped: tuple[set[str], set[str]] | None = None
+        while len(frames) > segment.depth:
+            context, targets = frames.pop()
+            popped = (context, targets | (popped[1] if popped else set()))
+        if segment.separator == SUBSTITUTED and popped is not None:
+            # The command containing the substitutions that just ran, started on
+            # wherever they left HEAD.
+            here = popped[0] | popped[1]
+        elif segment.separator == SUBSTITUTED and frames:
+            here = frames[-1][0] | frames[-1][1]  # the next substitution in a row
+        else:
+            here = set(ok if segment.separator == GUARANTEEING else possible)
+        while len(frames) < segment.depth:
+            frames.append((set(here), set()))
 
         subcommand, args = git_subcommand(segment.tokens)
-        if subcommand in RISKY_SUBCOMMANDS and effective == UNRESOLVED:
-            return (
-                f"Refused: this would run `git {subcommand}` after a branch switch "
-                "whose target only the running shell can resolve, so which branch "
-                "it would land on cannot be determined here.\n"
-                "Name the branch instead:\n"
-                f"    git checkout <branch> && git {subcommand} ..."
-            )
-        if subcommand == "commit" and effective == PROTECTED:
+        if subcommand == "commit" and PROTECTED in here:
             return (
                 f"Refused: this would commit to `{PROTECTED}`, which this repo "
                 "never commits to directly.\n"
@@ -1077,17 +1217,30 @@ def violation(command: str, branch: str) -> str:
                 "    git checkout -b <type>/<kebab-case-topic>\n"
                 "Prefixes: feat, fix, refactor, docs, test, chore."
             )
-        if subcommand == "push" and push_targets_main(args, effective):
+        if subcommand == "push" and any(push_targets_main(args, b) for b in here):
             return (
                 f"Refused: this would push to `{PROTECTED}`, which is protected "
                 "on the remote and would be rejected anyway.\n"
                 "Push the feature branch and open a pull request instead:\n"
                 "    git push -u origin <branch>"
             )
+        if subcommand in RISKY_SUBCOMMANDS and UNRESOLVED in here:
+            return (
+                f"Refused: this would run `git {subcommand}` after a branch switch "
+                "whose target only the running shell can resolve, so which branch "
+                "it would land on cannot be determined here.\n"
+                "Name the branch instead:\n"
+                f"    git checkout <branch> && git {subcommand} ..."
+            )
 
         target = switch_target(subcommand, args)
         if target and not _redirected(segment.tokens):
-            effective = target
+            ok = {target}
+            possible.add(target)
+            for _, targets in frames:
+                targets.add(target)
+        else:
+            ok = set(here)
 
     return ""
 

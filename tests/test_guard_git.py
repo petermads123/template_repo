@@ -7,6 +7,7 @@ import guard_git
 import pytest
 from guard_git import (
     PROTECTED,
+    SUBSTITUTED,
     UNRESOLVED,
     Segment,
     git_subcommand,
@@ -831,9 +832,12 @@ def test_violation_allows_a_harmless_command_after_an_unresolvable_switch() -> N
     assert not refused("git checkout - && git status", OTHER)
 
 
-def test_violation_does_not_carry_an_unresolvable_switch_across_a_weak_join() -> None:
-    # `;` does not guarantee the switch ran, so the branch is the real one.
-    assert not refused('git checkout - ; git commit -m "m"', OTHER)
+def test_violation_refuses_after_an_unresolvable_switch_across_a_weak_join() -> None:
+    # `;` does not guarantee the switch ran, so the branch is either one: the real
+    # branch or whatever `-` names, which cannot be told from here.
+    assert violation('git checkout - ; git commit -m "m"', OTHER).startswith(
+        "Refused: this would run `git commit` after a branch switch"
+    )
 
 
 # --- the false positives command recognition must not introduce --------------
@@ -1302,7 +1306,18 @@ UNMODELLED_BYPASSES = [
 
 
 def test_unmodelled_openers_is_the_documented_set() -> None:
-    assert guard_git.UNMODELLED_OPENERS == ("$'", "@'", '@"', "<#", "`'", '`"')
+    assert guard_git.UNMODELLED_OPENERS == (
+        "$'",
+        "@'",
+        '@"',
+        "<#",
+        "`'",
+        '`"',
+        "${ ",
+        "${\t",
+        "${\n",
+        "${|",
+    )
 
 
 @pytest.mark.parametrize("command", UNMODELLED_BYPASSES)
@@ -1619,20 +1634,21 @@ def test_violation_flags_unmodelled_syntax_inside_a_body_substitution() -> None:
     assert violation(command, PROTECTED).startswith(UNMODELLED_REASON)
 
 
-def test_violation_does_not_look_inside_quotes_within_a_body_substitution() -> None:
-    # The same limit a plain `echo "$(git commit)"` has outside a heredoc: the guard
-    # does not read substitutions nested in quotes or backticks. Recorded so a change
-    # to it is a decision.
-    assert violation('cat <<EOF\n$(echo "$(git commit -m x)")\nEOF', PROTECTED) == ""
-    assert violation('echo "$(git commit -m x)"', PROTECTED) == ""
+def test_violation_looks_inside_quotes_within_a_body_substitution() -> None:
+    # A substitution nested in quotes inside a body substitution runs in bash, and
+    # a plain `echo "$(git commit)"` outside a heredoc is read the same way.
+    assert violation(
+        'cat <<EOF\n$(echo "$(git commit -m x)")\nEOF', PROTECTED
+    ).startswith(COMMIT_REASON)
+    assert violation('echo "$(git commit -m x)"', PROTECTED).startswith(COMMIT_REASON)
 
 
-def test_segments_puts_a_body_substitution_on_its_own_line_after_the_command() -> None:
+def test_segments_puts_a_body_substitution_before_the_command_that_opened_it() -> None:
     command = "cat <<EOF > f\n$(git commit -m x)\nEOF"
 
     assert segments(command) == [
-        Segment(("cat", "<<", "EOF", ">", "f"), ""),
-        Segment(("git", "commit", "-m", "x"), "\n"),
+        Segment(("git", "commit", "-m", "x"), "", 1),
+        Segment(("cat", "<<", "EOF", ">", "f"), SUBSTITUTED, 0),
     ]
 
 
@@ -1640,10 +1656,10 @@ def test_segments_orders_dollar_paren_and_backtick_substitutions_as_written() ->
     command = "cat <<EOF\n`git add .` text $(git commit -m x)\nEOF\nls"
 
     assert segments(command) == [
-        Segment(("cat", "<<", "EOF"), ""),
-        Segment(("git", "add", "."), "\n"),
-        Segment(("git", "commit", "-m", "x"), "\n"),
-        Segment(("ls",), "\n"),
+        Segment(("git", "add", "."), "", 1),
+        Segment(("git", "commit", "-m", "x"), SUBSTITUTED, 1),
+        Segment(("cat", "<<", "EOF"), SUBSTITUTED, 0),
+        Segment(("ls",), "\n", 0),
     ]
 
 
@@ -1662,7 +1678,8 @@ def test_segments_unescapes_a_nested_backtick_pair_for_the_inner_command() -> No
     parsed = segments(command)
 
     assert parsed is not None
-    assert parsed[1].tokens[0] == "echo"
+    assert parsed[0] == Segment(("git", "commit", "-m", "x"), "", 2)
+    assert parsed[1] == Segment(("echo", "_"), SUBSTITUTED, 1)
 
 
 def test_violation_distrust_searches_the_raw_command_comments_included() -> None:
