@@ -146,46 +146,162 @@ None.
 
 ## 2. Plan
 
-> Written in step 2, accepted by the user before step 3 starts. Concrete enough that
-> step 3 is transcription, not invention.
-
 ### Approach
 
-One paragraph on the chosen approach, and one on what was rejected and why.
+**Chosen: the pre-pass, which already knows what is quoted, writes that knowledge into the
+text it hands to `shlex`, using private stand-in characters; `_segments` reads them and maps
+them back.**
+
+`shlex` cannot be told what was quoted, but `_scan` (the pre-pass) already walks every quote,
+escape and substitution frame. So `_scan` changes what it emits, in three ways:
+
+1. **A quoted operator character becomes a word character.** Inside single or double quotes
+   (the innermost frame is a quote, not a `$( )` inside one), each of `; & | ( ) { } < >` and
+   newline is written as its own private stand-in (`_QUOTED`, a fixed map into the Unicode
+   private-use area). `shlex` keeps it inside the word, `_is_separator` never sees an operator,
+   and `_segments` maps each stand-in back to its character when it builds the tokens. So
+   `echo ";" x` is one invocation `echo ; x`, and no quoted text ever reaches a run.
+2. **A token that begins with a quote carries a marker.** `_scan` writes `_QUOTE_MARK` just
+   before the opening quote of a word that starts with one. The marker survives into the
+   tokens `_segments` returns to `_judge`, and it is what stops `'if'`, `'!'`, `"X=1"` and `'>'`
+   from being read as a leader, an assignment or a redirection, because those checks compare
+   the token as it is. Everything that reads a token's *text* — the command name, wrappers,
+   the subcommand and its arguments, switch targets, refs — strips it first, so `"git" commit`
+   is still git and `git checkout "main"` is still a switch to `main`.
+3. **The three shell-dependent tokens become a soft separator.** An unquoted backslash
+   before an operator character (`\;`, `\&`, `\|`, `\(`, `\{`…), and an unquoted carriage
+   return, are each written as `_SOFT`, a private character added to `PUNCTUATION_CHARS` and
+   `SEPARATOR_CHARS`. It still splits the command — bash would read a word there and
+   PowerShell a separator, so splitting keeps PowerShell's reading — but `_governs` reads it
+   as `;`, never `&&`, so nothing across it is trusted, and `_OPERATORS` does not match it,
+   so it never ends an `||` operand or a `!` scope and never changes a group level. A bare
+   `{` or `}` token that is not at command position (the invocation being built already has a
+   word) is treated as `_SOFT` by `_segments` too, so `ForEach-Object { git commit -m x }`
+   still splits and stays refused while `true || echo { | …` no longer shifts the group level.
+
+This removes cause (1) at `_lex`/`_is_separator` — the knowledge `shlex` throws away is
+written into the text before `shlex` runs — and cause (2) by making `\r` a separator that is
+never trusted, instead of whitespace.
+
+**Rejected:**
+- **A hand-written tokenizer in place of `shlex`.** It would carry quoting cleanly, but
+  replaces the lexing rounds 1–4 verified with new code that would itself need verifying,
+  and still has to get the flags through the public `Segment`.
+- **Reading the payload's `tool_name`** and applying each shell's exact rules. The user chose
+  both-shell-safe.
+- **A quoted flag on the public `Segment`.** Changes the public dataclass and every test that
+  pins segment tuples.
 
 ### Modules
 
 | Path | New or changed | Purpose |
 |---|---|---|
+| `.claude/hooks/guard_git.py` | changed | Private stand-ins and their blanking; `_scan` emits them; `PUNCTUATION_CHARS`, `SEPARATOR_CHARS`, `INLINE_WHITESPACE`, `_governs` and `_segments` read them; a private `_plain` that strips them for every text comparison; module docstring |
+| `tests/test_guard_git.py` | changed | New tests for A1–A6 under a round 5 heading; the existing tests A4 and A5 name changed to their agreed outcome, nothing else touched |
+| `STRUCTURE.md` | changed | Guard section prose (quoting kept, soft separators, the known-miss line for quoted operators removed); tests entry gains the round 5 paragraph |
 
 ### Public API
 
-> Every public class and function, with its full signature as it will be written.
-> `Covers` links back to the acceptance criteria above.
+No public signature or constant changes. `PUNCTUATION_CHARS` and `SEPARATOR_CHARS` gain one
+private character each but keep their names and types; `INLINE_WHITESPACE` loses `\r`.
 
 | Signature | Module | Purpose | Covers |
 |---|---|---|---|
+| `segments(command: str) -> list[Segment] \| None` | `guard_git.py` | Unchanged signature. A quoted operator character stays in its word; a soft separator splits and shows as `;`; stand-ins and the quote marker never appear in its output. | A2, A6 |
+| `git_subcommand(tokens: tuple[str, ...]) -> tuple[str, tuple[str, ...]]` | `guard_git.py` | Unchanged signature. A token carrying the quote marker is never a leader, assignment or redirection; the name, subcommand and arguments come back without it. | A5 |
+| `violation(command: str, branch: str) -> str` | `guard_git.py` | Unchanged signature. Refuses the quoted, escaped, bare-brace and carriage-return forms; allows quoted words at command position. | A1–A6 |
 
 ### Implementation guide
 
-Ordered. Each entry small enough to finish and check.
-
-1.
-2.
+1. **Reproduction first (fix round).** Add `test_violation_refuses_an_or_switch_after_a_quoted_separator_word`
+   asserting `violation('true || echo ";" | git checkout -b x && git commit -m x', "main")`
+   starts with the commit reason, under a new heading "round 5: quoted words are never
+   operators" at the end of the file. Run it red, paste the run into section 3, commit before
+   any production change. If it is already green, halt.
+2. **Stand-ins.** Add, beside `_OPEN`/`_CLOSE`/`_PLACEHOLDER`: `_QUOTED` (a dict from each of
+   `; & | ( ) { } < >` and `\n` to its own private-use character, e.g. U+E001–U+E00A), its
+   inverse, `_QUOTE_MARK` (U+E000) and `_SOFT` (U+E00B). `_prepare` blanks every one of them
+   in the input exactly as it blanks `_OPEN`, `_CLOSE` and `_PLACEHOLDER`, so a command cannot
+   forge them. Add `_SOFT` to `PUNCTUATION_CHARS` and `SEPARATOR_CHARS`; remove `\r` from
+   `INLINE_WHITESPACE`.
+3. **`_scan` emits them.** Where `_scan` copies a character whose innermost frame is a single
+   or double quote, copy its `_QUOTED` stand-in instead if it has one. Where it copies an
+   opening quote that starts a word (the previous emitted character is whitespace, an
+   operator, the start, or a mark), write `_QUOTE_MARK` before it. Where it copies an
+   unquoted backslash pair whose second character is an operator character, write `_SOFT`
+   instead of the pair. Where it copies an unquoted `\r`, write `_SOFT`. Substitution text that
+   `_scan` extracts and re-scans gets the same treatment, since it goes through `_scan`.
+   Heredoc bodies are dropped before this and are unaffected; a heredoc delimiter line
+   followed by `\r` keeps closing as today (`_DELIMITER_END` already excludes `\r`).
+4. **`_governs`.** A piece containing `_SOFT` and no `&&` governs as `;`; a run containing
+   `_SOFT` never governs as `&&` (`_join` already returns the first non-`&&` piece).
+5. **`_segments`.** After classification, map `_QUOTED` stand-ins back to their characters in
+   every token. A token that is exactly `{` or `}` while `current` already holds a word is
+   handled as `_SOFT` (splits, governs as `;`, adds nothing to `raw`). `_SOFT` adds nothing to
+   `raw` (`_OPERATORS` does not match it). Keep `_QUOTE_MARK` in the tokens.
+6. **`_plain(token) -> str`.** A private helper that removes `_QUOTE_MARK`. `segments` applies
+   it with the placeholder mapping, so the public output never shows the marker. In
+   `_walk_prefix`, the leader, assignment and redirection checks compare the raw token; the
+   wrapper and executable checks compare `_plain(token)`. `git_subcommand` returns the
+   subcommand and arguments through `_plain`. Any other place that compares a token's text to
+   a name (`_loop_ranges`' loop words, `_leads_uncertainly`, `_redirected`, `switch_target`'s
+   callers) reads it through `_plain` unless it is checking shell syntax, in which case a
+   quoted token is correctly not that syntax.
+7. **Docs.** Module docstring and STRUCTURE.md's guard section: quoting is kept for operator
+   characters and leading quotes; the soft separator and the three tokens it covers; the
+   known-miss line for quoted operators is removed; "reads both the same way" stays true and
+   says the shell-dependent tokens are read so as to be safe in both. The tests entry gets a
+   round 5 paragraph.
 
 ### Test intents
 
-> High-level: what a test must prove, not how it is written. Step 5 turns each of these
-> into concrete cases, including the edge cases.
-
 | # | Must prove | Covers |
 |---|---|---|
-| T1 | | |
+| T1 | `true \|\| echo ";" \| git checkout -b x && git commit -m x` on `main` refused with the commit reason: red before, green after | A1 |
+| T2 | `segments` keeps each quoted operator token in its word (`";"`, `"&&"`, `'&'`, `'\|'`, `'\|\|'`, `'('`, `')'`, `'{'`, `'}'`, a quoted newline, `";"";"`, `a';'`, and a quoted `;` inside `"$( )"` that is code, not quoted, still splitting); every `\|\|`/`!` form from the Reproduction row built on a quoted token refused on `main`, each checked in bash | A2 |
+| T3 | `\;`, `\&`, `\|`, `-exec true \;` and a bare `{`/`}` argument forms refused on `main`; `ForEach-Object { git commit -m x }`, `Invoke-Command -ScriptBlock { git commit -m x }`, `Start-Job { git push origin main }` and `{ git commit -m x; }` refused on `main`; a soft separator never carries `&&` trust (`git checkout -b x \; && git commit -m x` refused on `main`) | A3 |
+| T4 | `&&\r\n`, `&&\r\n\r\n`, `&& \r\n` forms refused on `main`; the test at `:2429` rewritten to refused; `git commit\r\n`, `git push\r\n`, `git push origin main\r\n` refused; the CR heredoc tests (`:971`, `:2056–2073`) keep their outcomes | A4 |
+| T5 | `'if' git commit -m x`, `'!' git checkout -b x && git commit -m x`, `"X=1" git commit -m x`, `'>' x git commit -m x`, `echo ";" git commit -m x` allowed on `main` (round 3's quoted-leader pins rewritten to allowed); `"git" commit -m x`, `git "commit" -m x`, `"sudo" git commit -m x`, `git checkout "main"; git commit -m x` from a branch refused; forged stand-ins and markers in the input blanked; `git_subcommand` returns marker-free text | A5 |
+| T6 | See below. | A6 |
+
+T6 in full. The existing suite passes unmodified except the tests A4 and A5 name, which step 3
+or 5 rewrites with a one-line note each in section 5; rounds 1–4's criteria are re-checked. The
+differential runs at step 6:
+- **Baseline.** `git show 8972524:.claude/hooks/guard_git.py`, loaded from the scratchpad with
+  `.claude/hooks` on `sys.path` and registered in `sys.modules`.
+- **Corpus.** Every `(command, branch)` the suite passes to `violation`, captured with a scratch
+  `-p` plugin.
+- **Variants.** Each command with a quoted-operator argument inserted after its first word
+  (`";"`, `"&&"`, `'('`, `'{'`), an escaped one (`\;`), a bare `{`, and each newline replaced by
+  `\r\n`; prefixes `true || echo ";" | ` and `! true | echo ';' | `; branches `main` and `feat/x`.
+- **What goes to bash.** Differing rows only, oracle as in round 4 (`git` shadowed with HEAD in a
+  file, an empty checkout argument failing, `PATH=/usr/bin:/bin`, wrappers shadowed, stdin
+  closed, a timeout, no hostile nesting), **shown live first** by `git commit -m x` landing on
+  `main`. PowerShell-only rows are listed, not run.
+- **Pass condition.** Every difference involves a quoted, escaped, bare-brace or carriage-return
+  token; the oracle agrees or the new refusal is play-safe; zero rows where the new guard allows a
+  commit or push that bash lands on `main`.
 
 ### Risks
 
-What could make this harder than it looks, and what the build should do if it does —
-including whether it should halt.
+- **A stand-in leaks into a comparison.** If a test shows a quoted name or ref mis-compared
+  (`git checkout "main"` not seen as `main`), route that comparison through `_plain`: inside the
+  build.
+- **The pre-pass cannot tell a word-starting quote cheaply** in some frame. Then write the marker
+  for every opening quote; a mid-word marker only affects the three syntax checks, which a
+  mid-word quote already fails in bash. Inside the build.
+- **An existing test other than those A4 and A5 name changes outcome.** Halt.
+- **PowerShell.** Backtick escapes, here-strings and `$'…'` already play safe through
+  `UNMODELLED_OPENERS`; if a PowerShell test changes outcome, halt.
+- **The cause is elsewhere.** If an A1–A4 form stays allowed after the stand-ins are in place for
+  a reason other than these two causes, halt.
+
+### Coverage
+
+- **Every criterion has a Public API entry:** A1–A6 through `violation`, A2 and A6 through
+  `segments`, A5 through `git_subcommand`.
+- **Every criterion has a test intent:** A1→T1, A2→T2, A3→T3, A4→T4, A5→T5, A6→T6.
+- **Nothing in the Public API lacks a criterion.** No new public surface.
 
 ---
 
