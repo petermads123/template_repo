@@ -44,7 +44,19 @@ expands the body and runs its `$( )` and backtick substitutions, so those are
 extracted the same way, in front of the command that opened the heredoc, and
 the rest of the body is dropped: an escaped `$(` is text, `$(( ))` is
 arithmetic and `${ }` is a parameter, none of them a command, while a
-substitution inside either of the last two still runs. A backtick inside double
+substitution inside either of the last two still runs. A heredoc opened inside
+a `$( )`, `<( )` or `>( )` may close on a line that carries the substitution's
+own `)`, because bash finds the end of the substitution before it reads the
+heredoc: `EOF)`, `EOF )`, `EOF) ; cmd`, `EOFx)` and `EOF git push origin main)`
+all end the body at the delimiter, close the substitution and leave the rest of
+the line, whatever it is, to be read as commands (checked in bash 5.2 with `git`
+shadowed). The guard takes any line that begins with the last queued heredoc's
+delimiter and holds a `)` as such a line, which covers everything bash does and
+reads a little more as commands, so it can only add refusals. The rule is
+limited to those substitutions: a heredoc in a top-level subshell, or in a
+backtick pair (whose text bash has complete before it parses it), needs the bare
+delimiter line, and so does one whose closing line has no `)`, a leading space
+or, under plain `<<`, a tab. A backtick inside double
 quotes is also left in the text, because PowerShell reads it as its escape
 character, so both readings are judged; one with no partner is just a
 character. A substitution that never closes is left in the text, not
@@ -581,7 +593,10 @@ def _logical_line(command: str, position: int, join: bool) -> tuple[str, int]:
 
 
 def _heredoc_bodies(
-    command: str, start: int, queue: list[tuple[str, bool, bool]]
+    command: str,
+    start: int,
+    queue: list[tuple[str, bool, bool]],
+    in_substitution: bool = False,
 ) -> tuple[int, list[str]]:
     """Skip the bodies of the heredocs opened on the line that just ended.
 
@@ -591,21 +606,48 @@ def _heredoc_bodies(
         queue: The delimiter, whether leading tabs are stripped (`<<-`) and
             whether the delimiter was quoted, for each heredoc, in the order
             they were opened.
+        in_substitution: Whether the heredocs were opened inside a `$( )` or
+            `<( )`. There bash finds the end of the substitution before it
+            reads the heredoc, so the last heredoc's closing line may be its
+            delimiter followed by the `)` that closes the substitution --
+            `EOF)`, `EOF )`, `EOF) ; cmd`, `EOFx)` -- and the rest of that line
+            is ordinary text. Any line that begins with the delimiter and holds
+            a `)` ends the body here; that takes in everything bash does and
+            reads a little more as commands, which can only add refusals.
 
     Returns:
-        The index just past the last delimiter line, and the text of each body
-        whose delimiter was unquoted -- the only bodies bash expands -- with
+        The index just past the last delimiter line -- or, for a line that
+        closes the substitution as well, just past its delimiter, so the
+        caller reads the rest of the line -- and the text of each body whose
+        delimiter was unquoted, the only bodies bash expands, with
         continuation lines joined. When the input ends before a delimiter
         arrives that is the end of the input: bash warns and takes the rest as
         the body, and so does this.
     """
     position = start
     expanded: list[str] = []
-    for delimiter, strip_tabs, quoted in queue:
+    last = len(queue) - 1
+    for number, (delimiter, strip_tabs, quoted) in enumerate(queue):
         lines: list[str] = []
         while position < len(command):
+            begin = position
             line, position = _logical_line(command, position, join=not quoted)
-            if (line.lstrip("\t") if strip_tabs else line) == delimiter:
+            text = line.lstrip("\t") if strip_tabs else line
+            if text == delimiter:
+                break
+            if (
+                in_substitution
+                and number == last
+                and text.startswith(delimiter)
+                and ")" in text[len(delimiter) :]
+            ):
+                position = begin
+                while strip_tabs and command[position : position + 1] == "\t":
+                    position += 1
+                # A delimiter split by a continuation is read as text instead.
+                position += (
+                    len(delimiter) if command.startswith(delimiter, position) else 0
+                )
                 break
             lines.append(line)
         if not quoted:
@@ -635,7 +677,9 @@ def _quoted_end(text: str, start: int) -> int | None:
     return None
 
 
-def _body_substitutions(body: str, nesting: int, budget: list[int]) -> list[str]:
+def _body_substitutions(
+    body: str, nesting: int, budget: list[int]
+) -> list[tuple[str, str]]:
     r"""Pull the command substitutions out of text that bash expands.
 
     That is an unquoted heredoc body and the inside of an arithmetic
@@ -652,12 +696,15 @@ def _body_substitutions(body: str, nesting: int, budget: list[int]) -> list[str]
 
     Returns:
         The text of each command substitution that bash would run, in order,
-        for `_scan` to read as commands. The end of a `$( )` is found with the
+        for `_scan` to read as commands, each with the closer to walk it with:
+        `")"` for a `$( )`, whose text then ends with its own `)` so the walk
+        reads a heredoc closing line the way it did when the end was found, and
+        `""` for a backtick pair. The end of a `$( )` is found with the
         walk `_scan` makes of ordinary text, so a quote, a heredoc or a `case`
         pattern inside it is read as it is there. A substitution that never
         closes runs nothing in bash and is left out, along with the rest.
     """
-    found: list[str] = []
+    found: list[tuple[str, str]] = []
     failed: set[int] = set()
     index = 0
     while index < len(body):
@@ -670,7 +717,7 @@ def _body_substitutions(body: str, nesting: int, budget: list[int]) -> list[str]
             if end is None:
                 break
             inner = body[index + 1 : end - 1]
-            found.append(re.sub(r"\\([$`\\])", r"\1", inner))
+            found.append((re.sub(r"\\([$`\\])", r"\1", inner), ""))
             index = end
         elif body[index : index + 2] == "$(":
             if (
@@ -682,7 +729,7 @@ def _body_substitutions(body: str, nesting: int, budget: list[int]) -> list[str]
             _, _, end, closed = _scan(body, index + 2, ")", failed, nesting, budget)
             if not closed:
                 break
-            found.append(body[index + 2 : end - 1])
+            found.append((body[index + 2 : end], ")"))
             index = end
         else:
             index += 1
@@ -808,8 +855,8 @@ def _scan(
             unmodelled = True  # too deep to follow: play safe
             return False
         inners = _body_substitutions(text, nesting + 1, budget)
-        for inner in inners:
-            prepared, flag, _, _ = _scan(inner, 0, "", set(), nesting + 1, budget)
+        for inner, ends in inners:
+            prepared, flag, _, _ = _scan(inner, 0, ends, set(), nesting + 1, budget)
             place(prepared, flag, target)
         return bool(inners)
 
@@ -1003,7 +1050,7 @@ def _scan(
             index += 1
             boundary = True
             if queue:
-                index, bodies = _heredoc_bodies(command, index, queue)
+                index, bodies = _heredoc_bodies(command, index, queue, closer == ")")
                 owners = [
                     s
                     for (_, _, quoted), s in zip(queue, queue_slots, strict=True)
@@ -1012,11 +1059,6 @@ def _scan(
                 queue, queue_slots = [], []
                 for body, owner in zip(bodies, owners, strict=True):
                     from_text(body, owner)
-                if index >= length:
-                    # A body that ran to the end of the input took any closing
-                    # quote with it; bash runs the command, so close them here
-                    # for `shlex` to read what the substitutions left behind.
-                    out.append('"' * frames.count("dq"))
             fresh()
         elif char == "(":
             arith = _arith_end(command, index, budget) if pair == "((" else None

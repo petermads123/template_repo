@@ -1,6 +1,6 @@
 # The git guard judges command substitutions inside a word
 
-<!-- claude-plan step=3 status=active -->
+<!-- claude-plan step=4 status=active -->
 
 | Field | Value |
 |---|---|
@@ -16,8 +16,8 @@
 | 1 | Conceptualize | `/conceptualize` | with the user | done |
 | 2 | Plan | `/plan` | with the user | done |
 | 3 | Implement | `/implement` | in `/build` | done |
-| 4 | Verify | `/verify` | in `/build` | done |
-| 5 | Test | `/test` | in `/build` | done |
+| 4 | Verify | `/verify` | in `/build` | pending |
+| 5 | Test | `/test` | in `/build` | pending |
 | 6 | Concept check | `/concept-check` | in `/build` | pending |
 | 7 | Ship | `/ship` | in `/build` | pending |
 | 8 | Recommend | `/recommend` | with the user | pending |
@@ -464,6 +464,19 @@ E        +      where '' = violation('echo "$(cat <<EOF\nhi\nEOF)" ; git push or
 ```
 
 Every one of the eight was confirmed in bash 5.2 with `git` shadowed to push `main` (scratchpad `r3/chk_tests.py`).
+
+**Halt answer implemented (option 1): a heredoc inside a substitution closes where bash closes it.** Built as the user decided; no change to section 1 beyond the A2 amendment already made. Bash 5.2's rule, found by running it with `git` shadowed (scratchpad `r3/probe1.py` to `probe5.py`, `r3/table.py`):
+
+- Bash finds the end of a `$( )` or `<( )`/`>( )` *before* it reads a heredoc inside it, with a prefix match: a line that **begins with the delimiter and holds a `)`** ends the body at the delimiter, the `)` closes the substitution (the nearest open one, so `EOF))` closes two levels and a subshell's `)` is taken first), and the rest of the line is ordinary commands. `EOF)`, `EOF )`, `EOF<tab>)`, `EOF) ; cmd`, `EOFx)` and `EOF git push origin main)` all do; `declare -f` shows bash rewrites the line to `EOF` plus a new line holding the rest. `<<-` strips leading tabs first; a quoted delimiter ends the same way (the body is data); an unquoted one joins backslash-newline first (`EOF\` then `)`).
+- It does **not** end on a line without the `)` (`EOFx` then `EOF`, `EOF foo` with the `)` on the next line, `EOF;`, `EOF` then a backtick), on a leading space, on a tab under plain `<<`, in a top-level subshell, or in a backtick pair (whose text is complete before it is parsed, so only the bare delimiter ends it). When the `)` is meant to close and the line does not match, bash reports a syntax error ("unexpected EOF while looking for matching `)'") and runs nothing from that command.
+- With two heredocs opened together only the last one takes the rule (`A)` with a `B` pending is a syntax error). When the delimiter line closes the substitution before its body (`$(cat <<EOF)` then the body on the next lines) bash reads the body from after the `)`; the guard already handled that (flagged unmodelled).
+- Bash warns "delimited by end-of-file" in every one of these cases; it is the second parse of the extracted text and does not stop the command.
+
+Fix: `_heredoc_bodies` takes `in_substitution` (the walk's `closer == ")"`) and, for the last queued heredoc, ends the body at a line that begins with the delimiter and holds a `)`, returning the index just past the delimiter so `_scan` reads the rest of the line as commands (the `)` closes the substitution, `fresh()` opens a command slot). Reading is a little more liberal than bash (a `)` inside a quote or a comment on the line counts), which only adds refusals; an exhaustive pass over 40 closing-line shapes (`r3/table.py`) found none that bash runs and the guard allows from a branch. To keep that rule on the second walk of an extracted `$( )` (heredoc bodies and arithmetic), `_body_substitutions` now returns each substitution with the closer to walk it with and, for `$( )`, the text including its own `)`; backtick text is walked bare. The differential (`r6/diff6.py`, corpus recaptured, 5,394 judged inputs) has no row where the new guard allows what bash lands on `main` (the 11 rows of the second check are gone); the base-refuse to new-allow rows are the earlier explained ones plus one more of the same kind (`cat <(git checkout -b feat/x && git commit -F - <<'EOF'\nfix main's guard\nEOF)`, bash commits on `feat/x`).
+
+**What happened to 9a98609's quote-appending: removed.** With the rule above, the shapes it was written for (`echo "$(cat <<EOF > f\n$(git push origin main)\nEOF)"` and kin) end their heredoc on the `)` line, so the text after the body is balanced and nothing swallows the closing quote. What was left that needed it was only input bash rejects: with the append removed, exactly two cases of the 14 failed (`cat <<EOF "$(echo hi\nbody\n$(git push origin main)\nEOF` and `echo "$(cat <<A <<B\n$(git push origin main)\nA\n$(date)`), both syntax errors in bash ("unexpected EOF while looking for matching `)'", nothing runs). A heredoc that genuinely runs to the end of the input (bash's warning case, e.g. `cat <<EOF "$(echo hi)"\nbody $(git push origin main)\n`) never has a `dq` frame open in the walk that reads its body, so the append was dead there. Those two inputs are now unreadable (refused on `main`, allowed elsewhere), pinned by `test_violation_reads_an_unterminated_heredoc_in_a_substitution_as_unreadable`.
+
+Tests changed by this (all round 2's, none of round 1's, none of A9's five): `test_violation_closes_every_open_quote_when_a_body_reaches_the_end` renamed `test_violation_judges_a_body_substitution_inside_nested_quotes_and_closers`, its two unterminated cases moved to the unreadable test; `test_violation_allows_an_unclosed_quoted_heredoc_that_runs_no_git` renamed `test_violation_allows_a_heredoc_in_a_quoted_substitution_that_runs_no_git`, and its last case (`echo "$(cat <<EOF\nit's\nEOF)" ; git push origin main`, which pinned the wrong model: "the rest of the input is the body") moved to the refused set. New tests: the red ones above (shapes a, b, c and harmless counterparts), `test_violation_reads_a_closing_line_that_carries_the_substitutions_paren` (27 shapes, each confirmed in bash), `test_violation_leaves_a_line_bash_does_not_close_on_as_body` (4), `test_violation_still_reads_the_body_that_follows_a_closing_paren_on_the_opener`. Suite 766 passed (724 plus 42), `ruff check`, `ruff format --check` and `mypy` clean; all 409 round 1 tests unchanged and green.
 
 ---
 
