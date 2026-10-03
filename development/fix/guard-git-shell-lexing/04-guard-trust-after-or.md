@@ -326,6 +326,18 @@ under A2–A5.
 > planned" is a complete and good entry. On a fix round, also the reproduction test's red
 > run, pasted here before the fix was written — step 6 cites it.
 
+**Reproduction, red before the fix** (`pytest tests/test_guard_git.py -k after_an_or_switch`):
+
+```
+>       assert violation(command, PROTECTED).startswith(COMMIT_REASON)
+E       AssertionError: assert False
+E        +  where '' = violation('git status || git checkout -b x && git commit -m x', 'main')
+FAILED tests/test_guard_git.py::test_violation_refuses_a_commit_after_an_or_switch_on_main
+====================== 1 failed, 951 deselected in 0.59s =======================
+```
+
+It fails as the Defect block's Observed row says: `violation` returns `""`.
+
 ---
 
 ## 4. Verification log

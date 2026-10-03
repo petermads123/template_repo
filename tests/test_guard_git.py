@@ -3478,3 +3478,12 @@ def test_git_subcommand_leaves_a_redirected_git_after_a_leader_to_violation() ->
         "checkout",
         ("main",),
     )
+
+
+# --- round 4: trust after `||` -----------------------------------------------
+
+
+def test_violation_refuses_a_commit_after_an_or_switch_on_main() -> None:
+    command = "git status || git checkout -b x && git commit -m x"
+
+    assert violation(command, PROTECTED).startswith(COMMIT_REASON)
