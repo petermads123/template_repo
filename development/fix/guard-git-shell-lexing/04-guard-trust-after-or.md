@@ -45,8 +45,6 @@ extraction.
 
 ---|---|---|
 
-This round came from recommendation `<R#>` of round `<N>`, which read:
-
 > <the recommendation, quoted from that round's section 8>
 
 What is already on the branch that this round must not break:
@@ -159,10 +157,11 @@ still replace `ok` for commands *inside* the operand (so
 operand is the union. Create-or-switch stays allowed because both sides trust `feat/x`.
 
 Groups are the obstacle: `_join` folds `|| {`, `; } &&` and `)&&` into a single separator,
-so `Segment.separator` cannot say where a group opened or closed. `_segments` already holds
-the full run (`pending`) when it flushes each segment; it hands those runs out through a
-private optional parameter, and `_judge` walks each run's pieces in order. That keeps the
-public `Segment` unchanged.
+and `_governs` reduces a glued punctuation token (`)&&`, `||(`, `);`) to one piece, so neither
+`Segment.separator` nor `pending` can say where a group opened or closed. `_segments` keeps a
+second list beside `pending` holding the **raw operators** of each run in written order, and
+hands those runs out through a private optional parameter; `_judge` walks each run's
+operators in order. That keeps the public `Segment`, `pending` and `_join` unchanged.
 
 Round 3's `negating` state gets the same keying. It is set at the `!`/`coproc` segment's
 (depth level, group level) and cleared only by a list end at that key, or by the group it
@@ -207,25 +206,30 @@ small helper for the (depth level, group level) key if the build wants one.
    starts with the commit reason, under a new heading "round 4: trust after `||`" at the end
    of the file. Run it red, paste the run into section 3, commit before any production
    change. If it is already green, halt.
-2. **Runs out of `_segments`.** Give `_segments` a keyword-only
-   `runs: list[tuple[str, ...]] | None = None`. When given, `flush` appends `tuple(pending)`
-   for each segment it appends — the governed separator pieces since the previous
-   invocation, in written order, including `(`, `{`, `)` and `}`; empty for a `SUBSTITUTED`
-   segment; the inherited run for the first segment of a substitution (as `separator` is
-   inherited). `segments` and every other caller pass nothing and are unchanged. Check
-   that `_governs` keeps `(`, `{`, `)`, `}` as their own pieces; if a run can lose a group
-   delimiter, the operand rule plays safe on it (guide 5) rather than guessing.
+2. **Runs out of `_segments`.** Keep a second list, `raw`, beside `pending`. Wherever a
+   separator piece is appended to `pending`, append to `raw` that piece's operators split in
+   written order — `re.findall(r"\|\||&&|\|&|;;&?|;&|[;&|(){}\n]", piece)` — so `)&&` gives
+   `)`, `&&`, `||(` gives `||`, `(`, and `))` gives `)`, `)`. Reset `raw` wherever `pending` is
+   reset, save it in `opened` with `pending`, and restore it on the empty-group `_CLOSE` path
+   exactly as `pending` is. Give `_segments` a keyword-only
+   `runs: list[tuple[str, ...]] | None = None`; when given, `flush` appends `tuple(raw)` for
+   each segment it appends — empty for a `SUBSTITUTED` segment, the inherited run for the
+   first segment of a substitution (as `separator` is inherited). `pending`, `_join`,
+   `segments` and every other caller are unchanged.
 3. **The key.** For segment *i*, its run belongs to the **level**
    `min(depth_i, depth_{i-1})` (`depth_{-1}` = 0): the inherited run of a substitution's
    first segment belongs to the command containing it. Keep a group count per level,
    `nest[level]`; walking a run's pieces in order, `(`/`{` increments it and `)`/`}`
    decrements it (never below 0). A piece's key is `(level, nest[level])` at that moment.
-4. **Operands in `_judge`.** Keep a stack of open operands `(key, base)`. Walk each segment's
-   run before computing `here`:
+4. **Operands in `_judge`.** Keep a stack of open operands `(key, base)`. Before walking a
+   segment's run, pop every entry whose level is greater than `segment.depth` (a
+   substitution that has ended), doing `ok |= base` for each; the substitution's frame
+   already carries its targets. Then walk the segment's run before computing `here`:
    - `||` at key *k*: if the top of the stack has key *k*, `base |= ok`; else push
      `(k, set(ok))`.
-   - `&&`, `;`, newline, `&` at key *k*: pop every entry whose key is *k* and do
-     `ok |= base` for each.
+   - `&&`, `;`, `&` at key *k*, and a newline at key *k* **only when the run holds no other
+     operator** (the rule `_join` already applies: `||` or `|` or `&&` followed by a newline
+     continues the list): pop every entry whose key is *k* and do `ok |= base` for each.
    - `)`/`}` closing to nest *n* at a level: first pop every entry at that level whose group
      level is greater than *n* (`ok |= base` for each), then decrement.
    - `|` (and what `|&` governs to): nothing.
@@ -235,10 +239,14 @@ small helper for the (depth level, group level) key if the build wants one.
    with nothing open, a level that jumps), widen rather than drop: an entry is only ever
    dropped by the rules above, and each drop does `ok |= base`. A stack left open at the
    end of the command needs nothing.
-6. **`negating` by key.** Replace the `groups` counter: when a `!`/`coproc`-led segment sets
-   `negating`, record its key. Clear it on a list-end piece (`_LIST_ENDS`) at exactly that
-   key, or when a close takes that level's nest below the recorded group level. Pieces at a
-   deeper level or group level leave it set. The switch rule at line 1671–1672 is unchanged.
+6. **`negating` by key.** Replace the boolean and the `groups` counter with a set of keys.
+   A `!`/`coproc`-led segment adds its own key `(segment.depth, nest[segment.depth])`, taken
+   after its run is walked. A key is cleared by a list-end operator (`_LIST_ENDS`) at exactly
+   that key — a newline only under guide 4's rule — or by a close that takes that level's
+   nest below the key's group level, or (as in guide 4) when a segment's depth drops below
+   the key's level. Operators at a deeper level or group level leave it. The switch is
+   unsure while the set is non-empty, so line 1671 reads `unsure = bool(negating) or
+   _leads_uncertainly(...)`; line 1672 is unchanged.
 7. **Docs.** Rewrite the comment at 1603–1605 (`ok` after an `||` operand is the union of
    both sides; only a switch inside an operand is trusted inside it). Update the module
    docstring's trust paragraph and STRUCTURE.md's guard section to say a switch on the right
@@ -251,10 +259,10 @@ small helper for the (depth level, group level) key if the build wants one.
 | # | Must prove | Covers |
 |---|---|---|
 | T1 | `git status \|\| git checkout -b x && git commit -m x` on `main` refused with the commit reason: red before, green after | A1 |
-| T2 | Every A2 form refused on `main` (the named switch from `feat/y`), each checked against bash with `git` shadowed: later pipeline stage via `\|` and `\|&`; `time`, `sudo`, `x=1`, `2>/dev/null`, `!`-free reserved word before the switch; `"$(echo)"` on the switch; chained `\|\|`; `\|\|` after an `&&` chain; `coproc true \|\|`; a heredoc on the switch; `&&` ending a line; `\|\| git checkout -b x && true && git commit`; the commit inside `"$(...)"` and unquoted `$(...)`; the whole inside `{ }`, `$( )` and an `if` condition; the push of `HEAD`; `git checkout main \|\| git checkout feat/x && git commit -m x` from `feat/y`; a subshell `true \|\| (git checkout -b x)&&git commit -m x` | A2 |
-| T3 | The `negating` leak closed: `! true \| git checkout -b feat/x "$(true && true)" && git commit -m x`, the `"$(true; true)"` and backtick variants, the `coproc` equivalent, and `true \|\| git checkout -b x "$(true && true)" && git commit -m x`, all refused on `main` | A3 |
-| T4 | Stay allowed on `main`: create-or-switch with `checkout` and with `switch -c`/`switch`; `git fetch \|\| true && git checkout -b x && git commit -m x`; `true \|\| false && git checkout -b x && git commit -m x`; `true \|\| { git checkout -b x && git commit -m x; }`; the round 3 staged-commit chain; and a `!` scope still ended by `;` at its own level | A4 |
-| T5 | The run parameter: `_segments(command)` output unchanged with and without `runs`; runs pinned for `\|\| {`, `; } &&`, `)&&` and a substitution's inherited run (a private-helper test, kept small) | A2, A5 |
+| T2 | Every A2 form refused on `main` (the named switch from `feat/y`), each checked against bash with `git` shadowed: later pipeline stage via `\|` and `\|&`; `time`, `sudo`, `x=1`, `2>/dev/null`, `!`-free reserved word before the switch; `"$(echo)"` on the switch; chained `\|\|`; `\|\|` after an `&&` chain; `coproc true \|\|`; a heredoc on the switch; `&&` ending a line; `\|\| git checkout -b x && true && git commit`; the commit inside `"$(...)"` and unquoted `$(...)`; the whole inside `{ }`, `$( )` and an `if` condition; the push of `HEAD`; `git checkout main \|\| git checkout feat/x && git commit -m x` from `feat/y`; a subshell glued either side, `true \|\| (git checkout -b x)&&git commit -m x` and `true \|\|(git checkout -b x) && git commit -m x`; `true \|\| ` newline with a trailing space before the newline | A2 |
+| T3 | The `negating` leak closed: `! true \| git checkout -b feat/x "$(true && true)" && git commit -m x`, the `"$(true; true)"` and backtick variants, the `coproc` equivalent, `true \|\| git checkout -b x "$(true && true)" && git commit -m x`, a nested `!` inside the substitution (`! true \| git checkout -b x "$(true; ! true; true)" && git commit -m x`) and `! true \| ` newline with a trailing space then the switch, all refused on `main` | A3 |
+| T4 | Stay allowed on `main`: create-or-switch with `checkout` and with `switch -c`/`switch`; `git fetch \|\| true && git checkout -b x && git commit -m x`; `true \|\| false && git checkout -b x && git commit -m x`; `true \|\| { git checkout -b x && git commit -m x; }`; the round 3 staged-commit chain; a `!` scope still ended by `;` at its own level; and an ended substitution leaving no state: `echo "$(! true)"; git checkout -b x && git commit -m x` and `echo "$(true \|\| git checkout -b y)"; git checkout -b x && echo "$(true && git commit -m x)"` | A4 |
+| T5 | The run parameter: `_segments(command)` output unchanged with and without `runs`; runs pinned for `\|\| {`, `; } &&`, `)&&`, `\|\|(`, `);`, `()`, `))`, a substitution's inherited run and an empty group's restored run (a private-helper test, kept small) | A2, A5 |
 | T6 | See below. | A5 |
 
 T6 in full. The existing suite passes unmodified, and rounds 1–3's criteria are re-checked.
@@ -277,10 +285,9 @@ The differential runs at step 6:
 
 ### Risks
 
-- **A run loses a group delimiter.** Then the key is wrong. The guide's play-safe rule means
-  an entry is never dropped silently; if a test shows an A4 form refused because of it,
-  that is a fix inside the build; if fixing it would need a different `_segments` shape than
-  guide 2, halt.
+- **A run loses an operator.** Guide 2 splits raw operators so it should not; if a test shows
+  an A2 or A3 form allowed or an A4 form refused because a run is wrong, fixing the split is
+  inside the build; if it needs a different `_segments` shape than guide 2, halt.
 - **Round 3 tests move.** The `negating` re-keying should only narrow when it clears. If an
   existing round 3 test changes outcome, halt — unless it is a refusal that becomes a
   refusal for the same reason (no change in outcome).
@@ -294,6 +301,28 @@ The differential runs at step 6:
 - **Every criterion has a Public API entry:** A1–A5 through `violation`.
 - **Every criterion has a test intent:** A1→T1, A2→T2 (and T5), A3→T3, A4→T4, A5→T5 and T6.
 - **Nothing in the Public API lacks a criterion.** No new public surface.
+
+Re-checked after the critique: the Public API is unchanged; T2–T5 gained cases, all still
+under A2–A5.
+
+### Critique
+
+`plan-critic` verdict: accept with changes. Every finding applied:
+
+1. **Runs built from `pending` lose `(` and `)` glued to an operator (`)&&`, `||(`, `);`), so
+   `true || (git checkout -b x)&&git commit` stayed allowed.** Applied: guide 2 keeps a raw
+   operator list beside `pending`, saved and restored with it; T2 and T5 gained the glued
+   forms; Risks updated.
+2. **Walking pieces one at a time made a newline after `||`, `|` or `&&` a list end, which
+   `_join` never did — a new hole for `||` and a regression for round 3's `!`.** Applied:
+   guides 4 and 6 count a newline as a list end only when the run holds no other operator;
+   T2 and T3 gained trailing-space newline cases.
+3. **The `negating` key's level and what happens when a substitution ends were undecided;
+   one reading opens an A3-class hole, the other over-refuses.** Applied: guide 6 makes
+   `negating` a set of keys at the segment's own depth; guide 4 drops operand entries and
+   keys deeper than the current segment before walking its run; T3 and T4 gained the nested
+   and ended-substitution cases.
+4. **Leftover template text in Builds on.** Applied: removed.
 
 ---
 
