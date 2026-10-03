@@ -175,9 +175,8 @@ bash with `git` shadowed:
   lone `'` inside a quoted `${ }`) are pinned so changing them is a decision; a `git checkout -` inside a substitution refuses the command as unresolvable, and a detached HEAD (`""`) still refuses a push to `main` inside a substitution while allowing a commit.
 
 Round 3 (`development/fix/guard-git-shell-lexing/03-...`) adds the reproduction for the reserved
-words: `if git commit -m x; then echo ok; fi` refused on `main` instead of allowed. The rest of its
-suite (reserved words that take a command, `!`/`coproc` trust, loops, words that are not commands)
-follows the reproduction.
+words, under its own heading at the end of the file: `if git commit -m x; then echo ok; fi` refused
+on `main` instead of allowed.
 
 ### `tests/test_plan_state.py`
 

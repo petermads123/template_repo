@@ -1,6 +1,6 @@
 # The git guard steps over shell reserved words
 
-<!-- claude-plan step=4 status=active -->
+<!-- claude-plan step=5 status=active -->
 
 | Field | Value |
 |---|---|
@@ -16,7 +16,7 @@
 | 1 | Conceptualize | `/conceptualize` | with the user | done |
 | 2 | Plan | `/plan` | with the user | done |
 | 3 | Implement | `/implement` | in `/build` | done |
-| 4 | Verify | `/verify` | in `/build` | pending |
+| 4 | Verify | `/verify` | in `/build` | done |
 | 5 | Test | `/test` | in `/build` | pending |
 | 6 | Concept check | `/concept-check` | in `/build` | pending |
 | 7 | Ship | `/ship` | in `/build` | pending |
@@ -355,12 +355,13 @@ Built as planned. Two implementation choices inside the plan: `_command_index` n
 
 | Check | Result |
 |---|---|
-| `ruff check .` | |
-| `ruff format --check .` | |
-| `mypy` | |
-| Plan completeness | every signature in the Public API table exists as written |
-| `STRUCTURE.md` | in sync |
-| `python -m <package>.<module>` | |
+| `ruff check .` | `All checks passed!` |
+| `ruff format --check .` | `40 files already formatted` |
+| `mypy` | `Success: no issues found in 11 source files` |
+| `pytest` | `854 passed in 11.17s` (853 earlier plus the reproduction) |
+| Plan completeness | every signature in the Public API table exists as written: `git_subcommand(tokens: tuple[str, ...]) -> tuple[str, tuple[str, ...]]` and `violation(command: str, branch: str) -> str`; no public change, no Missing, Deviation or Unplanned |
+| `STRUCTURE.md` | in sync. `structure-auditor` found every signature, module and purpose matching and one stale sentence: the tests entry's "Round 3" paragraph described tests that do not exist yet. Applied: it now says only the reproduction exists, under its own heading at the end of the file. The auditor's optional note on public constants missing from the table predates this round and was not acted on |
+| `python -m <package>.<module>` | not applicable: no new module; `guard_git.py` is a hook entry point, not a showcase |
 
 ---
 
