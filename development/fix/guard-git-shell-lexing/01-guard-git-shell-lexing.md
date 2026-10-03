@@ -15,7 +15,7 @@
 |---|---|---|---|---|
 | 1 | Conceptualize | `/conceptualize` | with the user | done |
 | 2 | Plan | `/plan` | with the user | done |
-| 3 | Implement | `/implement` | in `/build` | pending |
+| 3 | Implement | `/implement` | in `/build` | in progress |
 | 4 | Verify | `/verify` | in `/build` | pending |
 | 5 | Test | `/test` | in `/build` | pending |
 | 6 | Concept check | `/concept-check` | in `/build` | pending |
@@ -273,6 +273,18 @@ whether an unmodelled opener was seen.
 > Written in step 3. Only deviations from the plan above, each with its reason. "Built as
 > planned" is a complete and good entry. On a fix round, also the reproduction test's red
 > run, pasted here before the fix was written — step 6 cites it.
+
+**Reproduction, red before the fix** (`pytest -q tests/test_guard_git.py -k stray_quote`):
+
+```
+FAILED tests/test_guard_git.py::test_violation_allows_a_heredoc_with_a_stray_quote_on_main
+>       assert not refused(command, PROTECTED)
+E       assert not True
+E        +  where True = refused("python3 - <<'EOF'\nx = \'\'\'main's push\'\'\'\nEOF", 'main')
+1 failed, 220 deselected
+```
+
+Refused on `main` as unreadable, as the Defect block's Observed row says.
 
 ---
 

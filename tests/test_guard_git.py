@@ -873,3 +873,12 @@ def test_violation_allows_those_same_commands_on_main(command: str) -> None:
 
 def test_violation_allows_a_commit_message_naming_git_and_sudo() -> None:
     assert not refused('git commit -m "run sudo git push by hand"', OTHER)
+
+
+# --- shell lexing: heredocs, comments, continuations -------------------------
+
+
+def test_violation_allows_a_heredoc_with_a_stray_quote_on_main() -> None:
+    command = "python3 - <<'EOF'\nx = '''main's push'''\nEOF"
+
+    assert not refused(command, PROTECTED)
