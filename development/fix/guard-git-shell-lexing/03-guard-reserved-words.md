@@ -1,6 +1,6 @@
 # The git guard steps over shell reserved words
 
-<!-- claude-plan step=1 status=active -->
+<!-- claude-plan step=2 status=active -->
 
 | Field | Value |
 |---|---|
@@ -13,7 +13,7 @@
 
 | # | Step | Skill | Runs | Status |
 |---|---|---|---|---|
-| 1 | Conceptualize | `/conceptualize` | with the user | pending |
+| 1 | Conceptualize | `/conceptualize` | with the user | done |
 | 2 | Plan | `/plan` | with the user | pending |
 | 3 | Implement | `/implement` | in `/build` | pending |
 | 4 | Verify | `/verify` | in `/build` | pending |
@@ -27,8 +27,6 @@
 Statuses: `pending`, `in progress`, `done`.
 
 ## Builds on
-
-Opened on a bug report — run `/fix` first.
 
 | Round | File | What it delivered |
 |---|---|---|
@@ -52,64 +50,81 @@ set-of-branches rule and substitution extraction.
 
 ## 1. Concept
 
-> Written in step 1, agreed with the user before step 2 starts. Prose, not code. Steps 3
-> to 7 run without the user, and the one thing that stops them is a finding that would
-> change this section — so what is not decided here is decided by a halt.
-
 ### Defect
-
-> Fix rounds only — a round 1 that `/fix` opened, or a later round opened on a bug report,
-> whatever its folder is called. Delete this block on a feature round; its presence, filled,
-> is the only thing that marks a round as a fix round to every step after this one. Its
-> starting content is the `/fix` diagnosis, agreed with the user like the rest of section 1
-> and written to disk with it. The root cause is on the halting line: a build that finds a
-> different cause halts rather than fixing what it found.
 
 | Field | Value |
 |---|---|
-| Observed | What happens, quoted from the reproduction. |
-| Expected | What should happen, and what says so — a docstring, a test, an earlier round's criterion. |
-| Reproduction | The exact command or call and its output. Step 3 turns this into the first test and runs it red before fixing. |
-| Root cause | `file.py:NN`, and the decision on that line that is wrong. |
-| Introduced by | The commit, or "older than the history here". |
-| Class | Other inputs the same cause breaks, and the same shape elsewhere in the repo. |
-| Blast radius | Callers of the cause, tests that will move, anything that depends on the current behaviour. |
-| Scope | `this instance` or `the class` — the user's decision, with the reason. What the class holds that is not taken goes under Explicitly out of scope by name. |
+| Observed | Bash runs a git command that follows a shell reserved word, but `guard_git.violation` allows it on `main`. A branch switch after a reserved word is equally invisible, so a later commit outside the compound command is judged on the starting branch. |
+| Expected | `CLAUDE.md` and the module docstring: the guard refuses a commit or push that would land on `main`, "including inside a compound command". |
+| Reproduction | Scratch `r3_repro.py` and `dc_r3.py`; bash with `git` shadowed and HEAD kept in a file. On `main`, bash commits or pushes on `main` and the guard allows: `if git commit -m x; then echo ok; fi`; `if git diff --quiet; then :; else git commit -am x; fi`; `for b in a; do git push origin main; done`; `! git commit -m x`; `while git commit -m x; do break; done`; `until git commit -m x; do :; done`; `if true; then git commit -m x; fi`; `if false; then :; elif git commit -m x; then :; fi`; `coproc git commit -m x`; `until git checkout fail; do git commit -m x; break; done`; `for ((i=0;i<1;i++)); do git commit -m x; done`; `true && if true; then git commit -m x; fi`; a reserved word after `\|`; `x=$(if true; then git commit -m x; fi)`; `if ! git checkout -b feat/x; then git commit -m x; fi`; `! ! git commit -m x`. From `feat/y`, bash commits on `main` and the guard allows: `if true; then git checkout main; fi; git commit -m x`, `for i in 1; do git checkout main; done && git commit -m x`, `! git checkout main; git commit -m x`, and the loop back-edge `for i in 1 2; do git commit -m x; git checkout main; done`. Already refused: `{ … }`, `time git commit`, `case a in a) git commit;; esac`, functions, `[[ ]] && git commit`, `(( 1 )) && git commit`, `coproc C { git commit; }`. Allowed today only because the guard sees no git at all, while bash commits on `feat/x`: `if git checkout -b feat/x; then git commit -m x; fi`, `while git checkout -b feat/x; do git commit -m x; break; done`, `if true; git checkout -b feat/x; then git commit -m x; fi`. |
+| Root cause | The guard models shell reserved words as ordinary words. (1) `.claude/hooks/guard_git.py:363`, `_command_index`, steps over assignments, redirections, file descriptors and `WRAPPERS` but never reserved words, so the command name it reads is `if`/`then`/`do`/`!`/`coproc`, and `git_subcommand` (:1237), and through it `switch_target`, never sees git. (2) `_judge` (:1428-1430) decides trust only from `segment.separator` (`ok` for `&&`, every possible branch otherwise), so what a reserved word does to trust (bash: `then` and `while … do` run only if the condition list's last command succeeded, `else` and `until … do` when it failed, `!` inverts) is not expressed anywhere. Round 2's `_COMMAND_LEADERS` (:750) is a second, diverging list of command-position words, used only to place `case`. |
+| Introduced by | Older than every round: the original guard (`41b4f32`) read `tokens[0]`; `5b01090` (2026-09-21) kept the miss. |
+| Class | Reserved words that take a command next — `if`, `then`, `else`, `elif`, `while`, `until`, `do`, `!`, `coproc` (`time` is already a wrapper, `{` already a separator) — chained (`if !`, `! !`, `time !`), after any separator, inside substitutions; hidden branch switches as well as hidden commits and pushes; loop back-edges, where a switch late in a loop body governs the next iteration. Not to be stepped over: `for`, `select`, `case`, `function`, `in` (the next word is a name). Same shape, different cause: a function body judged where it is defined, not where it is called; `command`/`exec`/`builtin`/`eval` before git (the deliberately incomplete `WRAPPERS`). |
+| Blast radius | `_command_index` feeds `git_subcommand` and `_redirected` (:420 — a `then git -C other checkout main` must stay ignored); `switch_target` is reached through `git_subcommand`; trust lives in `_judge`; `_COMMAND_LEADERS` becomes the one shared set. Tests: only `tests/test_guard_git.py:2681` mentions `if`, expects a refusal and survives. Decided here: the three forms allowed today only by accident become refusals on `main` (A4's accepted cost). |
+| Scope | `the class` — the user's decision — with the trust model played safe (every reserved-word join uncertain, `!` breaking trust: the user's choice over modelling bash exactly), and loops widened so any switch inside a loop counts for the whole loop (the user's choice). Functions called after a switch stay out (the user's choice), recorded only in this file — the user asked that nothing beyond its introduction be kept in `DEVELOPMENT.md`, this being a template repository. |
 
-Critique — the `diagnosis-critic`'s findings and what was done with each:
+Critique — the `diagnosis-critic`'s findings (verdict: cause confirmed, class incomplete) and what was done with each:
+
+1. A fix only in `_command_index` cannot express trust, which the separator carries — applied: the root cause names both sites.
+2. A reserved word hides a branch switch too, which bites from a branch — applied: A3.
+3. Loop back-edges survive a naive fix; functions are judged where defined — applied: loops are A5, functions out of scope by name.
+4. `!`, `if !` and `! !` must break trust, and chained words must loop — applied: A2 and A4.
+5. `for`/`select`/`case`/`function`/`in` must not be stepped over; `command`/`exec`/`builtin`/`eval` belong to `WRAPPERS` — applied: A6 and out of scope.
+6. History: the miss dates from `41b4f32`, not `5b01090` — applied.
 
 ### What this is
 
+The guard learns where a command starts in shell grammar. It steps over the reserved words that
+take a command next — `if`, `then`, `else`, `elif`, `while`, `until`, `do`, `!`, `coproc`, chained
+— from one shared list that replaces round 2's separate one, so a git commit, push or branch
+switch after any of them is judged like any other command. It plays safe on trust: a join made by
+a reserved word counts as uncertain, so the branches in play are every branch possible at that
+point, and `!` breaks the `&&` trust of what it negates. A branch switch anywhere inside a loop
+body counts for the whole loop. The two causes removed are at `_command_index` (:363) and at the
+trust decision in `_judge` (:1428).
+
 ### Why it is worth building
+
+See the Defect block.
 
 ### Inputs and outputs
 
+Unchanged: `violation(command, branch)` returns a refusal reason or `""`; `segments(command)`
+returns the invocations or `None`. Which commands land in which outcome changes.
+
 ### How it connects to the rest of the repo
 
-Which existing modules it calls, which call it, what it does not touch.
+Changes `.claude/hooks/guard_git.py` (command-position words, trust in `_judge`, loops), its
+tests, the module docstring and `STRUCTURE.md`'s guard section. Builds on round 2's
+set-of-branches rule and substitution extraction. Cleans `DEVELOPMENT.md` back to its
+introduction at the user's request.
 
 ### Explicitly out of scope
 
+- A function called after a branch switch (`f() { git commit -m x; }; git checkout main; f`
+  from a branch): its body is judged where it is defined. A different cause. Recorded here only.
+- `command`, `exec`, `builtin`, `eval` before `git`: the deliberately incomplete `WRAPPERS`.
+- Modelling bash's exact `if`/`else`/`while`/`until`/`!` logic: the user chose to play safe.
+- The items rounds 1 and 2 recorded for later (a push destination made by a substitution,
+  spelled-out subcommands, nesting past the limit off `main`, `merge`/`cherry-pick` on `main`).
+
 ### Acceptance criteria
 
-> Numbered, observable, and phrased so that step 6 can mark each one met or not met.
-> These are the contract. Step 2 plans against them, step 5 tests them, step 6 audits
-> against them. If a criterion cannot be observed from outside the code, rewrite it.
->
-> On a fix round the first criterion is the reproduction passing — "Given <the
-> reproduction's input>, <expected> rather than <observed>" — and the last is that nothing
-> else changed, phrased so step 6 can evidence it with more than a green suite. If the
-> scope is `the class`, each input in the class gets its own row.
+All judged with `main` checked out unless stated; "a branch" is `feat/y`.
 
 | # | The finished feature... |
 |---|---|
-| A1 | |
-| A2 | |
+| A1 | Refuses `if git commit -m x; then echo ok; fi`, which today it allows. |
+| A2 | Sees git after every reserved word that takes a command: refuses `if git diff --quiet; then :; else git commit -am x; fi`, `if false; then :; elif git commit -m x; then :; fi`, `if true; then git commit -m x; fi`, `while git commit -m x; do break; done`, `until git commit -m x; do :; done`, `! git commit -m x`, `! ! git commit -m x`, `coproc git commit -m x`, `for ((i=0;i<1;i++)); do git commit -m x; done`, `true && if true; then git commit -m x; fi`, `ls \| if true; then git commit -m x; fi` and `x=$(if true; then git commit -m x; fi)`; and refuses `for b in a; do git push origin main; done` from a branch too. |
+| A3 | Counts a branch switch after a reserved word: from a branch, refuses `if true; then git checkout main; fi; git commit -m x`, `for i in 1; do git checkout main; done && git commit -m x` and `! git checkout main; git commit -m x`. |
+| A4 | Plays safe on trust: refuses `! git checkout -b feat/x && git commit -m x` and `if ! git checkout -b feat/x; then git commit -m x; fi`. Accepted cost: `if git checkout -b feat/x; then git commit -m x; fi` and `while git checkout -b feat/x; do git commit -m x; break; done`, allowed today only because the guard sees no git, are refused on `main`; the same with `&&` (`git checkout -b feat/x && git commit -m x`) stays allowed. |
+| A5 | Counts a switch anywhere in a loop for the whole loop: from a branch, refuses `for i in 1 2; do git commit -m x; git checkout main; done` and `while true; do git commit -m x; git checkout main; break; done`. |
+| A6 | Keeps words that are not commands as words: allows `echo if git commit` and `for git in commit; do :; done` on `main`, and `git commit -m then` from a branch; `{ git commit -m x; }`, `time git commit -m x`, `case a in a) git commit -m x;; esac` and both function forms keep today's outcome; a switch aimed at another repository after `then` (`if true; then git -C ../o checkout main; fi; git commit -m x` from a branch) is still ignored. |
+| A7 | Changes nothing else: rounds 1 and 2 still meet their criteria; every existing test passes; and a differential against the guard at round 2's head (`8c5c2b9`) over every command the existing suite passes to the guard, plus variants that prefix it with each reserved word, agrees except where a reserved word sits at a command position — and there the new decision matches bash with `git` shadowed and HEAD in a file, or is the play-safe refusal. |
 
 ### Open questions
 
-> Must be empty before step 2 begins. An unanswered question here is a decision being
-> made by accident later — and nobody is watching when it happens.
+None.
 
 ---
 
