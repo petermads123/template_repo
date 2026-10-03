@@ -413,3 +413,34 @@ taken back through steps 1 to 7 on the same branch.
 > step that halted, the question for the user — and, once answered, the answer and what
 > changed because of it. Never deleted; it is the record of where the plan was thinner
 > than the code needed.
+
+### Halt 1 — after step 5, raised by the orchestrator
+
+**Step:** 5 finished (`STATUS: done`); the orchestrator halted before step 6 under halting
+rule 1, a criterion that turns out to be wrong.
+
+**Reason:** step 5 recorded as a known miss that "a `$(git commit)` in an unquoted heredoc
+body is data to the guard, though bash runs it", judging it within A2. The orchestrator
+checked it against the guard on `origin/main` and real bash (git shadowed by an echo
+function):
+
+| Command | Branch | Guard on `main` | New guard | Bash |
+|---|---|---|---|---|
+| `cat <<EOF > f` / `$(git commit -m x)` / `EOF` | `main` | refuse | **allow** | runs `git commit -m x` |
+| `cat <<EOF > f` / `` `git push origin main` `` / `EOF` | `main` | refuse | **allow** | runs `git push origin main` |
+| same | `feat/x` | refuse | **allow** | runs `git push origin main` |
+| `cat <<'EOF' > f` / `$(git commit -m x)` / `EOF` | `main` | refuse | allow | runs nothing |
+
+In a heredoc whose delimiter is unquoted, bash expands `$( )` and backtick command
+substitutions in the body, so the body is not pure data. A2 says bodies after `<<EOF`,
+`<<'EOF'` and `<<"EOF"` "all count as data", which is right only for a quoted delimiter. As
+built, the fix opens a commit-to-`main` bypass the old guard refused, which also fails A6.
+
+**Question for the user:** how should an unquoted heredoc body (`<<EOF`) be read?
+
+- **(a) Read the commands inside it** *(recommended)*: text in an unquoted body stays data,
+  but any `$( … )` or backtick command inside it is judged like any other command, as bash
+  runs it. A quoted body (`<<'EOF'`, `<<"EOF"`) stays pure data. A2 is amended to say so.
+- **(b) Play safe**: an unquoted body containing `$(` or a backtick counts as unmodelled
+  syntax, refused on `main` when the command names commit or push. Simpler, but a push to
+  `main` hidden that way from another branch would stay allowed where today it is refused.
