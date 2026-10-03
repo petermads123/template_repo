@@ -1,6 +1,6 @@
 # The git guard does not trust a switch that `||` may skip
 
-<!-- claude-plan step=3 status=active -->
+<!-- claude-plan step=4 status=active -->
 
 | Field | Value |
 |---|---|
@@ -15,7 +15,7 @@
 |---|---|---|---|---|
 | 1 | Conceptualize | `/conceptualize` | with the user | done |
 | 2 | Plan | `/plan` | with the user | done |
-| 3 | Implement | `/implement` | in `/build` | pending |
+| 3 | Implement | `/implement` | in `/build` | done |
 | 4 | Verify | `/verify` | in `/build` | pending |
 | 5 | Test | `/test` | in `/build` | pending |
 | 6 | Concept check | `/concept-check` | in `/build` | pending |
@@ -337,6 +337,11 @@ FAILED tests/test_guard_git.py::test_violation_refuses_a_commit_after_an_or_swit
 ```
 
 It fails as the Defect block's Observed row says: `violation` returns `""`.
+
+**Deviations from the plan.** Built as planned, with these private choices: `_walk_run` is the
+helper that reads one segment's run (guides 3, 4 and 6), and `_OPERATORS` and the `_Key` alias
+sit beside `_LIST_ENDS`. A list end or close matches keys exactly, as the plan says. After the
+fix the reproduction is green and the suite is 1043 passed with no existing test touched.
 
 ---
 

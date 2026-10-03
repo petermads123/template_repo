@@ -206,6 +206,10 @@ bash with `git` shadowed where bash can run it:
   leaders alone, a leader after the command read as an argument, and a `-C` git after a leader
   returned as is for `violation` to judge.
 
+Round 4 (`development/fix/guard-git-shell-lexing/04-...`) adds the reproduction for the trust after
+`||`, under its own heading at the end of the file: `git status || git checkout -b x && git commit -m x`
+refused on `main` instead of allowed.
+
 ### `tests/test_plan_state.py`
 
 Covers `.claude/hooks/plan_state.py`. `parse` against a complete marker, a file with none,
@@ -355,7 +359,12 @@ such as `; &&` HEAD may be on the branch it started on or on any branch switched
 and a commit or push is refused when `main` is one of them — from a branch too, so
 `git checkout main; git commit` is refused. A switch made inside a subshell that has since
 closed is distrusted the same way, as possibly having happened; one aimed elsewhere by a
-global `-C`, `--git-dir` or `--work-tree` changes nothing here. What still cannot be read is refused when it names `commit` or
+global `-C`, `--git-dir` or `--work-tree` changes nothing here. A switch on the right of `||`
+runs only when its left side failed, so the `&&` after that operand trusts what the left side
+trusted as well as the switch (`a || git checkout -b x && git commit` is refused from `main`,
+`git checkout -b feat/x || git checkout feat/x && git commit` allowed): the operand runs from
+the `||` to the next `&&`, `;`, newline or `&` at its own substitution depth and group level,
+and only inside it is the switch trusted. What still cannot be read is refused when it names `commit` or
 `push` — matched on word boundaries, so `committee` is not a commit — while `main` is
 checked out, and allowed anywhere else.
 
@@ -376,7 +385,7 @@ name or pattern and never stepped over). The one list is shared with the pre-pas
 placement, and a leader opens a command only where a command could start (`echo if case` reads
 `case` as an argument). Trust follows the separator, except that a switch led by `!` or `coproc`
 — or inside the pipeline or group such a word leads, until a `;`, newline, `&`, `&&` or `||` ends
-the list outside any group — only widens what an `&&` can trust, because the `&&` after a negated
+the list at its own substitution depth and group level (one inside a `$( )` or a deeper group does not) — only widens what an `&&` can trust, because the `&&` after a negated
 command runs when it failed and `coproc` returns at once. bash's own `if`/`while`/`until` logic is not modelled:
 `then`, `do`, `else` and `elif` follow `;` or a newline, so every branch is in play, and
 `if git checkout -b feat/x; then git commit -m x; fi` is refused from `main`. A branch

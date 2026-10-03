@@ -78,7 +78,14 @@ allowed from `main`, because `&&` runs its right side only if the switch
 succeeded. No other separator carries that guarantee -- after `;` or a newline
 the commit runs whether the switch worked or not -- so across those HEAD may be
 on the branch it started on or on any branch switched to since, and a commit
-or push is refused if `main` is one of them. A substitution runs on the
+or push is refused if `main` is one of them. Nor does a switch on the right of
+`||`, which runs only when its left side failed: `a || git checkout -b x && git
+commit` commits on the starting branch when `a` succeeded. The `&&` after such an
+operand trusts what the left side trusted as well as the switch, so
+`git checkout -b feat/x || git checkout feat/x && git commit` is still allowed;
+the operand runs from the `||` to the next `&&`, `;`, newline or `&` at its own
+substitution depth and group level, and only inside it is the switch trusted. A
+substitution runs on the
 branches in effect for the command that contains it, and a switch inside it
 counts for that command and for what follows. A switch whose target a
 substitution made (`git checkout "$(echo main)"`) is one only the shell can
@@ -109,7 +116,8 @@ command, with one exception: a switch led by `!` or `coproc` only widens the
 branches an `&&` can trust, because the `&&` after a negated command runs when it
 failed and `coproc` returns at once. That holds for everything the word leads --
 a pipeline (`! a | git checkout ...`) or a group (`! (git checkout ...)`) -- until
-a `;`, a newline, `&`, `&&` or `||` ends the list outside any group. A leader opens a
+a `;`, a newline, `&`, `&&` or `||` ends the list at its own substitution depth and
+group level -- one inside a `$( )` or a deeper group does not. A leader opens a
 command only where a command could start, so `echo if case` reads `case` as an
 argument. Playing safe, bash's own `if`, `while` and
 `until` logic is not modelled: `then`, `do`, `else` and `elif` follow `;` or a
@@ -830,6 +838,14 @@ _UNCERTAIN_LEADERS = frozenset({"!", "coproc"})
 #: Separators that end the list a `!` or `coproc` leads, outside any group.
 _LIST_ENDS = frozenset({";", "\n", "&", "&&", "||"})
 
+#: The operators a separator token is built from, in the order a shell reads
+#: them: `)&&` is `)` then `&&`.
+_OPERATORS = re.compile(r"\|\||&&|\|&|;;&?|;&|[;&|(){}\n]")
+
+#: Where a list is: the depth of the substitution it sits in, and how many
+#: `(` and `{` are open there.
+_Key = tuple[int, int]
+
 #: Words that open a bash loop, and the leaders among them.
 _LOOP_COMMANDS = frozenset({"for", "select"})
 _LOOP_LEADERS = frozenset({"while", "until"})
@@ -1250,11 +1266,18 @@ def segments(command: str) -> list[Segment] | None:
     ]
 
 
-def _segments(command: str) -> list[Segment] | None:
+def _segments(
+    command: str, *, runs: list[tuple[str, ...]] | None = None
+) -> list[Segment] | None:
     """Split a command as `segments` does, leaving the placeholder as it is.
 
     Args:
         command: The full command line.
+        runs: When given, receives one entry per returned segment: the operators
+            written between it and the previous invocation, in order, one
+            element each (`)&&` is `)` and `&&`). A substitution's first
+            segment carries the run it inherits its separator from, and a
+            segment whose separator is `SUBSTITUTED` an empty one.
 
     Returns:
         What `segments` returns, with `_PLACEHOLDER` standing in each word where
@@ -1267,14 +1290,18 @@ def _segments(command: str) -> list[Segment] | None:
     parsed: list[Segment] = []
     current: list[str] = []
     pending: list[str] = []
+    raw: list[str] = []  # the operators behind `pending`, as written
     separator = ""
     depth = 0
     after_close = False  # a substitution closed and no operator has come since
-    opened: list[tuple[int, str, list[str], bool]] = []  # state at each group's mark
+    # State at each group's mark.
+    opened: list[tuple[int, str, list[str], list[str], bool]] = []
 
     def flush() -> None:
         if current:
             parsed.append(Segment(tuple(current), separator, depth))
+            if runs is not None:
+                runs.append(tuple(raw))
             current.clear()
 
     for token in tokens:
@@ -1286,7 +1313,9 @@ def _segments(command: str) -> list[Segment] | None:
                 current.append(piece)  # a mark glued to punctuation that is no operator
             elif piece == _OPEN:
                 flush()
-                opened.append((len(parsed), separator, list(pending), after_close))
+                opened.append(
+                    (len(parsed), separator, list(pending), list(raw), after_close)
+                )
                 depth += 1
                 if after_close:
                     separator = SUBSTITUTED
@@ -1294,24 +1323,28 @@ def _segments(command: str) -> list[Segment] | None:
                 flush()
                 depth = max(depth - 1, 0)
                 if opened:
-                    count, was_separator, was_pending, was_after = opened.pop()
+                    count, was_separator, was_pending, was_raw, was_after = opened.pop()
                     if len(parsed) == count:
                         # The group ran nothing, so the command around it
                         # follows whatever it would have followed without it.
-                        separator, pending, after_close = (
+                        separator, pending, raw, after_close = (
                             was_separator,
                             was_pending,
+                            was_raw,
                             was_after,
                         )
                         continue
                 pending = []
+                raw = []
                 separator = SUBSTITUTED
                 after_close = True
             elif piece:
                 if current:
                     flush()
                     pending = []
+                    raw = []
                 pending.append(_governs(piece))
+                raw.extend(_OPERATORS.findall(piece))
                 separator = _join(pending)
                 after_close = False
             # The pieces left to right: an operator glued to a mark, as in
@@ -1575,6 +1608,67 @@ def _loop_ranges(
     return widened
 
 
+def _walk_run(
+    run: tuple[str, ...],
+    level: int,
+    ok: set[str],
+    nest: dict[int, int],
+    operands: list[tuple[_Key, set[str]]],
+    negating: set[_Key],
+) -> set[str]:
+    """Read one run of operators for the `||` operands and `!` scopes it ends.
+
+    A list ends at `&&`, `;`, `&` or a newline, and a group's close ends every
+    list opened inside it. Only the ones at the key they were opened at end: an
+    operator inside a substitution or a deeper group is another list's.
+
+    Args:
+        run: The operators between two invocations, in written order.
+        level: The substitution depth the run belongs to.
+        ok: The branches HEAD could be on if every command of the current `&&`
+            chain succeeded.
+        nest: How many groups are open at each level; updated.
+        operands: The `||` operands being read, with what their left side
+            trusted; entries are added and removed.
+        negating: The lists a `!` or `coproc` leads; keys are removed.
+
+    Returns:
+        The branches the operands that ended trusted on their left side, for the
+        caller to add to `ok`.
+    """
+    widened: set[str] = set()
+    only_newlines = all(operator == "\n" for operator in run)
+
+    def close(at: int, group: int, *, below: bool) -> None:
+        # Ends what was opened at `group` -- or, for a close, in any group
+        # deeper than it -- on this level.
+        def ended(key: _Key) -> bool:
+            return key[0] == at and (key[1] > group if below else key[1] == group)
+
+        for entry in [e for e in operands if ended(e[0])]:
+            operands.remove(entry)
+            widened.update(entry[1])
+        negating.difference_update([k for k in negating if ended(k)])
+
+    for operator in run:
+        group = nest.get(level, 0)
+        key = (level, group)
+        if operator == "||":
+            if operands and operands[-1][0] == key:
+                operands[-1][1].update(ok)  # chained: a || b || c
+            else:
+                operands.append((key, set(ok)))
+        elif operator in _LIST_ENDS and (operator != "\n" or only_newlines):
+            close(level, group, below=False)
+        elif operator in ("(", "{"):
+            nest[level] = group + 1
+        elif operator in (")", "}"):
+            left = max(group - 1, 0)
+            close(level, left, below=True)
+            nest[level] = left
+    return widened
+
+
 def _judge(command: str, branch: str) -> str:
     """Judge a command; `violation` is this with the failures caught.
 
@@ -1596,31 +1690,42 @@ def _judge(command: str, branch: str) -> str:
             "    git checkout -b <type>/<kebab-case-topic>"
         )
 
-    parsed = _segments(command)
+    runs: list[tuple[str, ...]] = []
+    parsed = _segments(command, runs=runs)
     if parsed is None:
         return _unreadable(command, branch)
 
     # `ok` is every branch HEAD could be on if each command of the current `&&`
     # chain succeeded, `possible` every branch it could be on at all. Only a
-    # switch that an `&&` guards replaces `ok`; the others only widen `possible`.
+    # switch that an `&&` guards replaces `ok`, and not one on the right of an
+    # `||`, which runs only when its left side failed: when that operand ends,
+    # `ok` takes in what the left side trusted too. The others only widen
+    # `possible`.
     ok = {branch}
     possible = {branch}
     # One frame per substitution being run: the branches the containing command
     # could start on, and the branches the substitution has switched to.
     frames: list[tuple[set[str], set[str]]] = []
     loops = _loop_ranges(parsed, _quoted_done(prepared))
-    # Set by a `!` or `coproc`, until the list it leads has ended; `groups` counts
-    # the `(` and `{` opened since. A glued close is not counted, which only
-    # keeps the state longer.
-    negating = False
-    groups = 0
+    # Open `||` operands, each with what its left side trusted, and the lists a
+    # `!` or `coproc` leads, both keyed by where the list sits: its substitution
+    # depth and how many groups are open there. Only an operator at that key ends
+    # one, or the group or substitution it sits in closing.
+    nest: dict[int, int] = {}
+    operands: list[tuple[_Key, set[str]]] = []
+    negating: set[_Key] = set()
+    previous_depth = 0
     for number, segment in enumerate(parsed):
-        if segment.separator in ("(", "{"):
-            groups += 1
-        elif segment.separator in (")", "}"):
-            groups = max(groups - 1, 0)
-        elif negating and groups == 0 and segment.separator in _LIST_ENDS:
-            negating = False
+        for level in [level for level in nest if level > segment.depth]:
+            del nest[level]
+        negating.difference_update([k for k in negating if k[0] > segment.depth])
+        while operands and operands[-1][0][0] > segment.depth:
+            ok |= operands.pop()[1]  # a substitution that has ended
+        run = runs[number] if number < len(runs) else ()
+        ok |= _walk_run(
+            run, min(segment.depth, previous_depth), ok, nest, operands, negating
+        )
+        previous_depth = segment.depth
         if number in loops:
             ok |= loops[number]
             possible |= loops[number]
@@ -1668,7 +1773,7 @@ def _judge(command: str, branch: str) -> str:
         if target and not _redirected(segment.tokens):
             # What `!` negates and `coproc` backgrounds leaves the `&&` after it
             # unsure whether the switch happened.
-            unsure = negating or _leads_uncertainly(segment.tokens)
+            unsure = bool(negating) or _leads_uncertainly(segment.tokens)
             ok = here | {target} if unsure else {target}
             possible.add(target)
             for _, targets in frames:
@@ -1676,7 +1781,7 @@ def _judge(command: str, branch: str) -> str:
         else:
             ok = set(here)
         if _leads_uncertainly(segment.tokens):
-            negating, groups = True, 0
+            negating.add((segment.depth, nest.get(segment.depth, 0)))
 
     return ""
 
