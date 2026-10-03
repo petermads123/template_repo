@@ -1701,3 +1701,774 @@ def test_violation_still_calls_an_unbalanced_quote_unreadable() -> None:
 
 def test_violation_refuses_a_commit_in_a_double_quoted_substitution_on_main() -> None:
     assert violation('echo "$(git commit -m x)"', PROTECTED).startswith(COMMIT_REASON)
+
+
+UNRESOLVED_REASON = "Refused: this would run `git "
+
+#: Every double-quoted or nested `$( )` position the class names (A2, T2), each
+#: running `git commit` before its enclosing command.
+SUBSTITUTION_POSITIONS = [
+    'echo "result: $(git commit -m x)"',
+    'out="$(git commit -m x 2>&1)"',
+    'echo "${x:-$(git commit -m x)}"',
+    '[[ -n "$(git commit -m x)" ]]',
+    'declare x="$(git commit -m x)"',
+    'cat <<<"$(git commit -m x)"',
+    'echo > "$(git commit -m x)"',
+    'echo $(echo "$(git commit -m x)")',
+    'echo "$(cd /tmp; git commit -m x)"',
+    'echo "$(sudo git commit -m x)"',
+    'echo "$( (git commit -m x) )"',
+    'for x in "$(git commit -m x)"; do :; done',
+    'case "$(git commit -m x)" in a) :;; esac',
+    'a=("$(git commit -m x)")',
+    'printf -v v "$(git commit -m x)"',
+    "echo $[ $(git commit -m x) ]",
+    'export V="$(git commit -m x)"',
+    'local V="$(git commit -m x)"',
+    '[ -z "$(git commit -m x)" ]',
+    'test -z "$(git commit -m x)"',
+    'echo "$(echo hi)" "$(git commit -m x)"',
+    'echo "a $(true) b $(git commit -m x) c"',
+]
+
+
+@pytest.mark.parametrize("command", SUBSTITUTION_POSITIONS)
+def test_violation_refuses_a_commit_in_every_substitution_position(
+    command: str,
+) -> None:
+    assert violation(command, PROTECTED).startswith(COMMIT_REASON)
+
+
+def test_violation_refuses_a_push_in_a_quoted_assignment_on_main_and_from_a_branch() -> (
+    None
+):
+    command = 'out="$(git push origin main 2>&1)"'
+
+    assert violation(command, PROTECTED).startswith(PUSH_REASON)
+    assert violation(command, OTHER).startswith(PUSH_REASON)
+
+
+@pytest.mark.parametrize(
+    "command",
+    [
+        'echo "$(git push origin main)"',
+        'echo "${x:-$(git push origin main)}"',
+        "echo `git push origin main`",
+        "diff <(git push origin main) f",
+        "diff <(a) <(git push origin main)",
+        'echo "$(( $(git push origin main) ))"',
+    ],
+)
+def test_violation_refuses_a_push_to_main_inside_a_substitution_from_a_branch(
+    command: str,
+) -> None:
+    assert violation(command, OTHER).startswith(PUSH_REASON)
+
+
+def test_violation_allows_a_commit_in_a_substitution_off_main() -> None:
+    assert violation('echo "$(git commit -m x)"', OTHER) == ""
+    assert violation("echo `git commit -m x`", OTHER) == ""
+
+
+def test_segments_puts_a_quoted_substitution_before_the_command_around_it() -> None:
+    assert segments('echo "$(git status)"') == [
+        Segment(("git", "status"), "", 1),
+        Segment(("echo", "_"), SUBSTITUTED, 0),
+    ]
+
+
+@pytest.mark.parametrize("separator", ["&&", ";", "|"])
+def test_segments_gives_the_first_group_the_separator_of_its_command(
+    separator: str,
+) -> None:
+    assert segments(f'ls {separator} echo "$(git status)"') == [
+        Segment(("ls",), ""),
+        Segment(("git", "status"), separator, 1),
+        Segment(("echo", "_"), SUBSTITUTED, 0),
+    ]
+
+
+def test_segments_marks_a_second_group_substituted_too() -> None:
+    assert segments('ls && echo "$(a)$(b)"') == [
+        Segment(("ls",), ""),
+        Segment(("a",), "&&", 1),
+        Segment(("b",), SUBSTITUTED, 1),
+        Segment(("echo", "__"), SUBSTITUTED, 0),
+    ]
+
+
+def test_segments_closes_two_levels_one_after_the_other() -> None:
+    assert segments('echo "$($(git checkout main))" && ls') == [
+        Segment(("git", "checkout", "main"), "", 2),
+        Segment(("_",), SUBSTITUTED, 1),
+        Segment(("echo", "_"), SUBSTITUTED, 0),
+        Segment(("ls",), "&&", 0),
+    ]
+
+
+def test_segments_returns_to_an_operator_after_the_command_around_a_group() -> None:
+    parsed = segments('echo "$(a)"; ls')
+
+    assert parsed is not None
+    assert parsed[-1] == Segment(("ls",), ";", 0)
+
+
+def test_segments_keeps_a_newline_inside_a_group_out_of_the_outer_separator() -> None:
+    command = "git commit -m \"$(cat <<'EOF'\nit's 1) done\nEOF\n)\""
+
+    assert segments(command) == [
+        Segment(("cat", "<<", "EOF"), "", 1),
+        Segment(("git", "commit", "-m", "_"), SUBSTITUTED, 0),
+    ]
+
+
+def test_segments_two_argument_construction_is_depth_zero() -> None:
+    assert Segment(("a",), "") == Segment(("a",), "", 0)
+    assert SUBSTITUTED == "$("
+
+
+def test_segments_blanks_group_marks_and_the_placeholder_it_was_given() -> None:
+    assert segments("echo \x1dgit commit\x1e") == [
+        Segment(("echo", "git", "commit"), "", 0)
+    ]
+    assert segments("echo \x1fa") == [Segment(("echo", "a"), "", 0)]
+
+
+def test_violation_cannot_be_given_a_forged_group_to_hide_behind() -> None:
+    # The marks are blanked on the way in, so the text is read as written.
+    assert violation("echo \x1dgit commit -m x\x1e", PROTECTED) == ""
+    assert violation("\x1egit commit -m x", PROTECTED).startswith(COMMIT_REASON)
+    assert violation("git checkout -b feat/y \x1e&& git commit -m x", PROTECTED) == ""
+
+
+def test_segments_leaves_an_unclosed_substitution_in_the_text() -> None:
+    parsed = segments("echo $(git status")
+
+    assert parsed is not None
+    assert Segment(("git", "status"), "(", 0) in parsed
+
+
+# --- backticks (A3, T3) ------------------------------------------------------
+
+
+@pytest.mark.parametrize(
+    "command",
+    [
+        "echo `git commit -m x`",
+        "x=`git commit -m x`",
+        "echo ${x:-`git commit -m x`}",
+        "echo 2>`git commit -m x`",
+        "`git commit -m x`",
+        "echo `echo \\`git commit -m x\\``",
+        'echo "`git commit -m x`"',
+    ],
+)
+def test_violation_refuses_a_commit_in_a_backtick_in_every_position(
+    command: str,
+) -> None:
+    assert violation(command, PROTECTED).startswith(COMMIT_REASON)
+
+
+def test_violation_refuses_a_push_to_main_in_a_backtick_from_a_branch() -> None:
+    assert violation("echo `git push origin main`", OTHER).startswith(PUSH_REASON)
+
+
+@pytest.mark.parametrize(
+    "command",
+    [
+        'git commit -m "a`nb"; git push origin main; git log --format="%h`t%s"',
+        'git commit -m "a`nb"; git push origin main',
+        'git commit -m "a`nb #1"; git push origin main',
+        'git commit -m "Line`nSee #12"; git push origin main',
+    ],
+)
+def test_violation_still_sees_a_push_after_a_powershell_escape(command: str) -> None:
+    assert violation(command, OTHER).startswith(PUSH_REASON)
+
+
+def test_violation_allows_a_powershell_message_with_escapes() -> None:
+    assert violation('git commit -m "Title`n`nBody"', OTHER) == ""
+
+
+def test_segments_keeps_a_double_quoted_backtick_in_the_text() -> None:
+    assert segments('echo "a`b`c"') == [
+        Segment(("b",), "", 1),
+        Segment(("echo", "a`b`c"), SUBSTITUTED, 0),
+    ]
+
+
+def test_violation_reads_the_slot_right_after_an_unpaired_powershell_backtick() -> None:
+    command = 'echo "a`n" && git checkout -b feat/y && git commit -m "$(git checkout -q main)x"'
+
+    assert violation(command, PROTECTED).startswith(COMMIT_REASON)
+    parsed = segments(command)
+    assert parsed is not None
+    assert parsed[-2:] == [
+        Segment(("git", "checkout", "-q", "main"), "&&", 1),
+        Segment(("git", "commit", "-m", "_x"), SUBSTITUTED, 0),
+    ]
+
+
+def test_violation_is_no_worse_than_before_for_a_backtick_between_commands() -> None:
+    assert violation('echo "a`n"; echo `date`; git push origin main', OTHER).startswith(
+        PUSH_REASON
+    )
+
+
+# --- process substitution (A4, T4) -------------------------------------------
+
+
+@pytest.mark.parametrize(
+    "command",
+    [
+        "diff <(git commit -m x) /dev/null",
+        "tee >(git commit -m x) </dev/null",
+        "cat <(git commit -m x)",
+        "cat <(case x in x) git commit -m y;; esac)",
+    ],
+)
+def test_violation_refuses_a_commit_in_a_process_substitution(command: str) -> None:
+    assert violation(command, PROTECTED).startswith(COMMIT_REASON)
+
+
+def test_segments_replaces_a_whole_process_substitution_with_the_placeholder() -> None:
+    assert segments("diff <(git status) /dev/null") == [
+        Segment(("git", "status"), "", 1),
+        Segment(("diff", "_", "/dev/null"), SUBSTITUTED, 0),
+    ]
+    assert segments("tee >(cat) /dev/null") == [
+        Segment(("cat",), "", 1),
+        Segment(("tee", "_", "/dev/null"), SUBSTITUTED, 0),
+    ]
+
+
+# --- a substitution runs before its command (A5, T5) --------------------------
+
+
+@pytest.mark.parametrize(
+    "command",
+    [
+        'git commit -m "$(git checkout -q main)x"',
+        "git commit -m $(git checkout -q main)x",
+        "git commit -F - <<EOF\n$(git checkout -q main)\nEOF",
+        'echo "$($(git checkout main))" && git commit -m x',
+        'if ($?) { git commit -m "$(git checkout main)" }',
+    ],
+)
+def test_violation_runs_a_substitution_before_the_command_around_it(
+    command: str,
+) -> None:
+    assert violation(command, OTHER).startswith(COMMIT_REASON)
+
+
+@pytest.mark.parametrize(
+    "command",
+    [
+        'git checkout -b feat/y && out="$(git commit -m y)"',
+        'git checkout -b feat/y && git commit -m "$(date)"',
+        'git checkout -b feat/y && echo "$(date)$(git commit -m y)"',
+        'git checkout -b feat/y &&\necho "$(git commit -m y)"',
+        'git checkout -b feat/y && echo "$(git status)" && git commit -m y',
+        'echo "$(git checkout -b feat/y && git commit -m y)"',
+        'git checkout -b "$(echo feat/y)" && git commit -m x',
+        'git checkout -b feat/y && git commit -m "$( )x"',
+        'git checkout -b feat/y && git commit -m "Use ``foo`` here"',
+        'git checkout -b feat/y &&\r\ngit commit -m "$(date)"\r\n',
+    ],
+)
+def test_violation_carries_and_trust_into_and_through_a_substitution(
+    command: str,
+) -> None:
+    assert violation(command, PROTECTED) == ""
+
+
+@pytest.mark.parametrize(
+    "command",
+    [
+        'echo "$(git checkout -b feat/y; git commit -m y)"',
+        'echo "$(git checkout -b feat/y)" && git commit -m y',
+    ],
+)
+def test_violation_does_not_trust_a_switch_a_substitution_may_not_have_made(
+    command: str,
+) -> None:
+    assert violation(command, PROTECTED).startswith(COMMIT_REASON)
+
+
+@pytest.mark.parametrize(
+    "command",
+    [
+        'out="$(git checkout -b feat/y)" && git commit -m y',
+        'git commit -m "$(git checkout -b feat/y)x"',
+    ],
+)
+def test_violation_deliberately_over_refuses_a_switch_inside_a_substitution(
+    command: str,
+) -> None:
+    # Bash commits on feat/y here. The guard widens the command's branches by
+    # what the substitution switched to, so `main` stays in them: the safe side.
+    assert violation(command, PROTECTED).startswith(COMMIT_REASON)
+
+
+def test_violation_orders_groups_as_they_are_written() -> None:
+    command = 'git commit -m "$(git checkout -q main)$(git checkout -q feat/y)"'
+
+    assert segments(command) == [
+        Segment(("git", "checkout", "-q", "main"), "", 1),
+        Segment(("git", "checkout", "-q", "feat/y"), SUBSTITUTED, 1),
+        Segment(("git", "commit", "-m", "__"), SUBSTITUTED, 0),
+    ]
+    assert violation(command, OTHER).startswith(COMMIT_REASON)
+
+
+def test_violation_does_not_follow_a_switch_aimed_at_another_repository() -> None:
+    assert violation('git commit -m "$(git -C ../o checkout main)x"', OTHER) == ""
+
+
+# --- main among the branches it could be (A6, T6) -----------------------------
+
+
+@pytest.mark.parametrize(
+    "command",
+    [
+        "git checkout main; git commit -m x",
+        "git checkout main\ngit commit -m x",
+        "(git checkout main) && git commit -m x",
+        "x=$(git checkout main) && git commit -m x",
+        'x="$(git checkout main)" && git commit -m x',
+        "git checkout main & git commit -m x",
+        "git checkout main | git commit -m x",
+        "x=$(git checkout main); git commit -m x",
+    ],
+)
+def test_violation_refuses_a_commit_when_main_is_any_branch_it_could_land_on(
+    command: str,
+) -> None:
+    assert violation(command, OTHER).startswith(COMMIT_REASON)
+
+
+def test_violation_refuses_a_push_after_a_switch_to_main_that_may_have_failed() -> None:
+    assert violation("git switch main || true; git push", OTHER).startswith(PUSH_REASON)
+
+
+def test_violation_allows_a_commit_after_an_untrusted_switch_to_another_branch() -> (
+    None
+):
+    assert violation("git checkout feat/y; git commit -m x", OTHER) == ""
+    assert violation("git checkout feat/y\ngit commit -m x", OTHER) == ""
+
+
+def test_violation_still_refuses_after_an_untrusted_switch_away_from_main() -> None:
+    assert violation("git checkout -b feat/x; git commit -m x", PROTECTED).startswith(
+        COMMIT_REASON
+    )
+
+
+@pytest.mark.parametrize(
+    ("command", "branch", "expected"),
+    [
+        ("git checkout -; git commit -m x", PROTECTED, COMMIT_REASON),
+        ("git checkout -; git commit -m x", OTHER, UNRESOLVED_REASON),
+        ("git checkout - ; git push origin main", OTHER, PUSH_REASON),
+        ("git checkout -; git push", OTHER, UNRESOLVED_REASON),
+    ],
+)
+def test_violation_gives_the_commit_reason_then_push_then_unresolved(
+    command: str, branch: str, expected: str
+) -> None:
+    assert violation(command, branch).startswith(expected)
+
+
+# --- a switch target a substitution makes ------------------------------------
+
+
+@pytest.mark.parametrize(
+    "command",
+    [
+        'git checkout "$(echo main)" && git commit -m x',
+        "git checkout $(echo main) && git commit -m x",
+        'git switch "$(echo main)" && git commit -m x',
+        'git checkout -B "$(echo main)" && git commit -m x',
+        'git switch -C "$(echo main)" && git commit -m x',
+        'git checkout "$(echo ma)in" && git commit -m x',
+        "git checkout `echo main` && git commit -m x",
+    ],
+)
+def test_violation_cannot_resolve_a_switch_target_a_substitution_made(
+    command: str,
+) -> None:
+    assert violation(command, OTHER).startswith(UNRESOLVED_REASON)
+
+
+@pytest.mark.parametrize("option", ["-b", "-c"])
+def test_violation_reads_a_new_branch_named_by_a_substitution_as_a_switch_away(
+    option: str,
+) -> None:
+    command = f'git checkout {option} "$(echo feat/y)" && git commit -m x'
+
+    assert violation(command, PROTECTED) == ""
+
+
+def test_switch_target_marks_a_placeholder_target_unresolved() -> None:
+    assert switch_target("checkout", ("\x1f",)) == UNRESOLVED
+    assert switch_target("checkout", ("-B", "\x1f")) == UNRESOLVED
+    assert switch_target("switch", ("-C", "feat/\x1f")) == UNRESOLVED
+    assert switch_target("checkout", ("-b", "\x1f")) == "\x1f"
+    assert switch_target("checkout", ("--", "\x1f")) == ""
+
+
+def test_violation_allows_a_harmless_command_after_a_substituted_switch_target() -> (
+    None
+):
+    assert violation('git checkout "$(echo main)" && git status', OTHER) == ""
+
+
+# --- bash 5.3 funsub (A7, T7) ------------------------------------------------
+
+FUNSUBS = [
+    "echo ${ git commit -m x; }",
+    "echo ${| git commit -m x; }",
+    "echo ${\tgit commit -m x; }",
+    "echo ${\ngit commit -m x; }",
+    'echo "${ git commit -m x; }"',
+    'echo "${| git push; }"',
+]
+
+
+@pytest.mark.parametrize("command", FUNSUBS)
+def test_violation_plays_safe_on_every_funsub_opener(command: str) -> None:
+    reason = violation(command, PROTECTED)
+
+    assert reason.startswith(UNMODELLED_REASON)
+    assert "${ cmd; }" in reason
+
+
+@pytest.mark.parametrize("command", FUNSUBS)
+def test_violation_allows_a_funsub_off_main(command: str) -> None:
+    assert violation(command, OTHER) == ""
+
+
+def test_violation_allows_a_funsub_on_main_that_names_neither_commit_nor_push() -> None:
+    assert violation("echo ${ ls; }", PROTECTED) == ""
+    assert violation('echo "${ ls; }"', PROTECTED) == ""
+
+
+def test_violation_does_not_mistake_a_parameter_expansion_for_a_funsub() -> None:
+    assert violation('echo "${x:-a}" ${y} ${#z}; git status', PROTECTED) == ""
+
+
+# --- harmless and literal substitutions (A8, T8) ------------------------------
+
+
+@pytest.mark.parametrize(
+    "command",
+    [
+        'echo "$(git status)"',
+        'v="$(git rev-parse HEAD)"',
+        "echo `date`",
+        'echo "$(git log -1 --format=%s)" | grep commit',
+        'echo "<(git commit -m x)"',
+        "echo '$(git commit -m x)'",
+        'echo "\\$(git commit -m x)"',
+        'echo "\\`git commit -m x\\`"',
+        "echo \"$(echo '$(git commit -m x)')\"",
+        "echo '\"$(git commit -m x)\"'",
+        'echo $((1 + 2)) "$((3 * 4))"',
+        'echo "$( )" "``" "$(# nothing\n)"',
+    ],
+)
+def test_violation_leaves_harmless_and_literal_substitutions_alone(
+    command: str,
+) -> None:
+    assert violation(command, PROTECTED) == ""
+
+
+PIPELINE_COMMIT = "git commit -m \"$(cat <<'EOF'\nTitle\n\nBody\nEOF\n)\""
+PIPELINE_COMMIT_AWKWARD = "git commit -m \"$(cat <<'EOF'\nit's 1) done\nEOF\n)\""
+
+
+@pytest.mark.parametrize("command", [PIPELINE_COMMIT, PIPELINE_COMMIT_AWKWARD])
+def test_violation_reads_the_pipelines_own_commit_form(command: str) -> None:
+    assert violation(command, PROTECTED).startswith(COMMIT_REASON)
+    assert violation(command, OTHER) == ""
+    assert violation("git checkout -b x && " + command, PROTECTED) == ""
+    assert violation("git checkout -b x &&\n" + command, PROTECTED) == ""
+
+
+def test_violation_reads_a_quote_inside_a_double_quote_around_a_substitution() -> None:
+    assert violation("echo \"'$(git commit -m x)'\"", PROTECTED).startswith(
+        COMMIT_REASON
+    )
+
+
+def test_violation_flags_ansi_c_quoting_around_a_substitution_on_main_only() -> None:
+    command = "echo $'$(git commit -m x)'"
+
+    assert violation(command, PROTECTED).startswith(UNMODELLED_REASON)
+    assert violation(command, OTHER) == ""
+
+
+# --- a `case` pattern's `)` inside a substitution ----------------------------
+
+
+@pytest.mark.parametrize(
+    "command",
+    [
+        "echo $(case a in a) git commit -m x;; esac)",
+        'echo "$(case a in a) git commit -m x;; esac)"',
+        'echo "$(case x in x) git commit -m y;; esac)"',
+        'echo "$(case x in (x) git commit -m y;; esac)"',
+        'echo "$(case x in a|x) git commit -m y;; esac)"',
+        'echo "$(echo hi; case x in x) git commit -m y;; esac)"',
+        'echo "$( (case x in x) git commit -m y;; esac) )"',
+        'echo "$(case b in a) echo hi;; b) git commit -m y;; esac)"',
+        'echo "$(case a in a) case b in b) git commit -m y;; esac;; esac)"',
+        "echo `case x in x) git commit -m y;; esac`",
+        "cat <<EOF\n$(case x in x) git commit -m y;; esac)\nEOF",
+        'echo "$(if true; then case x in x) git commit -m y;; esac; fi)"',
+    ],
+)
+def test_violation_refuses_a_commit_after_a_case_pattern_inside_a_substitution(
+    command: str,
+) -> None:
+    assert violation(command, PROTECTED).startswith(COMMIT_REASON)
+
+
+def test_violation_closes_a_substitution_at_its_own_paren_after_a_case() -> None:
+    command = 'echo "$(case a in a) echo hi;; esac)" && git commit -m x'
+
+    assert violation(command, PROTECTED).startswith(COMMIT_REASON)
+    assert violation("git checkout -b feat/y && " + command, PROTECTED) == ""
+
+
+def test_violation_reads_case_as_a_word_only_where_a_command_could_start() -> None:
+    # `case` as an argument opens nothing, so its substitution still ends at its
+    # own `)` and the one after it is still found.
+    command = 'echo "$(echo case) $(git commit -m x)"'
+
+    assert violation(command, PROTECTED).startswith(COMMIT_REASON)
+    assert segments(command) == [
+        Segment(("echo", "case"), "", 1),
+        Segment(("git", "commit", "-m", "x"), SUBSTITUTED, 1),
+        Segment(("echo", "_ _"), SUBSTITUTED, 0),
+    ]
+
+
+def test_segments_keeps_a_case_pattern_paren_inside_the_group() -> None:
+    parsed = segments('echo "$(case a in a) git commit -m x;; esac)"')
+
+    assert parsed is not None
+    assert parsed[-1] == Segment(("echo", "_"), SUBSTITUTED, 0)
+    assert any(s.tokens[:2] == ("git", "commit") and s.depth == 1 for s in parsed)
+
+
+@pytest.mark.parametrize(
+    "command",
+    [
+        "case a in a) git commit -m x;; esac",
+        "(case a in a) git commit -m x;; esac)",
+        "case a in\n  a) git commit -m x;;\nesac",
+    ],
+)
+def test_violation_still_reads_a_case_statement_outside_any_substitution(
+    command: str,
+) -> None:
+    assert violation(command, PROTECTED).startswith(COMMIT_REASON)
+    assert violation(command, OTHER) == ""
+
+
+# --- substitutions inside arithmetic ----------------------------------------
+
+
+@pytest.mark.parametrize(
+    "command",
+    [
+        'echo "$(( $(git commit -m x) + 1 ))"',
+        'echo "$(( `git commit -m x` ))"',
+        'x="$(( $(git commit -m x) ))"',
+        '(( "$(git commit -m x)" ))',
+        "echo $(( $(git commit -m x) ))",
+        "(( $(git commit -m x) ))",
+        'echo "$(( 1 + $(( $(git commit -m x) )) ))"',
+        'echo "$(( "$(git commit -m x)" ))"',
+        "echo $(( `git commit -m x` ))",
+    ],
+)
+def test_violation_refuses_a_commit_inside_an_arithmetic_expansion(
+    command: str,
+) -> None:
+    assert violation(command, PROTECTED).startswith(COMMIT_REASON)
+
+
+def test_violation_refuses_a_push_inside_arithmetic_from_a_branch() -> None:
+    command = 'echo "$(( $(git push origin main) ))"'
+
+    assert violation(command, OTHER).startswith(PUSH_REASON)
+
+
+def test_segments_puts_an_arithmetic_substitution_before_its_command() -> None:
+    assert segments('echo "$(( $(git status) + 1 ))"') == [
+        Segment(("git", "status"), "", 1),
+        Segment(("echo", "_"), SUBSTITUTED, 0),
+    ]
+
+
+@pytest.mark.parametrize(
+    "command",
+    [
+        "echo $((1<<2)); git status",
+        "x=1; (( x <<= 1 )); git status",
+        'echo "$((1 + 2))" $((3 * 4))',
+    ],
+)
+def test_violation_leaves_plain_arithmetic_alone(command: str) -> None:
+    assert violation(command, PROTECTED) == ""
+
+
+def test_segments_extracts_nothing_from_plain_arithmetic() -> None:
+    parsed = segments('echo $((1 + 2)) "$((3 * 4))"')
+
+    assert parsed is not None
+    assert all(segment.depth == 0 for segment in parsed)
+    assert all(segment.separator != SUBSTITUTED for segment in parsed)
+
+
+# --- an empty substitution -----------------------------------------------------
+
+
+def test_segments_gives_an_empty_group_no_say_in_the_separator() -> None:
+    assert segments('a && b "$( )"') == [
+        Segment(("a",), ""),
+        Segment(("b", "_"), "&&"),
+    ]
+    assert segments("a ; b `` c") == [
+        Segment(("a",), ""),
+        Segment(("b", "_", "c"), ";"),
+    ]
+
+
+@pytest.mark.parametrize("empty", ['"$( )"', '"$(# only a comment\n)"', "``", '"$(;)"'])
+def test_segments_ignores_a_group_that_ran_nothing(empty: str) -> None:
+    parsed = segments(f"git checkout -b feat/y && git commit -m {empty}x")
+
+    assert parsed is not None
+    assert [s.separator for s in parsed] == ["", "&&"]
+    assert all(s.depth == 0 for s in parsed)
+
+
+# --- a command that cannot be read in time, or at all -------------------------
+
+
+def test_violation_survives_a_deeply_nested_heredoc_body_substitution() -> None:
+    body = "$(" * 1500 + "git commit -m x" + ")" * 1500
+    command = f"cat <<EOF\n{body}\nEOF\n"
+
+    assert violation(command, PROTECTED) != ""
+    assert violation(command.replace("commit -m x", "push origin main"), OTHER) != ""
+
+
+def test_violation_stays_fast_with_thousands_of_unclosed_openers() -> None:
+    import time
+
+    command = "echo " + "$(" * 6000 + " git commit -m x"
+    started = time.monotonic()
+
+    reason = violation(command, PROTECTED)
+
+    assert time.monotonic() - started < 5
+    assert reason.startswith(UNMODELLED_REASON)
+    assert violation(command, OTHER) == ""
+
+
+@pytest.mark.parametrize("opener", ["$((", "(", "`", "<(", "${"])
+def test_violation_stays_fast_and_plays_safe_on_a_hostile_run_of_openers(
+    opener: str,
+) -> None:
+    import time
+
+    command = "echo " + opener * 6000 + " git commit -m x"
+    started = time.monotonic()
+
+    violation(command, PROTECTED)
+    violation(command, OTHER)
+
+    assert time.monotonic() - started < 10
+
+
+def test_violation_refuses_what_it_cannot_finish_reading_on_main() -> None:
+    command = 'echo "$(' * 6000 + "git commit -m x" + ')"' * 6000
+
+    assert violation(command, PROTECTED) != ""
+
+
+def test_prepare_gives_up_in_time_and_says_so() -> None:
+    text, unmodelled = guard_git._prepare("echo " + "$((" * 6000)
+
+    assert unmodelled
+    assert text.startswith("echo $((")
+
+
+@pytest.mark.parametrize("depth", [29, 30])
+def test_violation_judges_a_push_up_to_the_nesting_limit(depth: int) -> None:
+    command = 'echo "$(' * depth + "git push origin main" + ')"' * depth
+
+    assert violation(command, OTHER).startswith(PUSH_REASON)
+
+
+def test_violation_does_not_judge_substitutions_nested_past_the_limit_off_main() -> (
+    None
+):
+    # Recorded, not endorsed: past `_MAX_NESTING` the text is left unread. On
+    # `main` the same command plays safe instead.
+    push = 'echo "$(' * 31 + "git push origin main" + ')"' * 31
+    commit = push.replace("push origin main", "commit -m x")
+
+    assert violation(push, OTHER) == ""
+    assert violation(commit, PROTECTED).startswith(UNMODELLED_REASON)
+
+
+def test_violation_refuses_on_main_when_the_guard_itself_fails(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    def explode(command: str) -> tuple[str, bool]:
+        raise RuntimeError(command)
+
+    monkeypatch.setattr(guard_git, "_prepare", explode)
+
+    assert violation("git commit -m x", PROTECTED).startswith(UNREADABLE_REASON)
+    assert violation("git status", PROTECTED) == ""
+    assert violation("git commit -m x", OTHER) == ""
+
+
+def test_main_exits_2_when_the_guard_fails_on_main(
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    def explode(command: str) -> tuple[str, bool]:
+        raise RecursionError(command)
+
+    monkeypatch.setattr(guard_git, "_prepare", explode)
+    monkeypatch.setattr(guard_git, "current_branch", lambda _project: PROTECTED)
+    payload = {"tool_input": {"command": "git commit -m x"}}
+
+    assert run_hook(monkeypatch, payload) == 2
+    assert "could not be read" in capsys.readouterr().err
+
+
+# --- recorded misses (deliberate, pinned so changing them is a decision) -----
+
+
+@pytest.mark.parametrize(
+    "command",
+    [
+        "echo \"${x:-'$(git commit -m x)'}\"",
+        'echo "${x:-\'}" "$(git commit -m x)" "\'}"',
+    ],
+)
+def test_violation_misses_a_substitution_after_a_quote_inside_a_quoted_parameter(
+    command: str,
+) -> None:
+    # In bash the single quote inside `"${...}"` is literal and the substitution
+    # runs; the `${ }` frame reads it as quoting and hides the text. Recorded.
+    assert violation(command, PROTECTED) == ""
