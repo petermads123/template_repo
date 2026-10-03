@@ -1,6 +1,6 @@
 # The git guard judges command substitutions inside a word
 
-<!-- claude-plan step=7 status=active -->
+<!-- claude-plan step=8 status=active -->
 
 | Field | Value |
 |---|---|
@@ -19,7 +19,7 @@
 | 4 | Verify | `/verify` | in `/build` | done |
 | 5 | Test | `/test` | in `/build` | done |
 | 6 | Concept check | `/concept-check` | in `/build` | done |
-| 7 | Ship | `/ship` | in `/build` | pending |
+| 7 | Ship | `/ship` | in `/build` | done |
 | 8 | Recommend | `/recommend` | with the user | pending |
 | 9 | Pull request | `/create-pr` | with the user | pending |
 | 10 | Review | `/watch-pr` | on the pull request | pending |
@@ -716,8 +716,10 @@ Re-run directly against the code as it stands (`r6/r1.py`, 25 commands, 0 failur
 
 | Field | Value |
 |---|---|
-| Commits | |
-| Pushed to | |
+| Commits | Round 2, from the open commit `679acee` to the step 6 commit `5642c57` (24 commits), plus this step's `Ship:` commit. Subjects: `Concept: the git guard judges command substitutions inside a word`; `Plan: the git guard judges command substitutions inside a word`; `Plan: apply plan-critic findings (round 2)`; `Plan accepted (round 2): open the build`; step 3 `WIP step 3: reproduction, red`, `WIP step 3: sentinels and Segment.depth, existing suite green`, `WIP step 3: extract substitutions in execution order, track possible branches`, `Judge command substitutions inside a word as commands of their own`; step 4 `Verify: the git guard judges command substitutions inside a word`; step 5 `WIP step 5: guard reads case patterns, arithmetic substitutions, PowerShell backticks; fails closed`, `WIP step 5: round 2 suite, ...`, `Test: the git guard judges command substitutions inside a word`; step 6 `Concept check: the git guard judges command substitutions inside a word`; send-back `Judge heredoc body substitutions inside an unclosed quoted substitution`, `Verify: re-verify after send-back, ...`, `Test: edge cases around the closing quotes appended for unterminated heredoc bodies`; halt `Concept check: second run, halt on the heredoc closed by a glued paren ...`, `Halt answered at step 6: heredocs close at EOF) as in bash`, `WIP step 3: heredoc closed by a substitution's paren, red`, `Close a heredoc inside a substitution where bash does`, `Verify: ... re-verify after the step-6 halt`, `Test: closing-line edge cases for heredocs in substitutions`, `Test: correct case counts in the round file`, `Concept check: guard substitutions in words, third check`. Every step from 1 left a commit naming the round file; none missing. |
+| Pushed to | `origin/fix/guard-git-shell-lexing` |
+
+Whole-tree gates at ship: `ruff check .` clean, `ruff format --check .` 11 files already formatted, `mypy` no issues in 11 source files, `pytest` 853 passed. `origin/main` (`c88580a`) is an ancestor of HEAD: nothing to merge. Diff review (`679acee..HEAD`): four files changed (`.claude/hooks/guard_git.py`, `tests/test_guard_git.py`, `STRUCTURE.md`, this round file); no scratch file, no debug print, no scratchpad path in code or tests (the one `/tmp` is the test string `echo "$(cd /tmp; git commit -m x)"`, A2 data). Nothing removed.
 
 ---
 
