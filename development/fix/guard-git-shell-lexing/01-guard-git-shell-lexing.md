@@ -1,6 +1,6 @@
 # The git guard reads commands the way the shell does
 
-<!-- claude-plan step=6 status=active -->
+<!-- claude-plan step=5 status=active -->
 
 | Field | Value |
 |---|---|
