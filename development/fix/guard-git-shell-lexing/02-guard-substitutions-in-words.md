@@ -1,6 +1,6 @@
 # The git guard judges command substitutions inside a word
 
-<!-- claude-plan step=1 status=active -->
+<!-- claude-plan step=2 status=active -->
 
 | Field | Value |
 |---|---|
@@ -13,7 +13,7 @@
 
 | # | Step | Skill | Runs | Status |
 |---|---|---|---|---|
-| 1 | Conceptualize | `/conceptualize` | with the user | pending |
+| 1 | Conceptualize | `/conceptualize` | with the user | done |
 | 2 | Plan | `/plan` | with the user | pending |
 | 3 | Implement | `/implement` | in `/build` | pending |
 | 4 | Verify | `/verify` | in `/build` | pending |
@@ -27,8 +27,6 @@
 Statuses: `pending`, `in progress`, `done`.
 
 ## Builds on
-
-Opened on a bug report — run `/fix` first.
 
 | Round | File | What it delivered |
 |---|---|---|
@@ -48,64 +46,83 @@ in this round's scope.
 
 ## 1. Concept
 
-> Written in step 1, agreed with the user before step 2 starts. Prose, not code. Steps 3
-> to 7 run without the user, and the one thing that stops them is a finding that would
-> change this section — so what is not decided here is decided by a halt.
-
 ### Defect
-
-> Fix rounds only — a round 1 that `/fix` opened, or a later round opened on a bug report,
-> whatever its folder is called. Delete this block on a feature round; its presence, filled,
-> is the only thing that marks a round as a fix round to every step after this one. Its
-> starting content is the `/fix` diagnosis, agreed with the user like the rest of section 1
-> and written to disk with it. The root cause is on the halting line: a build that finds a
-> different cause halts rather than fixing what it found.
 
 | Field | Value |
 |---|---|
-| Observed | What happens, quoted from the reproduction. |
-| Expected | What should happen, and what says so — a docstring, a test, an earlier round's criterion. |
-| Reproduction | The exact command or call and its output. Step 3 turns this into the first test and runs it red before fixing. |
-| Root cause | `file.py:NN`, and the decision on that line that is wrong. |
-| Introduced by | The commit, or "older than the history here". |
-| Class | Other inputs the same cause breaks, and the same shape elsewhere in the repo. |
-| Blast radius | Callers of the cause, tests that will move, anything that depends on the current behaviour. |
-| Scope | `this instance` or `the class` — the user's decision, with the reason. What the class holds that is not taken goes under Explicitly out of scope by name. |
+| Observed | Bash runs a git command that sits in a command substitution inside a word, but `guard_git.violation` allows it on `main` — on the guard at `origin/main` and as round 1 left it. Separately (folded in at the user's choice), after a separator that does not guarantee success the guard forgets a switch **to** `main`, so a commit that lands on `main` is allowed from a feature branch. |
+| Expected | `CLAUDE.md` and the module docstring: the guard refuses a commit or push that would land on `main`, "including inside a compound command". |
+| Reproduction | Scratch `r2_repro.py` and `dc_probe.py`; bash with `git` shadowed by an echo function. Allowed on `main` while bash runs git: `echo "$(git commit -m x)"`, `echo "result: $(git commit -m x)"`, `out="$(git push origin main 2>&1)"`, ``echo `git commit -m x` ``, ``x=`git commit -m x` ``, `diff <(git commit -m x) /dev/null`, `tee >(git commit -m x) </dev/null`, `echo "${x:-$(git commit -m x)}"`. Order: from `feat/x`, `git commit -m "$(git checkout -q main)x"` commits to `main` (verified in a throwaway repo) and is allowed in its double-quoted, unquoted and unquoted-heredoc-body forms. Untrusted switch: from `feat/x`, `git checkout main; git commit -m x`, `git checkout main\ngit commit -m x`, `git switch main \|\| true; git push`, `(git checkout main) && git commit -m x`, `x=$(git checkout main) && git commit -m x` are allowed. Already refused (unquoted `$( )` only by accident of `(` being a separator): `echo $(git commit -m x)`, `` `git commit -m x` `` at command position. |
+| Root cause | (1) `.claude/hooks/guard_git.py:722-747` (`$(`, backtick) and `:794-803` (`(` after `<`/`>`): `_prepare` recognises where a command substitution opens and pushes a `cmd`/`bt` frame but copies its text through unchanged, so `shlex` keeps `"…$(…)…"` and backticks inside one word and `<(` arrives as one token `_is_separator` rejects; the inner command never becomes a segment, and `violation` (:982) judges only command-name positions. Round 1's heredoc extraction (:786-793) appends body substitutions *after* the opener line, though bash runs them first. (2) `violation` :1021-1022: on any separator but `&&`, `effective = branch` falls back to the starting branch, which is only safe when the starting branch is `main`. |
+| Introduced by | (1) Double-quoted substitution unjudged since the `shlex` rebuild `009f6e3` (2026-09-21); backtick handling (`5b01090`, 2026-09-21) covers only the command-name token; round 1 pinned `echo "$(git commit -m x)"` as an allowed "known miss" (`tests/test_guard_git.py:1620-1627`). (2) The distrust rule, also from the 2026-09-21 rebuild. |
+| Class | `$( )` inside double quotes, in any position (`${…}`, `$[ ]`, here-strings `<<<"$(…)"`, `[[ ]]`/`[ ]`/`test`, array/`declare`/`export`/`local` assignments, `case`/`for` words, redirection targets, `printf -v`); backticks anywhere but command position (arguments, assignments, inside `${ }`, here-strings, redirections); process substitution `<( )`/`>( )`; nested mixes; substitutions with their own separators, wrappers and subshells; a branch switch inside a substitution, which runs before the enclosing command; bash 5.3 funsub `${ cmd; }`/`${\| cmd; }` (unverified — bash 5.2 here rejects it); an untrusted switch to `main` (or to a target only the shell can resolve) after `;`, newline, `\|\|`, `\|`, `&` or a subshell. Same shape elsewhere: PowerShell's `"$( … )"` subexpression. |
+| Blast radius | `violation` is called only from `guard_git.main()`. Tests that move: `tests/test_guard_git.py:1620-1627` (pins the miss as allowed) and round 1's `test_segments_puts_a_body_substitution_on_its_own_line_after_the_command` (pins the after-order). Decided here: both are rewritten to the new behaviour. The module docstring's "known misses" sentence and `STRUCTURE.md`'s guard section change with it. Nothing depends on the bug. |
+| Scope | `the class` — the user's decision, including the order fix to round 1's heredoc extraction; the funsub syntax plays safe (the user's choice); and the untrusted-switch-to-`main` defect folded into this round at the user's choice, although it is a different cause. |
 
-Critique — the `diagnosis-critic`'s findings and what was done with each:
+Critique — the `diagnosis-critic`'s findings (verdict: cause confirmed, class incomplete) and what was done with each:
+
+1. A substitution runs before the command around it, so a branch switch inside one decides where the enclosing commit lands; round 1's heredoc extraction has the order wrong too — applied: in the class, A5, and the round 1 order test moves.
+2. Many more positions within the class, so extracted text must go through the full segment rules (separators, `&&` trust, wrappers, subshells, recursion) — applied: A2–A4.
+3. bash 5.3 funsub `${ cmd; }` is a separate, unverified miss — applied as a scope decision: play safe (A7).
+4. An untrusted switch to `main` falls back to the starting branch — confirmed in this session; a different cause, folded into this round at the user's choice (A6).
 
 ### What this is
 
+Wherever bash runs a command inside a word — `$( … )` inside double quotes, backticks in any
+position, `<( … )` and `>( … )` — the guard pulls that command out and judges it as a command
+of its own, with every rule a plain command gets, and as running *before* the command that
+contains it, on the branch in effect for that command. A branch switch inside a substitution
+therefore counts for the enclosing command, and round 1's unquoted-heredoc extraction takes the
+same order. Second, when the guard cannot be sure an earlier branch switch took effect, it no
+longer assumes the starting branch: a commit or push is refused when `main` is **any** branch
+it could land on. bash 5.3's `${ cmd; }` joins the unmodelled syntax that plays safe on `main`.
+
 ### Why it is worth building
+
+See the Defect block.
 
 ### Inputs and outputs
 
+Unchanged: `violation(command, branch)` returns a refusal reason or `""`; `segments(command)`
+returns the invocations or `None`. Which commands land in which outcome changes, and
+`segments` gains the extracted commands as invocations of their own.
+
 ### How it connects to the rest of the repo
 
-Which existing modules it calls, which call it, what it does not touch.
+Changes `.claude/hooks/guard_git.py` (the `_prepare` pass, `segments`, `violation`, and
+`UNMODELLED_OPENERS` for funsub), `tests/test_guard_git.py`, the module docstring and
+`STRUCTURE.md`'s guard section. Builds on round 1's `_body_substitutions` extraction. No other
+hook parses shell text.
 
 ### Explicitly out of scope
 
+- A git command inside a program's string argument — `bash -c "…"`, `sh -c`, `eval`, aliases
+  and functions. A different cause.
+- Wrappers not in `WRAPPERS` (`xargs`, `timeout`, `nice`, `command`, `exec`).
+- Shell reserved words before `git` (`if git commit …`, `do git push …`, `! git commit`) —
+  round 1's recommendation R2, the next round.
+- Subcommands spelled with hex escapes or split quotes (`git co""mmit`).
+- Running bash 5.3 to verify funsub: it plays safe instead.
+
 ### Acceptance criteria
 
-> Numbered, observable, and phrased so that step 6 can mark each one met or not met.
-> These are the contract. Step 2 plans against them, step 5 tests them, step 6 audits
-> against them. If a criterion cannot be observed from outside the code, rewrite it.
->
-> On a fix round the first criterion is the reproduction passing — "Given <the
-> reproduction's input>, <expected> rather than <observed>" — and the last is that nothing
-> else changed, phrased so step 6 can evidence it with more than a green suite. If the
-> scope is `the class`, each input in the class gets its own row.
+All judged with `main` checked out unless stated; "a branch" is `feat/x`.
 
 | # | The finished feature... |
 |---|---|
-| A1 | |
-| A2 | |
+| A1 | Refuses `echo "$(git commit -m x)"` on `main`, which today it allows. |
+| A2 | Judges `$( )` inside double quotes in every position: `out="$(git push origin main 2>&1)"` is refused on `main` and from a branch; `echo "${x:-$(git commit -m x)}"`, `[[ -n "$(git commit -m x)" ]]`, `declare x="$(git commit -m x)"`, `cat <<<"$(git commit -m x)"`, `echo > "$(git commit -m x)"`, `echo $(echo "$(git commit -m x)")`, `echo "$(cd /tmp; git commit -m x)"`, `echo "$(sudo git commit -m x)"` and `echo "$( (git commit -m x) )"` are refused on `main`. |
+| A3 | Judges backticks in every position: ``echo `git commit -m x` ``, ``x=`git commit -m x` ``, ``echo ${x:-`git commit -m x`}`` and ``echo 2>`git commit -m x` `` are refused on `main`; ``echo `git push origin main` `` is refused from a branch. |
+| A4 | Judges process substitution: `diff <(git commit -m x) /dev/null` and `tee >(git commit -m x) </dev/null` are refused on `main`; `diff <(git push origin main) f` is refused from a branch. |
+| A5 | Judges a substitution as running before its enclosing command: `git commit -m "$(git checkout -q main)x"`, `git commit -m $(git checkout -q main)x` and `git commit -F - <<EOF\n$(git checkout -q main)\nEOF` are refused from a branch; a `&&` switch before the enclosing command carries into its substitutions, so `git checkout -b feat/y && out="$(git commit -m y)"` is allowed on `main`. |
+| A6 | Refuses a commit or push when `main` is any branch it could land on: from a branch, `git checkout main; git commit -m x`, `git checkout main\ngit commit -m x`, `git switch main \|\| true; git push`, `(git checkout main) && git commit -m x` and `x=$(git checkout main) && git commit -m x` are refused; `git checkout feat/y; git commit -m x` is allowed from a branch; `git checkout -b feat/x; git commit -m x` is still refused on `main`. |
+| A7 | Plays safe on bash 5.3 funsub: `echo ${ git commit -m x; }` and `echo ${\| git commit -m x; }` are refused on `main` with the unmodelled-syntax reason, allowed from a branch, and allowed on `main` when they name neither commit nor push. |
+| A8 | Leaves harmless substitutions alone: `echo "$(git status)"`, `v="$(git rev-parse HEAD)"`, ``echo `date` `` and `echo "$(git log -1 --format=%s)" \| grep commit` are allowed on `main`; the pipeline's `git commit -m "$(cat <<'EOF' … EOF\n)"` is refused on `main` and allowed on a branch. |
+| A9 | Changes nothing else: round 1's A1–A6 still hold; every existing test passes, except `tests/test_guard_git.py:1620-1627` and `test_segments_puts_a_body_substitution_on_its_own_line_after_the_command`, which are rewritten to the new behaviour; and a differential against the guard as round 1 left it (commit `f8775d0`) over every command the existing suite passes to the guard plus generated variations agrees, except where the input contains a command substitution, a funsub opener or an untrusted switch to `main` or an unresolvable target — and there the new decision matches bash with `git` shadowed, or is the play-safe refusal on `main`. |
 
 ### Open questions
 
-> Must be empty before step 2 begins. An unanswered question here is a decision being
-> made by accident later — and nobody is watching when it happens.
+None.
 
 ---
 
