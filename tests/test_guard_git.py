@@ -3487,3 +3487,312 @@ def test_violation_refuses_a_commit_after_an_or_switch_on_main() -> None:
     command = "git status || git checkout -b x && git commit -m x"
 
     assert violation(command, PROTECTED).startswith(COMMIT_REASON)
+
+
+# Each form below was run in bash 5.2 with `git` shadowed by a function that keeps
+# HEAD in a file, and `branches` holding main, feat/y and feat/x: the refused ones
+# land a commit or push on `main`, the allowed ones do not.
+
+OR_OPERAND_FORMS = [
+    # A later pipeline stage, and what can stand before the switch.
+    "true || echo a | git checkout -b x && git commit -m x",
+    "true || echo a |& git checkout -b x && git commit -m x",
+    "true || time git checkout -b x && git commit -m x",
+    "true || sudo git checkout -b x && git commit -m x",
+    "true || nohup git checkout -b x && git commit -m x",
+    "true || GIT_X=1 git checkout -b x && git commit -m x",
+    "true || git checkout -b x 2>/dev/null && git commit -m x",
+    'true || git checkout -b x "$(echo)" && git commit -m x',
+    # Chained `||`, and an `||` after an `&&` chain.
+    "false || true || git checkout -b x && git commit -m x",
+    "git status || git rev-parse || git checkout -b x && git commit -m x",
+    "true && true || git checkout -b x && git commit -m x",
+    "coproc true || git checkout -b x && git commit -m x",
+    # The rest of the chain, in every place the commit can sit.
+    "true || git checkout -b x <<EOF && git commit -m x\nhi\nEOF",
+    "true || git checkout -b x &&\ngit commit -m x",
+    "true || git checkout -b x && true && git commit -m x",
+    'true || git checkout -b x && echo "$(git commit -m x)"',
+    "true || git checkout -b x && echo $(git commit -m x)",
+    "true || git checkout -b x && git push origin HEAD",
+    # The whole of it inside a group, a substitution or a condition.
+    "{ true || git checkout -b x && git commit -m x; }",
+    'echo "$(true || git checkout -b x && git commit -m x)"',
+    "if true || git checkout -b x && git commit -m x; then :; fi",
+    # A group glued to the operators.
+    "true || (git checkout -b x)&&git commit -m x",
+    "true ||(git checkout -b x) && git commit -m x",
+    "true||(git checkout -b x)&&git commit -m x",
+    "(true)||git checkout -b x&&git commit -m x",
+    # A trailing space before a newline after the `||`.
+    "true || \ngit checkout -b x && git commit -m x",
+    # A body substitution of a heredoc on the switch is another list's.
+    "true || git checkout -b x <<EOF && git commit -m x\n$(true && true)\nEOF",
+]
+
+
+@pytest.mark.parametrize("command", OR_OPERAND_FORMS)
+def test_violation_refuses_a_commit_after_every_or_operand_form(command: str) -> None:
+    assert violation(command, PROTECTED).startswith((COMMIT_REASON, PUSH_REASON))
+
+
+def test_violation_refuses_a_push_of_head_after_an_or_switch_on_main() -> None:
+    command = "true || git checkout -b x && git push origin HEAD"
+
+    assert violation(command, PROTECTED).startswith(PUSH_REASON)
+
+
+def test_violation_refuses_a_named_or_switch_that_may_not_have_run_from_a_branch() -> (
+    None
+):
+    command = "git checkout main || git checkout feat/x && git commit -m x"
+
+    assert violation(command, "feat/y").startswith(COMMIT_REASON)
+
+
+@pytest.mark.parametrize(
+    "command",
+    [
+        "git checkout main && true || git checkout -b x && git commit -m x",
+        "git checkout main || git checkout -b x && git commit -m x",
+    ],
+)
+def test_violation_refuses_an_or_switch_after_a_switch_to_main_from_a_branch(
+    command: str,
+) -> None:
+    assert violation(command, "feat/y").startswith(COMMIT_REASON)
+
+
+def test_violation_refuses_a_push_of_head_after_a_switch_to_main_from_a_branch() -> (
+    None
+):
+    command = "git checkout main || git checkout -b x && git push origin HEAD"
+
+    assert violation(command, "feat/y").startswith(PUSH_REASON)
+
+
+@pytest.mark.parametrize(
+    "command",
+    [
+        "true ||\n\ngit checkout -b x && git commit -m x",
+        "true || # note\ngit checkout -b x && git commit -m x",
+        "true \\\n|| git checkout -b x && git commit -m x",
+        "true || echo a |\n git checkout -b x && git commit -m x",
+    ],
+)
+def test_violation_refuses_an_or_switch_across_line_forms(command: str) -> None:
+    assert violation(command, PROTECTED).startswith(COMMIT_REASON)
+
+
+@pytest.mark.parametrize(
+    "command",
+    [
+        "git checkout -b feat/x || git checkout main && git commit -m x",
+        "git checkout -b feat/x || true && git commit -m x",
+    ],
+)
+def test_violation_refuses_an_or_whose_left_switch_may_have_failed(
+    command: str,
+) -> None:
+    # `feat/x` exists, so the left side fails and the right side runs.
+    assert violation(command, PROTECTED).startswith(COMMIT_REASON)
+
+
+@pytest.mark.parametrize(
+    "command",
+    [
+        "git checkout -b y && true || git checkout -b x && git commit -m x",
+        "git checkout -b x || git checkout y && git commit -m x",
+        "true && git checkout -b x || git checkout -b y && git commit -m x",
+        "git checkout -b x || git checkout -b y && git commit -m x",
+        "git checkout -b feat/z || git switch feat/z && git commit -m x",
+    ],
+)
+def test_violation_unions_both_sides_of_an_or_for_the_and_after_it(
+    command: str,
+) -> None:
+    assert violation(command, PROTECTED) == ""
+
+
+def test_violation_closes_an_or_operand_when_its_substitution_ends() -> None:
+    refused_command = 'echo "$(true || git checkout -b x)" && git commit -m x'
+    allowed_command = (
+        'git checkout -b y && echo "$(true || git checkout -b x)" && git commit -m x'
+    )
+
+    assert violation(refused_command, PROTECTED).startswith(COMMIT_REASON)
+    assert violation(allowed_command, PROTECTED) == ""
+
+
+@pytest.mark.parametrize("separator", [";", "\n"])
+def test_violation_closes_an_or_operand_at_a_list_end(separator: str) -> None:
+    command = (
+        f"true || git checkout -b y{separator}git checkout -b x && git commit -m x"
+    )
+
+    assert violation(command, PROTECTED) == ""
+
+
+def test_violation_closes_an_or_operand_when_its_group_closes() -> None:
+    command = "( true || git checkout -b y ); git checkout -b x && git commit -m x"
+
+    assert violation(command, PROTECTED) == ""
+
+
+def test_violation_keeps_an_or_operand_in_a_heredoc_body_as_data() -> None:
+    command = "cat <<'EOF'\ntrue ||\nEOF\ngit checkout -b x && git commit -m x"
+
+    assert violation(command, PROTECTED) == ""
+
+
+@pytest.mark.parametrize(
+    "command",
+    [
+        "git status || git checkout -b x && git commit -m x",
+        "true || git checkout -b x && git push origin HEAD",
+    ],
+)
+def test_violation_leaves_the_or_rule_alone_off_main(command: str) -> None:
+    assert violation(command, "feat/y") == ""
+    assert violation(command, "") == ""  # a detached HEAD
+
+
+@pytest.mark.parametrize("command", ["||", "true ||", "true || git checkout -b x &&"])
+def test_violation_allows_a_dangling_or(command: str) -> None:
+    # bash rejects each as a syntax error, and none runs a commit.
+    assert violation(command, PROTECTED) == ""
+
+
+def test_violation_refuses_a_leading_or_that_names_a_commit() -> None:
+    # A syntax error in bash; the guard reads the commit and plays safe.
+    assert violation("|| git commit -m x", PROTECTED).startswith(COMMIT_REASON)
+
+
+def test_violation_refuses_an_or_switch_in_a_deep_chain_quickly() -> None:
+    import time
+
+    chain = "true || " * 5000 + "git checkout -b x && git commit -m x"
+    groups = "{ " * 2000 + "true || git checkout -b x && git commit -m x"
+    started = time.monotonic()
+
+    reasons = [violation(chain, PROTECTED), violation(groups, PROTECTED)]
+
+    assert time.monotonic() - started < 5
+    assert all(reason.startswith(COMMIT_REASON) for reason in reasons)
+
+
+# --- round 4: the `!`/`coproc` scope is not ended by a substitution ----------
+
+NEGATION_LEAKS = [
+    '! true | git checkout -b feat/x "$(true && true)" && git commit -m x',
+    '! true | git checkout -b feat/x "$(true; true)" && git commit -m x',
+    "! true | git checkout -b feat/x `true && true` && git commit -m x",
+    "! true | git checkout -b feat/x `true; true` && git commit -m x",
+    'coproc git checkout -b feat/x "$(true && true)" && git commit -m x',
+    'true || git checkout -b x "$(true && true)" && git commit -m x',
+    '! true | git checkout -b feat/x "$(true; ! true; true)" && git commit -m x',
+    '! true | git checkout -b feat/x "$(true || true)" && git commit -m x',
+    "! true | \ngit checkout -b feat/x && git commit -m x",
+]
+
+
+@pytest.mark.parametrize("command", NEGATION_LEAKS)
+def test_violation_keeps_a_negation_through_the_substitutions_inside_it(
+    command: str,
+) -> None:
+    # `feat/x` exists, so the checkout fails, `!` turns that into success and the
+    # `&&` commits on `main`.
+    assert violation(command, PROTECTED).startswith(COMMIT_REASON)
+
+
+@pytest.mark.parametrize(
+    "command",
+    [
+        "! git diff --quiet || { git checkout -b feat/z && git commit -m x; }",
+        "! git diff --quiet; git checkout -b x && git commit -m x",
+    ],
+)
+def test_violation_ends_a_negation_at_a_list_end_of_its_own(command: str) -> None:
+    assert violation(command, PROTECTED) == ""
+
+
+def test_violation_ends_a_negation_at_an_or_of_its_own() -> None:
+    command = "! git diff --quiet || git checkout -b x && git commit -m x"
+
+    assert violation(command, PROTECTED).startswith(COMMIT_REASON)
+
+
+# --- round 4: what stays allowed ---------------------------------------------
+
+OR_ALLOWED = [
+    "git checkout -b feat/z || git checkout feat/z && git commit -m x",
+    "git switch -c feat/z || git switch feat/z && git commit -m x",
+    "git fetch || true && git checkout -b x && git commit -m x",
+    "true || false && git checkout -b x && git commit -m x",
+    "true || { git checkout -b x && git commit -m x; }",
+    "git checkout -b feat/z && ! git diff --cached --quiet && git commit -m x",
+    'echo "$(! true)"; git checkout -b x && git commit -m x',
+    'echo "$(true || git checkout -b y)"; git checkout -b x && echo "$(true && git commit -m x)"',
+]
+
+
+@pytest.mark.parametrize("command", OR_ALLOWED)
+def test_violation_still_allows_a_switch_that_certainly_ran(command: str) -> None:
+    assert violation(command, PROTECTED) == ""
+
+
+# --- round 4: a substitution opening with a group, siblings, case clauses -----
+
+SUBSTITUTION_OPENS_WITH_GROUP = [
+    'true || git checkout -b x "$( (true) )" && git commit -m x',
+    'true || git checkout -b x "$( { true; } )" && git commit -m x',
+    "true || git checkout -b x `(true)` && git commit -m x",
+    'echo "$(true || git checkout -b x "$( (true) )" && git commit -m x)"',
+    '! true | git checkout -b feat/x "$( (true) )" && git commit -m x',
+]
+
+
+@pytest.mark.parametrize("command", SUBSTITUTION_OPENS_WITH_GROUP)
+def test_violation_reads_a_group_opened_inside_a_substitution_as_its_own(
+    command: str,
+) -> None:
+    # The group belongs to the substitution: it is closed again before the `&&`.
+    assert violation(command, PROTECTED).startswith(COMMIT_REASON)
+
+
+@pytest.mark.parametrize(
+    "command",
+    [
+        'echo "$(true || git checkout -b y)" "$(git checkout -b x && git commit -m x)"',
+        'echo "$(! true)" "$(git checkout -b x && git commit -m x)"',
+    ],
+)
+def test_violation_does_not_carry_state_into_a_sibling_substitution(
+    command: str,
+) -> None:
+    assert violation(command, PROTECTED) == ""
+
+
+@pytest.mark.parametrize("terminator", [";;", ";&", ";;&"])
+@pytest.mark.parametrize(
+    "scope", ["true || git checkout -b y", "! true | git checkout -b y"]
+)
+def test_violation_ends_a_scope_at_a_case_clause_terminator(
+    scope: str, terminator: str
+) -> None:
+    command = (
+        f"case $v in a) {scope} {terminator} "
+        "b) git checkout -b x && git commit -m x ;; esac"
+    )
+
+    assert violation(command, PROTECTED) == ""
+
+
+def test_violation_pins_a_group_after_a_negation_ended_by_a_newline_as_refused() -> (
+    None
+):
+    # Accepted over-refusal, the same as at 43eeea3: bash commits on `x`, but a
+    # newline between a `!` list and a `{` is not told from one inside it.
+    command = "! true\n{ git checkout -b x && git commit -m x; }"
+
+    assert violation(command, PROTECTED).startswith(COMMIT_REASON)
