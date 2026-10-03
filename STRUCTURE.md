@@ -137,7 +137,39 @@ for command substitutions inside a word: `echo "$(git commit -m x)"` refused on 
 allowed. Five round 1 tests that pinned the old behaviour were rewritten to the new one — the
 substitution miss, the three that pin where an extracted command sits in `segments`' output, and
 the unresolvable switch across a weak join — and the `UNMODELLED_OPENERS` pin gained the funsub
-openers. The rest of the round's suite is written at step 5.
+openers. The rest of the round's suite follows the reproduction, each group checked against real
+bash with `git` shadowed:
+
+- **Substitution positions** — twenty-two positions a `$( )` sits in (assignments, `${x:-…}`,
+  tests, here-strings, redirections, `for`/`case` words, arrays, `printf -v`, `$[ ]`, wrappers,
+  subshells, nesting) refused on `main`, a push form from a branch; `segments` puts each
+  extracted command at depth 1 before the command containing it, with `SUBSTITUTED` on that
+  command, the first group inheriting its separator, two groups in a row, two levels closing,
+  and the pipeline's own `"$(cat <<'EOF' … EOF\n)"` form with a `)` and an apostrophe in it;
+  forged group marks and placeholders in the input are blanked.
+- **Backticks and process substitution** — every position, nested, and `<( )`/`>( )` in either
+  direction, replaced whole by the placeholder; PowerShell escapes (`` `n ``, `` `t ``, an
+  unpaired backtick before a `#`) no longer hide a later push or misplace the slot.
+- **Order and trust** — the substitution runs before its command (three forms and a nested one),
+  `&&` trust carried into and through groups, an empty group leaving the separator alone, a
+  switch inside a substitution widening the command's branches (two pinned over-refusals), and a
+  switch aimed at another repository ignored.
+- **Main as any branch it could be** — an untrusted switch to `main` after `;`, a newline, `||`,
+  `&`, `|`, a subshell or a substitution; a switch elsewhere allowed; the commit, push, then
+  unresolved order of reasons; a switch target a substitution made refused as unresolvable
+  (`-b`/`-c` excepted), with `switch_target` pinned on the placeholder.
+- **Funsub** — every opener, inside double quotes too, refused on `main` with the reason naming
+  it, allowed elsewhere or when it names neither commit nor push.
+- **Harmless and literal text** — `git status` in a substitution, single-quoted and escaped
+  `$(`, plain arithmetic and an empty group allowed on `main`.
+- **`case` patterns and arithmetic** — a pattern's `)` inside a `$( )`, a backtick or a heredoc
+  body no longer closes it, `case` as an argument opens nothing, a `case` outside any
+  substitution still reads; a substitution inside `$(( ))` or `(( ))`, quoted or not, is judged
+  while plain arithmetic is left alone.
+- **Limits and failure** — thousands of nested or unclosed openers finish quickly and play safe
+  on `main`, a nesting past the limit is pinned as unjudged off `main`, an internal error is
+  refused on `main` and allowed elsewhere (`violation` and `main`), and the recorded misses (a
+  lone `'` inside a quoted `${ }`) are pinned so changing them is a decision.
 
 ### `tests/test_plan_state.py`
 
@@ -322,15 +354,22 @@ comments, backtick-escaped quotes, bash 5.3's `${ cmd; }`. It does not guess: wi
 `push` is refused with its own message, and anywhere else it is judged as parsed.
 
 Bash runs a command substitution before the command around it, wherever it sits in a word,
-so the pass takes each one out — `$( )` quoted or not, backticks, `<( )` and `>( )`, and
-the ones in an unquoted heredoc body — and writes it, between two private marks (`\x1d`,
-`\x1e`, blanked if the input carries them), in front of the simple command that contains
-it. The word keeps a placeholder, `_`. `segments` reads the marks as `Segment.depth`, so
-the extracted commands get every rule a plain command gets: separators, `&&` trust,
-wrappers, subshells, nesting. `violation` runs a substitution on the branches in effect for
-its containing command, and a switch inside it counts for that command. A backtick inside
-double quotes also stays in the text, because PowerShell reads it as an escape; a
-substitution that never closes stays in the text and is not extracted.
+so the pass takes each one out — `$( )` quoted or not, backticks, `<( )` and `>( )`, the
+inside of `$(( ))` and `(( ))`, and the ones in an unquoted heredoc body — and writes it,
+between two private marks (`\x1d`, `\x1e`, blanked if the input carries them), in front of the
+simple command that contains it. The end of a `$( )` is found by the pass's own walk, which
+reads the `)` of a `case` pattern as the pattern's and not the substitution's. The word keeps
+a placeholder (`\x1f`, shown as `_` by `segments`; `violation` sees it as it is, so a switch
+target a substitution made is told from a branch name). `segments` reads the marks as
+`Segment.depth`, so the extracted commands get every rule a plain command gets: separators,
+`&&` trust, wrappers, subshells, nesting; a substitution that runs nothing leaves no trace.
+`violation` runs a substitution on the branches in effect for its containing command, and a
+switch inside it counts for that command. A backtick inside double quotes also stays in the
+text, because PowerShell reads it as an escape, and one with no partner is only a character; a
+substitution that never closes stays in the text and is not extracted. Reading a command is
+budgeted in proportion to its length: past it, `_prepare` gives the command back unchanged and
+flagged, which plays safe on `main`, and a failure of any kind in `violation` is treated as
+unreadable input — refused on `main` when it names `commit` or `push`, allowed elsewhere.
 
 A push's destination is read with the same care. The arguments are walked rather than
 filtered, so an option that takes a value — `-o`, `--push-option`, `--repo`,
@@ -341,7 +380,7 @@ taken, `refs/heads/` stripped, backticks removed and `@` read as `HEAD`. Switch 
 through the same reduction, so `git checkout refs/heads/main` is a switch to `main`.
 
 A branch switch whose target only the running shell can resolve — `git checkout -`,
-`@{-1}` — leaves the branch *unknown* rather than unchanged, and a `commit` or `push` that
+`@{-1}`, a word a command substitution made — leaves the branch *unknown* rather than unchanged, and a `commit` or `push` that
 meets an unknown branch is refused with a message saying so rather than the one about
 `main`. Stdlib only.
 
@@ -349,10 +388,10 @@ meets an unknown branch is refused with a message saying so rather than the one 
 |---|---|
 | `Segment` | Frozen dataclass: `tokens`, the `separator` that preceded them — one of `SEPARATORS`, a newline, a grouping delimiter (`""` for the first) or `SUBSTITUTED` — and `depth: int = 0`, the number of command substitutions the invocation sits inside. |
 | `SUBSTITUTED: str` | `"$("`, the separator of an invocation whose command substitutions ran immediately before it. |
-| `segments(command: str) -> list[Segment] \| None` | Split a command into invocations after comments, continuations and heredoc bodies are removed, or None if it cannot be read: an unbalanced quote or a trailing backslash. A heredoc whose delimiter never arrives takes the rest of the input as its body. Every command substitution becomes invocations of its own, one depth deeper, immediately before the invocation that contains it. |
+| `segments(command: str) -> list[Segment] \| None` | Split a command into invocations after comments, continuations and heredoc bodies are removed, or None if it cannot be read: an unbalanced quote or a trailing backslash. A heredoc whose delimiter never arrives takes the rest of the input as its body. Every command substitution, arithmetic expansion's included, becomes invocations of its own, one depth deeper, immediately before the invocation that contains it; a word that held one reads `_`. |
 | `git_subcommand(tokens: tuple[str, ...]) -> tuple[str, tuple[str, ...]]` | Identify the git subcommand and its arguments. |
 | `push_targets_main(args: tuple[str, ...], branch: str) -> bool` | Whether a push would update `main`. |
-| `switch_target(subcommand: str, args: tuple[str, ...]) -> str` | The branch a `checkout`/`switch` moves to, `""` when it moves none, or the sentinel `UNRESOLVED` (`"?"`) for a target only the running shell can resolve — `-` and `@{-1}`. |
+| `switch_target(subcommand: str, args: tuple[str, ...]) -> str` | The branch a `checkout`/`switch` moves to, `""` when it moves none, or the sentinel `UNRESOLVED` (`"?"`) for a target only the running shell can resolve — `-`, `@{-1}`, or a word a command substitution made (for `-B` and `-C`, the name they take). |
 | `violation(command: str, branch: str) -> str` | The reason to refuse, or `""` to allow. Judges every invocation, substitutions included, against every branch it may run on. While `main` is checked out, a command carrying any of `UNMODELLED_OPENERS` that names `commit` or `push` is refused outright. |
 | `UNMODELLED_OPENERS: tuple[str, ...]` | `("$'", "@'", '@"', "<#", "`'", '`"', "${ ", "${\t", "${\n", "${\|")`: the openers of syntax the pre-pass does not read — an ANSI-C string, a PowerShell here-string, a PowerShell block comment, a backtick-escaped quote, bash 5.3's `${ cmd; }`. Each is matched as a prefix. Looked for outside quotes, and `` `" `` and the `${` forms inside double quotes too. A command carrying one is what `violation` refuses on `main` when it names `commit` or `push`. |
 | `main() -> None` | Entry point: allow or refuse the command. |

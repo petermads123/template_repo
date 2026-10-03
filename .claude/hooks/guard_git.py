@@ -32,23 +32,33 @@ unreadable input always was.
 Bash runs a command substitution before the command around it, wherever it
 sits in a word, so the pass takes each one out and writes it, between two
 private marks, in front of the simple command that contains it; the word keeps
-a placeholder, `_`. That covers `$( )` quoted or not, backticks, `<( )` and
-`>( )`, and nests. `segments` reads the marks as a depth, so the extracted
-commands get every rule a plain command gets, separators, `&&` trust,
-wrappers and subshells included. A heredoc body is data only when any part of
-its delimiter is quoted (`<<'EOF'`, `<<"EOF"`, a backslash before a letter).
-After an unquoted one bash expands the body and runs its `$( )` and backtick
-substitutions, so those are extracted the same way, in front of the command
-that opened the heredoc, and the rest of the body is dropped: an escaped `$(`
-is text, `$(( ))` is arithmetic and `${ }` is a parameter, none of them a
-command, while a substitution inside either of the last two still runs. A
-backtick inside double quotes is also left in the text, because PowerShell
-reads it as its escape character, so both readings are judged. A substitution
-that never closes is left in the text, not extracted. Known misses, all
-deliberate: a subcommand spelled with hex escapes or split quotes
-(`git co""mmit`) does not name `commit` to the raw-text search, and in
-`"${x:-'$(cmd)'}"` the single quotes are literal in bash but read as quoting
-here, which hides the substitution.
+a placeholder. That covers `$( )` quoted or not, backticks, `<( )` and `>( )`,
+the inside of `$(( ))` and `(( ))`, and nests. The end of a `$( )` is found by
+the pass's own walk, so a quote, a heredoc or the `)` of a `case` pattern inside
+it is read as it is outside one. `segments` reads the marks as a depth, so the
+extracted commands get every rule a plain command gets, separators, `&&` trust,
+wrappers and subshells included; a substitution that runs nothing leaves no
+trace. A heredoc body is data only when any part of its delimiter is quoted
+(`<<'EOF'`, `<<"EOF"`, a backslash before a letter). After an unquoted one bash
+expands the body and runs its `$( )` and backtick substitutions, so those are
+extracted the same way, in front of the command that opened the heredoc, and
+the rest of the body is dropped: an escaped `$(` is text, `$(( ))` is
+arithmetic and `${ }` is a parameter, none of them a command, while a
+substitution inside either of the last two still runs. A backtick inside double
+quotes is also left in the text, because PowerShell reads it as its escape
+character, so both readings are judged; one with no partner is just a
+character. A substitution that never closes is left in the text, not
+extracted. Known misses, all deliberate: a subcommand spelled with hex escapes
+or split quotes (`git co""mmit`) does not name `commit` to the raw-text search;
+in `"${x:-'$(cmd)'}"` the single quotes are literal in bash but read as quoting
+here, which hides the substitution, and so does a lone `'` in a quoted
+parameter, as in `echo "${x:-'}" "$(cmd)" "'}"`; a push whose remote or
+refspec is made by a substitution (`git push origin "$(git branch
+--show-current)"`) is read as naming a branch called `_`; and substitutions
+nested more than 30 deep are not followed, so off `main` the text past that is
+not judged, while on `main` it plays safe. A command that costs more to read
+than its length explains, or on which the guard fails for any reason, is
+treated as unreadable.
 
 Each segment is judged against the branches that may be checked out when it
 runs, not the one checked out now: `git checkout -b feat/x && git commit` is
@@ -58,7 +68,9 @@ the commit runs whether the switch worked or not -- so across those HEAD may be
 on the branch it started on or on any branch switched to since, and a commit
 or push is refused if `main` is one of them. A substitution runs on the
 branches in effect for the command that contains it, and a switch inside it
-counts for that command and for what follows.
+counts for that command and for what follows. A switch whose target a
+substitution made (`git checkout "$(echo main)"`) is one only the shell can
+resolve, except after `-b` and `-c`, which cannot land on a branch that exists.
 
 What still cannot be read is refused rather than allowed when it names `commit`
 or `push` and `main` is checked out. Such a command would usually fail in the

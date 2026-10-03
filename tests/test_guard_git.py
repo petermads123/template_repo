@@ -2472,3 +2472,17 @@ def test_violation_misses_a_substitution_after_a_quote_inside_a_quoted_parameter
     # In bash the single quote inside `"${...}"` is literal and the substitution
     # runs; the `${ }` frame reads it as quoting and hides the text. Recorded.
     assert violation(command, PROTECTED) == ""
+
+
+# --- switches inside a substitution, and a detached HEAD ---------------------
+
+
+def test_violation_cannot_resolve_a_switch_inside_a_substitution() -> None:
+    command = 'git commit -m "$(git checkout -)x"'
+
+    assert violation(command, OTHER).startswith(UNRESOLVED_REASON)
+
+
+def test_violation_judges_a_substitution_in_a_detached_head() -> None:
+    assert violation('echo "$(git push origin HEAD:main)"', "").startswith(PUSH_REASON)
+    assert violation('echo "$(git commit -m x)"', "") == ""

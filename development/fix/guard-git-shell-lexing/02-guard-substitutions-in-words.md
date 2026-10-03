@@ -1,6 +1,6 @@
 # The git guard judges command substitutions inside a word
 
-<!-- claude-plan step=5 status=active -->
+<!-- claude-plan step=6 status=active -->
 
 | Field | Value |
 |---|---|
@@ -17,7 +17,7 @@
 | 2 | Plan | `/plan` | with the user | done |
 | 3 | Implement | `/implement` | in `/build` | done |
 | 4 | Verify | `/verify` | in `/build` | done |
-| 5 | Test | `/test` | in `/build` | pending |
+| 5 | Test | `/test` | in `/build` | done |
 | 6 | Concept check | `/concept-check` | in `/build` | pending |
 | 7 | Ship | `/ship` | in `/build` | pending |
 | 8 | Recommend | `/recommend` | with the user | pending |
@@ -435,6 +435,16 @@ The command is allowed (empty reason) while bash runs git: the shape the Defect 
 - The refusal order in `violation` is main/commit, then push, then unresolved (guide step 7). Where both used to apply the old guard gave the unresolved message first; no existing test pins that.
 - Oracle note for step 6: a bash `git()` that keeps `HEAD` in a shell variable is wrong across `$( )`/`<( )` subshells, where the change is lost. A file-backed `HEAD` is used instead (`scratchpad/oracle.py`); with it the guard never allowed what bash ran onto `main`, and refused extra only where it plays safe (a `;` after a switch, concurrent `<( )`).
 
+**Bugs the step 5 readers and tests found, fixed in place (all inside section 1: A2, A5, A8, A9).** Each was confirmed in bash with `git` shadowed before the fix, and no public signature changed:
+
+- **A `case` pattern's `)` ended a `$( )` early** (A2, A9; a regression against `f8775d0` for the unquoted form). `_scan` now tracks `case … esac` per frame depth, reading `case` and `esac` only as words at a command position, and a `)` at a open `case`'s own depth closes nothing. The end of a `$( )` inside an unquoted heredoc body is found by the same walk (`_body_substitutions` no longer uses a separate matcher, so `_close_paren` and the double-quote branch of `_quoted_end` are gone, and with them the unbounded recursion).
+- **Substitutions inside `$(( ))` and `(( ))` were copied through unread** (A2). They are extracted like those of a heredoc body (`_body_substitutions` now serves both); the arithmetic text is replaced by the placeholder only when something was extracted from it.
+- **An unpaired backtick inside double quotes** (PowerShell's escape) pushed a backtick frame, turned the string state off and let a following `#` comment out the rest, losing a later `git push origin main`, or misplaced the slot (A3, A5). It is now a plain character, and a kept-in-place pair that contains an odd number of quotes closes the string. The decision is no worse than `f8775d0` on every input tried and better on four.
+- **A hostile or deeply nested command could crash or stall the hook** (A9: the hook exits 1 or times out, and both let the command run). Reading is budgeted (`20 * len + 50000` steps, shared by every walk, charged in `_scan`, `_arith_end` and `_body_substitutions`); past it `_prepare` returns the command unchanged and flagged, so `main` plays safe. `violation` now catches any exception and treats it as unreadable input (refused on `main` when it names `commit` or `push`, allowed elsewhere). Measured: 1500 nested `$(` in a heredoc body went from `RecursionError` to 0.35 s, 6000 unclosed openers 0.35 s.
+- **An empty `$( )` or a pair of double backticks lost `&&` trust** (A8, A5). `segments` now leaves the separator exactly as it was when a group ran no invocation.
+- **A switch target a substitution made** was read as a branch called `_` (the Class row's "target only the shell can resolve", A6). The placeholder is now `\x1f` inside the module and `segments` shows it as `_`, so `switch_target` can return `UNRESOLVED` for `git checkout "$(echo main)"`, `-B`/`-C` with a substituted name, and a name with a substitution in it; `-b`/`-c` still read as a switch away.
+- Docstrings corrected: `_strip_substitution`, `_branch_name`, `Segment.separator`, `segments`, `switch_target`, and the module's "known misses" sentence.
+
 ---
 
 ## 4. Verification log
@@ -488,12 +498,37 @@ None amends section 1.
 
 > Written in step 5: the dynamic half.
 
+Round 2 added 196 test cases to `tests/test_guard_git.py` (501 to 697 in the whole suite), beyond the reproduction test step 3 added, which is unchanged. Two readers worked it, `contract` and `input-space`; every "bash does X" claim in their reports was checked by running bash with `git` shadowed by a function that records `HEAD` in a file. PowerShell claims could not be run (`pwsh` is not installed) and rest on `violation()` alone.
+
 | Intent | Test names | Result |
 |---|---|---|
+| T1 (A1) reproduction, red then green | `test_violation_refuses_a_commit_in_a_double_quoted_substitution_on_main` (step 3, unchanged); `test_violation_allows_a_commit_in_a_substitution_off_main` | pass |
+| T2 (A2) every position, push from a branch, `segments` shape | `test_violation_refuses_a_commit_in_every_substitution_position` (22), `test_violation_refuses_a_push_in_a_quoted_assignment_on_main_and_from_a_branch`, `test_violation_refuses_a_push_to_main_inside_a_substitution_from_a_branch` (6), `test_segments_puts_a_quoted_substitution_before_the_command_around_it`, `test_segments_gives_the_first_group_the_separator_of_its_command`, `test_segments_marks_a_second_group_substituted_too`, `test_segments_closes_two_levels_one_after_the_other`, `test_segments_returns_to_an_operator_after_the_command_around_a_group`, `test_segments_keeps_a_newline_inside_a_group_out_of_the_outer_separator`, `test_segments_two_argument_construction_is_depth_zero`, `test_segments_blanks_group_marks_and_the_placeholder_it_was_given`, `test_violation_cannot_be_given_a_forged_group_to_hide_behind`, `test_segments_leaves_an_unclosed_substitution_in_the_text` | pass |
+| T3 (A3) backticks, PowerShell escapes | `test_violation_refuses_a_commit_in_a_backtick_in_every_position` (7), `test_violation_refuses_a_push_to_main_in_a_backtick_from_a_branch`, `test_violation_still_sees_a_push_after_a_powershell_escape` (4), `test_violation_allows_a_powershell_message_with_escapes`, `test_segments_keeps_a_double_quoted_backtick_in_the_text`, `test_violation_reads_the_slot_right_after_an_unpaired_powershell_backtick`, `test_violation_is_no_worse_than_before_for_a_backtick_between_commands` | pass |
+| T4 (A4) process substitution | `test_violation_refuses_a_commit_in_a_process_substitution` (4), `test_segments_replaces_a_whole_process_substitution_with_the_placeholder`; the push forms are in the T2 push test | pass |
+| T5 (A5) order, trust | `test_violation_runs_a_substitution_before_the_command_around_it` (5), `test_violation_carries_and_trust_into_and_through_a_substitution` (10), `test_violation_does_not_trust_a_switch_a_substitution_may_not_have_made` (2), `test_violation_deliberately_over_refuses_a_switch_inside_a_substitution` (2, pinned), `test_violation_orders_groups_as_they_are_written`, `test_violation_does_not_follow_a_switch_aimed_at_another_repository`, `test_violation_cannot_resolve_a_switch_inside_a_substitution` | pass |
+| T6 (A6) main as any branch | `test_violation_refuses_a_commit_when_main_is_any_branch_it_could_land_on` (8), `test_violation_refuses_a_push_after_a_switch_to_main_that_may_have_failed`, `test_violation_allows_a_commit_after_an_untrusted_switch_to_another_branch`, `test_violation_still_refuses_after_an_untrusted_switch_away_from_main`, `test_violation_gives_the_commit_reason_then_push_then_unresolved` (4), `test_violation_cannot_resolve_a_switch_target_a_substitution_made` (7), `test_violation_reads_a_new_branch_named_by_a_substitution_as_a_switch_away` (2), `test_switch_target_marks_a_placeholder_target_unresolved`, `test_violation_allows_a_harmless_command_after_a_substituted_switch_target`, `test_violation_judges_a_substitution_in_a_detached_head` | pass |
+| T7 (A7) funsub | `test_violation_plays_safe_on_every_funsub_opener` (6), `test_violation_allows_a_funsub_off_main` (6), `test_violation_allows_a_funsub_on_main_that_names_neither_commit_nor_push`, `test_violation_does_not_mistake_a_parameter_expansion_for_a_funsub`; the opener pin is `test_unmodelled_openers_is_the_documented_set` | pass |
+| T8 (A8) harmless, the pipeline's form | `test_violation_leaves_harmless_and_literal_substitutions_alone` (12), `test_violation_reads_the_pipelines_own_commit_form` (2), `test_violation_reads_a_quote_inside_a_double_quote_around_a_substitution`, `test_violation_flags_ansi_c_quoting_around_a_substitution_on_main_only` | pass |
+| T9 (A9) the five rewritten round 1 tests and the rest of the suite | the 409 round 1 tests plus the five rewrites, all green; the differential is step 6's. A first look (not the step 6 table): over the 508 `(command, branch)` inputs the suite passes to `violation`, each run on `main` and on `feat/x` as well, the guard at `f8775d0` and this one differ on 155 and every difference is base-allow to new-refuse, and every one contains a substitution, a funsub opener or an untrusted switch to `main` or an unresolvable target, bar one: a forged group mark in the input (`\x1egit commit -m x`), which step 3 made the guard blank, so the old guard read `\x1egit` as a word and this one reads `git` | pass |
+| Bugs found by the readers (not in T1 to T9) | `test_violation_refuses_a_commit_after_a_case_pattern_inside_a_substitution` (12), `test_violation_closes_a_substitution_at_its_own_paren_after_a_case`, `test_violation_reads_case_as_a_word_only_where_a_command_could_start`, `test_segments_keeps_a_case_pattern_paren_inside_the_group`, `test_violation_still_reads_a_case_statement_outside_any_substitution` (3), `test_violation_refuses_a_commit_inside_an_arithmetic_expansion` (9), `test_violation_refuses_a_push_inside_arithmetic_from_a_branch`, `test_segments_puts_an_arithmetic_substitution_before_its_command`, `test_violation_leaves_plain_arithmetic_alone` (3), `test_segments_extracts_nothing_from_plain_arithmetic`, `test_segments_gives_an_empty_group_no_say_in_the_separator`, `test_segments_ignores_a_group_that_ran_nothing` (4), `test_violation_survives_a_deeply_nested_heredoc_body_substitution`, `test_violation_stays_fast_with_thousands_of_unclosed_openers`, `test_violation_stays_fast_and_plays_safe_on_a_hostile_run_of_openers` (5), `test_violation_refuses_what_it_cannot_finish_reading_on_main`, `test_prepare_gives_up_in_time_and_says_so`, `test_violation_judges_a_push_up_to_the_nesting_limit` (2), `test_violation_refuses_on_main_when_the_guard_itself_fails`, `test_main_exits_2_when_the_guard_fails_on_main` | pass |
+| Recorded misses, pinned | `test_violation_misses_a_substitution_after_a_quote_inside_a_quoted_parameter` (2), `test_violation_does_not_judge_substitutions_nested_past_the_limit_off_main` | pass |
+
+Gates after the step: `ruff check .` clean, `ruff format --check .` clean, `mypy` clean, `pytest` 697 passed.
 
 Edge cases considered and deliberately skipped, with reasons:
 
----
+- **`x="$(git checkout main)" || git commit -m x` from a branch.** Bash does not commit (the assignment succeeds, so the `||` side is skipped); the guard refuses. A safe over-refusal of the `||` rule A6 sets; not pinned, because pinning an over-refusal for every separator would be noise. The two over-refusals that matter for the pipeline's own idioms are pinned (T5).
+- **The commit-position `case` heuristics** (an assignment prefix or a wrapper before `case`, `case` after `!` or `time`, a `case` with no `esac`). `case` is read only as a word at a command position, which covers the forms written by hand; the others read as before and bash itself rejects the last.
+- **Timing bounds in tests** are loose (5 s and 10 s against a measured 0.3 to 1.2 s), because a tight bound would flake on a slow runner; the quadratic behaviour they guard against took tens of seconds.
+- **PowerShell semantics** (`` `n ``, `if ($?) { }`) are tested through `violation()` only. `pwsh` is not installed, so what PowerShell does with them is unverified here.
+
+Recorded for step 8, not fixed or pinned as allowed (outside section 1 or a different question):
+
+1. **A push remote or refspec made by a substitution** (`git push origin "$(git branch --show-current)"` on `main`) is read as naming a branch called `_`, and is allowed. Verified in bash: it pushes `main`. The same on `f8775d0`. A different question from a switch target (a push has no "unresolved" state to refuse on), and the common agent idiom, so worth a round.
+2. **`"${x:-'}"` and `"${x:-'$(cmd)'}"`**: in bash the single quote inside double-quoted `${ }` is literal and a later `$(git commit)` runs; the `brace` frame reads it as quoting and hides the substitution. Verified in bash; the module docstring's recorded misses now name both shapes, and both are pinned.
+3. **Substitutions nested past 30 off `main`** are not judged (`echo "$(` repeated 31 times then `git push origin main` from a branch is allowed); on `main` the command plays safe. Pinned as recorded behaviour.
+4. **A substituted name given to `git checkout -b`** is read as a switch away although bash would create `main` if it did not exist yet. An unreachable edge in a repository that has a `main`.
 
 ## 6. Concept check
 
