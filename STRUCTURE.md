@@ -169,7 +169,7 @@ bash with `git` shadowed:
 - **Limits and failure** — thousands of nested or unclosed openers finish quickly and play safe
   on `main`, a nesting past the limit is pinned as unjudged off `main`, an internal error is
   refused on `main` and allowed elsewhere (`violation` and `main`), and the recorded misses (a
-  lone `'` inside a quoted `${ }`) are pinned so changing them is a decision.
+  lone `'` inside a quoted `${ }`) are pinned so changing them is a decision; a `git checkout -` inside a substitution refuses the command as unresolvable, and a detached HEAD (`""`) still refuses a push to `main` inside a substitution while allowing a commit.
 
 ### `tests/test_plan_state.py`
 
@@ -350,7 +350,7 @@ backticks, double quotes, `$(( ))` and `(( ))` — because the rules change ther
 quotes, which the raw-text search does not read as `commit`, and `"${x:-'$(cmd)'}"`, whose
 single quotes are literal in bash but read as quoting here. The pass also reports a construct
 it does not read — a pair in `UNMODELLED_OPENERS`: `$'...'`, PowerShell here-strings, `<# #>`
-comments, backtick-escaped quotes, bash 5.3's `${ cmd; }`. It does not guess: with `main` checked out, such a command that names `commit` or
+comments, backtick-escaped quotes, bash 5.3's `${ cmd; }` and `${| cmd; }`. It does not guess: with `main` checked out, such a command that names `commit` or
 `push` is refused with its own message, and anywhere else it is judged as parsed.
 
 Bash runs a command substitution before the command around it, wherever it sits in a word,
@@ -367,7 +367,7 @@ target a substitution made is told from a branch name). `segments` reads the mar
 switch inside it counts for that command. A backtick inside double quotes also stays in the
 text, because PowerShell reads it as an escape, and one with no partner is only a character; a
 substitution that never closes stays in the text and is not extracted. Reading a command is
-budgeted in proportion to its length: past it, `_prepare` gives the command back unchanged and
+budgeted in proportion to its length: past it, the pass gives the command back unchanged and
 flagged, which plays safe on `main`, and a failure of any kind in `violation` is treated as
 unreadable input — refused on `main` when it names `commit` or `push`, allowed elsewhere.
 
@@ -388,12 +388,12 @@ meets an unknown branch is refused with a message saying so rather than the one 
 |---|---|
 | `Segment` | Frozen dataclass: `tokens`, the `separator` that preceded them — one of `SEPARATORS`, a newline, a grouping delimiter (`""` for the first) or `SUBSTITUTED` — and `depth: int = 0`, the number of command substitutions the invocation sits inside. |
 | `SUBSTITUTED: str` | `"$("`, the separator of an invocation whose command substitutions ran immediately before it. |
-| `segments(command: str) -> list[Segment] \| None` | Split a command into invocations after comments, continuations and heredoc bodies are removed, or None if it cannot be read: an unbalanced quote or a trailing backslash. A heredoc whose delimiter never arrives takes the rest of the input as its body. Every command substitution, arithmetic expansion's included, becomes invocations of its own, one depth deeper, immediately before the invocation that contains it; a word that held one reads `_`. |
+| `segments(command: str) -> list[Segment] \| None` | Split a command into invocations after comments, continuations and heredoc bodies are removed, or None if it cannot be read: an unbalanced quote or a trailing backslash. A heredoc whose delimiter never arrives takes the rest of the input as its body. Every command substitution — in a word, in backticks, in `<( )`/`>( )`, in an arithmetic expansion or in an unquoted heredoc body — becomes invocations of its own, one depth deeper, immediately before the invocation that contains it, which is marked `SUBSTITUTED`; the first of them inherits the separator that preceded the containing invocation, and a substitution that runs nothing leaves no trace. A word that held one reads `_`. |
 | `git_subcommand(tokens: tuple[str, ...]) -> tuple[str, tuple[str, ...]]` | Identify the git subcommand and its arguments. |
 | `push_targets_main(args: tuple[str, ...], branch: str) -> bool` | Whether a push would update `main`. |
 | `switch_target(subcommand: str, args: tuple[str, ...]) -> str` | The branch a `checkout`/`switch` moves to, `""` when it moves none, or the sentinel `UNRESOLVED` (`"?"`) for a target only the running shell can resolve — `-`, `@{-1}`, or a word a command substitution made (for `-B` and `-C`, the name they take). |
-| `violation(command: str, branch: str) -> str` | The reason to refuse, or `""` to allow. Judges every invocation, substitutions included, against every branch it may run on. While `main` is checked out, a command carrying any of `UNMODELLED_OPENERS` that names `commit` or `push` is refused outright. |
-| `UNMODELLED_OPENERS: tuple[str, ...]` | `("$'", "@'", '@"', "<#", "`'", '`"', "${ ", "${\t", "${\n", "${\|")`: the openers of syntax the pre-pass does not read — an ANSI-C string, a PowerShell here-string, a PowerShell block comment, a backtick-escaped quote, bash 5.3's `${ cmd; }`. Each is matched as a prefix. Looked for outside quotes, and `` `" `` and the `${` forms inside double quotes too. A command carrying one is what `violation` refuses on `main` when it names `commit` or `push`. |
+| `violation(command: str, branch: str) -> str` | The reason to refuse, or `""` to allow. Judges every invocation, substitutions included, against every branch it may run on. While `main` is checked out, a command carrying any of `UNMODELLED_OPENERS` that names `commit` or `push` is refused outright. Never raises: a failure of any kind while judging is treated as unreadable input, refused on `main` when the command names `commit` or `push` and allowed elsewhere. |
+| `UNMODELLED_OPENERS: tuple[str, ...]` | `("$'", "@'", '@"', "<#", "`'", '`"', "${ ", "${\t", "${\n", "${\|")`: the openers of syntax the pre-pass does not read — an ANSI-C string, a PowerShell here-string, a PowerShell block comment, a backtick-escaped quote, bash 5.3's `${ cmd; }` and `${| cmd; }`. Each is matched as a prefix. Looked for outside quotes, and `` `" `` and the `${` forms inside double quotes too. A command carrying one is what `violation` refuses on `main` when it names `commit` or `push`. |
 | `main() -> None` | Entry point: allow or refuse the command. |
 
 ### `.claude/hooks/lint_py.py`

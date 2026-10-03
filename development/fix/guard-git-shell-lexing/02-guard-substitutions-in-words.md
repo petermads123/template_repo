@@ -1,6 +1,6 @@
 # The git guard judges command substitutions inside a word
 
-<!-- claude-plan step=6 status=active -->
+<!-- claude-plan step=3 status=active -->
 
 | Field | Value |
 |---|---|
@@ -15,9 +15,9 @@
 |---|---|---|---|---|
 | 1 | Conceptualize | `/conceptualize` | with the user | done |
 | 2 | Plan | `/plan` | with the user | done |
-| 3 | Implement | `/implement` | in `/build` | done |
-| 4 | Verify | `/verify` | in `/build` | done |
-| 5 | Test | `/test` | in `/build` | done |
+| 3 | Implement | `/implement` | in `/build` | in progress |
+| 4 | Verify | `/verify` | in `/build` | pending |
+| 5 | Test | `/test` | in `/build` | pending |
 | 6 | Concept check | `/concept-check` | in `/build` | pending |
 | 7 | Ship | `/ship` | in `/build` | pending |
 | 8 | Recommend | `/recommend` | with the user | pending |
@@ -535,11 +535,76 @@ Recorded for step 8, not fixed or pinned as allowed (outside section 1 or a diff
 > Written in step 6, against section 1 — not against section 2. The question is whether
 > the thing built is the thing agreed, not whether it matches the plan.
 
+Every command below was run against the tree at `2a962cb` (plus step 6's `STRUCTURE.md` edits) with `main` or `feat/x` as the branch; the scripts are in the scratchpad (`r6/a.py`, `r6/r1.py`, `r6/diff6.py`).
+
 | # | Criterion | Met | Evidence |
 |---|---|---|---|
-| A1 | | | |
+| A1 | Refuses `echo "$(git commit -m x)"` on `main` | yes | Reproduction test, red against `f8775d0` and green now (see below). |
+| A2 | `$( )` inside double quotes in every position | **partially** | All ten listed forms refused on `main`, and `out="$(git push origin main 2>&1)"` refused from `feat/x` (`r6/a.py`, 11 of 11). The differential found one shape that is not: `echo "$(cat <<EOF > f\n$(git push origin main)\nEOF)"` (delimiter glued to the `)`, which bash does not treat as a closing line, so the heredoc runs to the end of the input and bash still executes the body's `$(git push origin main)`) is **allowed from `feat/x`** while bash pushes `main` (oracle: `PUSH@feat/x origin main`). Refused on `main` (play-safe). The same body in the unquoted form `x=$(cat <<EOF\n$(git push origin main)\nEOF)` is refused from a branch; only the double-quote path misses. See "Drift". |
+| A3 | Backticks in every position | yes | The four forms refused on `main`, ``echo `git push origin main` `` refused from `feat/x` (`r6/a.py`); PowerShell escapes pinned by `test_violation_still_sees_a_push_after_a_powershell_escape` and `test_violation_allows_a_powershell_message_with_escapes` (pass). |
+| A4 | Process substitution | yes | `diff <(git commit -m x) /dev/null`, `tee >(git commit -m x) </dev/null` refused on `main`; `diff <(git push origin main) f` refused from `feat/x` (`r6/a.py`). |
+| A5 | Substitution runs before its command; `&&` trust carries in | yes | The three order forms refused from `feat/x`; `git checkout -b feat/y && out="$(git commit -m y)"` allowed on `main` (`r6/a.py`). Bash agrees on all of them (`scratchpad/oracle.py`, 18 cases x 2 branches: the guard never allows what bash lands on `main`; it over-refuses only where it plays safe). |
+| A6 | `main` as any branch it could land on | yes | The five untrusted-switch forms refused from `feat/x`; `git checkout feat/y; git commit -m x` allowed from `feat/x`; `git checkout -b feat/x; git commit -m x` refused on `main` (`r6/a.py`). |
+| A7 | Funsub plays safe | yes | The three forms refused on `main`, allowed from `feat/x`, and `echo ${ ls; }`, `echo ${| ls; }`, `echo "${ ls; }"` allowed on `main` (`r6/a.py`). `UNMODELLED_OPENERS` equals the ten-element tuple (`test_unmodelled_openers_is_the_documented_set`). |
+| A8 | Harmless substitutions left alone; the pipeline's commit form | yes | The four harmless commands allowed on `main`; the pipeline's `git commit -m "$(cat <<'EOF' ... EOF\n)"` and the apostrophe-and-`)` form refused on `main`, allowed on `feat/x`, and allowed on `main` after `git checkout -b x &&` (`r6/a.py`, 49 of 49 across A1-A8). |
+| A9 | Changes nothing else | **no** (one shape) | Tests and rest of suite: see the two blocks below. The differential: no regression and no unexplained difference, except the forged-mark input (accepted, below) and the bypass in A2 above, which is the only input where the new guard neither matches bash nor plays safe on `main`. |
 
-Drift found, and what was done about it:
+### Fix-round evidence
+
+**Reproduction criterion.** Red run: section 3 holds step 3's paste, run before any production change. Step 6 re-ran it: the test body copied unchanged into a scratch file and run against `git show f8775d0:.claude/hooks/guard_git.py` (scratchpad `r6/hooks`, never the tree):
+
+```
+E        +      where '' = violation('echo "$(git commit -m x)"', 'main')
+FAILED tests/test_repro.py::test_violation_refuses_a_commit_in_a_double_quoted_substitution_on_main
+1 failed
+```
+
+Green now, against the tree: `tests/test_guard_git.py::test_violation_refuses_a_commit_in_a_double_quoted_substitution_on_main PASSED`; whole suite `697 passed`, `ruff check .`, `ruff format --check .`, `mypy` clean.
+
+**Root cause removed where the Defect block puts it, not at the symptom.** Row (1): `_prepare`/`_scan` (`guard_git.py:710`, `:749`) now extract each substitution into a group of invocations that `segments` (`:1087`) places before the invocation that contains it, so `violation` judges text it used to pass through unseen; the heredoc extraction takes the same slot (order fix). Row (2): `violation` (`:1323`, `_judge` `:1344`) holds the set of branches and no longer falls back to the starting branch after a separator that guarantees nothing. No other file in the hook set changed, and `echo "$(git commit -m x)"` is refused because the inner command is judged, not because the word `commit` is searched for in the text.
+
+**Class (Scope: the class).** Every input the Class row lists has a test (Test log, section 5: T2 to T7 plus the readers' additions); funsub is the play-safe the user chose. The one bash 5.3 construct is unverified here by design.
+
+**Out of scope held.** `bash -c`, `eval`, aliases: no code reads a program's string argument. `WRAPPERS`, `OPTIONS_WITH_VALUE`, `PUSH_OPTIONS_WITH_VALUE`, `GIT_NAMES` unchanged in the diff against `f8775d0`. No reserved-word handling (`if git commit`, `do git push`, `! git commit`) was added. Hex-escaped subcommands untouched. Nothing was built outside section 1; the runaway-input budget and fail-closed `violation` (section 3) are internal hardening that a new recursive pass needs, they add no behaviour a criterion does not already imply.
+
+### A9: the differential (T9)
+
+Baseline: `git show f8775d0:.claude/hooks/guard_git.py` loaded from the scratchpad, registered in `sys.modules` before `exec`. Corpus: the 511 `(command, branch)` pairs the 606 tests in `tests/test_guard_git.py` pass to `violation` (442 distinct commands), captured by a scratch pytest plugin. Variants of each command: itself, `echo "$(C)"`, ``echo `C` ``, `cat <(C)`, `git checkout main;C`, `git checkout -;C`; each on `main` and `feat/x`. Oracle: bash with `git` shadowed, `HEAD` and the previous branch kept in files (a shell variable is lost in `$( )` subshells), `PATH` emptied so nothing but builtins runs, `stdin=/dev/null`, 10 s timeout in its own process group. Refuse = `COMMIT@main`, or a push `push_targets_main` reads as reaching `main`. Exempt, by name: the 13 hostile-nesting and limit inputs longer than 300 characters (nested `$(` 1500 deep, `echo "$(` repeated, `${${`, `((((`, `<(<(`, a run of backticks), because bash itself forks one process per level; they are compared base against new only for the plain form, and the suite's own limit tests cover them. Inputs bash rejects as a syntax error are exempt (PowerShell-only or deliberately unbalanced); the 31 plain ones are listed in the tool output and are the PowerShell here-strings, `<# #>`, `if ($?) { }` and backtick-`n` commands, and the unbalanced-quote and unclosed-substitution commands of round 1.
+
+| Variant | Judged | Same as base | Base allow, new refuse | of which bash lands on `main` | of which play-safe (substitution, funsub or switch present) | Base refuse, new allow | New allows, bash lands on `main` | Unaccepted |
+|---|---|---|---|---|---|---|---|---|
+| plain | 822 | 711 | 107 | 14 | 92 | 0 | 0 | 1 |
+| `"$( )"` | 738 | 472 | 261 | 81 | 180 | 5 | 2 | 0 |
+| backticks | 772 | 560 | 185 | 32 | 153 | 27 | 0 | 0 |
+| `<( )` | 748 | 537 | 189 | 38 | 151 | 22 | 0 | 0 |
+| `git checkout main;` prefix | 796 | 512 | 284 | 14 | 270 | 0 | 0 | 0 |
+| `git checkout -;` prefix | 796 | 508 | 288 | 14 | 274 | 0 | 0 | 0 |
+
+4,672 judged inputs in all, plus 502 more that bash rejected as a syntax error (exempt) and 4 plain inputs the baseline overflowed the stack on. Reading it:
+
+- **Base allow, new refuse** (1,314 rows): each one either lands on `main` in bash (193), or carries a substitution, a funsub opener or a switch (1,120 by pattern, the A9 exception set), and is the play-safe refusal when bash does not land. One row is in neither set: **`'\x1egit commit -m x'`**, a forged group mark in the input. Step 3's guide step 2 makes the guard blank `\x1d` and `\x1e` so input can never forge a group, which makes the guard read `git` where the old one read a word starting with a control character. Bash would run a command of that odd name, not git, so this is an over-refusal on an input no command contains; it was in the plan the user accepted. Recorded here as the single difference outside A9's literal exception set; the user can say whether A9's text should name it.
+- **Base refuse, new allow** (54 rows, every one bash does not land on `main`): ``echo `git checkout -b feat/x && git commit -m m` `` and the `<( )` twin run the switch and the commit in one subshell, so `main` is untouched (the old guard refused because it did not read the group at all), and four where an escaped `\$(` or a quoted `'"$(…)"'` keeps the text from running. The new decision matches bash, as A9 allows.
+- **New allows, bash lands on `main`** (2 rows, one shape): `echo "$(cat <<EOF > f\n$(git push origin main)\nEOF)"` and its backtick body, both from `feat/x` only. The base allowed these too; A9's wording says the new decision must match bash or be the play-safe refusal on `main`, and here it does neither from a branch. This is the A2 gap above.
+
+**A9 test clause.** `git diff f8775d0..HEAD -- tests/test_guard_git.py`, removed or modified lines only:
+
+| Changed test | In A9's five | Judgement |
+|---|---|---|
+| `test_violation_does_not_carry_an_unresolvable_switch_across_a_weak_join` (renamed `test_violation_refuses_after_an_unresolvable_switch_across_a_weak_join`) | yes | pins `git checkout - ; git commit` as allowed from a branch, which A6 refuses now |
+| `test_violation_does_not_look_inside_quotes_within_a_body_substitution` (renamed `test_violation_looks_inside_quotes_within_a_body_substitution`) | yes | pinned the miss |
+| `test_segments_puts_a_body_substitution_on_its_own_line_after_the_command` (renamed `..._before_the_command_that_opened_it`) | yes | pinned the after-order |
+| `test_segments_orders_dollar_paren_and_backtick_substitutions_as_written` | yes | pinned positions in `segments` |
+| `test_segments_unescapes_a_nested_backtick_pair_for_the_inner_command` | yes | dropped `parsed[1].tokens[0] == "echo"`, pinned a position |
+| `test_unmodelled_openers_is_the_documented_set` | **no, a sixth** | the constant's value is what the plan changes (A7, T7, Public API), so the assertion had to follow; the orchestrator judged it mechanical and told the user. It leaves A9 met in substance: no behaviour the old assertion guarded is lost (the six old openers are still the first six, in order). The literal text of A9 says "five", so the user should see this row. |
+| import list (`SUBSTITUTED` added) | n/a | |
+
+All other 409 round 1 tests are byte-identical and pass. `ruff`, `mypy` and `pytest` (697 passed) are clean.
+
+### Drift found, and what was done about it
+
+1. **A2/A9, unmet, one shape: an unquoted heredoc inside `"$( )"` whose closing delimiter is glued to the `)` is not judged from a branch.** Verified in bash (`r6/p1.py`, a throwaway script with `git` shadowed): bash 5.2 warns "here-document delimited by end-of-file", does not see `EOF)` as a closing line, expands the unquoted body and runs the `$(git push origin main)` in it. The guard's four relevant answers, `[main, feat/x]`: `echo "$(cat <<EOF > f\n$(git push origin main)\nEOF)"` `[refused, allowed]`; the same with a backtick body `[refused, allowed]`; the same without the double quotes (`x=$(cat <<EOF\n$(git push origin main)\nEOF)`) `[refused, refused]`; with a quoted `<<'EOF'` delimiter `[refused, allowed]`, which is right, bash treats that body as data. So the double-quote path loses what the unquoted path judges; on `main` the command is refused only because the unclosed substitution sets the unmodelled flag. Not a concept problem: A2 and A9 already say push-from-a-branch inside a double-quoted substitution is refused and the new decision must match bash. **Sent back to step 3**: make the double-quote path extract the body substitutions of an unquoted heredoc inside an unclosed `$( )` the way the unquoted path does, then add the regression test for it to step 5's file. First time this criterion has come back unmet.
+2. **Forged `\x1d`/`\x1e` in the input** reads differently from the baseline (over-refusal, plan-mandated). Not a code defect; surfaced above for the user, no change made.
+3. **`STRUCTURE.md`**, from the `structure-auditor` report: applied the `violation` "never raises" sentence, the private-name leak in the budget sentence, the `segments` row (all substitution kinds, `SUBSTITUTED`, the inherited separator, a substitution that runs nothing leaves no trace), `${| cmd; }` named beside `${ cmd; }` in two places, and the test entry's "Limits and failure" sentence for `git checkout -` and detached `HEAD`. Verified the stop gate's `structure_problems` cross-check (`tests/test_stop_gate.py` 46 passed).
 
 ### Earlier rounds still hold
 
@@ -548,8 +613,16 @@ Drift found, and what was done about it:
 > not sufficient — a criterion can be satisfied by tests that no longer describe what the
 > feature does.
 
+Re-run directly against the code as it stands (`r6/r1.py`, 25 commands, 0 failures) in addition to the 409 unchanged tests passing.
+
 | Round | # | Criterion | Still met | Evidence |
 |---|---|---|---|---|
+| 1 | A1 | The reported `python3 - <<'EOF'` with a stray quote is allowed on `main` | yes | allowed; `r6/r1.py` |
+| 1 | A2 | Heredoc body is data (quoted delimiters, `<<-`); `$( )`/backtick of an unquoted body judged on `main` and from a branch; command after the heredoc judged; `git commit -F - <<'EOF'` refused on `main`, allowed on `feat/x` | yes | data forms allowed; `cat <<EOF > f\n$(git commit -m x)\nEOF` refused on `main`; the backtick push refused on `main` and `feat/x`; the trailing commit refused; `commit -F -` refused/allowed as stated (11 checks, `r6/r1.py`) |
+| 1 | A3 | `#` read as bash reads it | yes | `# it's fine\ngit commit -m x\n# that's it` refused; `echo ok # git commit -m x` allowed; `echo ok#1 && git commit -m m` refused |
+| 1 | A4 | Backslash-newline joins | yes | `git \\\ncommit -m x` refused; `git \\\npush origin main` refused from `main` and `feat/x` |
+| 1 | A5 | Unmodelled forms play safe on `main` only | yes | `$'`, here-string, `<# #>`, backtick-quote and heredoc-plus-comment forms refused on `main` and allowed on `feat/x`; the same without commit or push allowed on `main` |
+| 1 | A6 | Changes nothing else: existing tests unmodified, differential, accepted `&&` plus `$'...'` cost | yes, with this round's declared exceptions | the 409 tests pass, with the six edits tabled in A9 above; the accepted cost (`git checkout -b x && git commit -m $'a'` on `main`) is still refused |
 
 ---
 
