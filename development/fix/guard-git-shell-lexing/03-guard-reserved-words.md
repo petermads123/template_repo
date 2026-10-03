@@ -515,7 +515,14 @@ Drift found, and what was done about it: none in the code. Out of scope kept out
 
 | # | Recommendation | Why it is critical | Effort | Decision |
 |---|---|---|---|---|
-| R1 | | | | |
+| R1 | A switch after `\|\|` only widens what a later `&&` trusts (`ok = here \| {target}`), as a `!`- or `coproc`-led switch already does | `a \|\| git checkout -b x && git commit` groups as `(a \|\| b) && c`: when `a` succeeds the switch is skipped and the commit runs on the starting branch. Checked in bash with `git` shadowed: `git rev-parse --verify feat/x \|\| git checkout -b feat/x && git commit -m x` and `git status \|\| git checkout -b x && git commit -m x` commit on `main` and the guard allows both; `git checkout main \|\| git checkout -b x && git commit -m x` from `feat/y` commits on `main`, allowed. A silent commit to `main` in ordinary shell; the trust rule dates from round 1, so it is outside round 3's promise (`defect-class` reader) | small | pending |
+
+Notes, not critical (kept here rather than in `DEVELOPMENT.md` at the user's instruction):
+
+- `command`, `exec`, `builtin` (and `eval`, `xargs`, which take a string or stdin) are not stepped as wrappers; `WRAPPERS` is deliberately incomplete.
+- The bash oracle lives in scratch scripts; an opt-in test that crosses every separator and leader against bash would have caught R1. Round 2's oracle ran with an empty `PATH` and was vacuous on commits (section 6).
+- Recorded at steps 5 and 6: a redirection on a compound command runs before its body; a variable switch target (`"$b"`); PowerShell glued braces and `ForEach-Object`/`%`; a `coproc`/`&` loop racing a foreground switch.
+- Pinned over-refusal to know about: `git checkout -b feat/x && for … done && git commit` and the `if … fi &&` form are refused on `main`.
 
 Decisions: `deferred`, `rejected`, or `next round` — a new numbered file in this folder,
 taken back through steps 1 to 7 on the same branch.
