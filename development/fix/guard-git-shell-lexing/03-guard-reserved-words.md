@@ -1,6 +1,6 @@
 # The git guard steps over shell reserved words
 
-<!-- claude-plan step=8 status=active -->
+<!-- claude-plan step=8 status=done -->
 
 | Field | Value |
 |---|---|
@@ -20,7 +20,7 @@
 | 5 | Test | `/test` | in `/build` | done |
 | 6 | Concept check | `/concept-check` | in `/build` | done |
 | 7 | Ship | `/ship` | in `/build` | done |
-| 8 | Recommend | `/recommend` | with the user | pending |
+| 8 | Recommend | `/recommend` | with the user | done |
 | 9 | Pull request | `/create-pr` | with the user | pending |
 | 10 | Review | `/watch-pr` | on the pull request | pending |
 
@@ -515,7 +515,7 @@ Drift found, and what was done about it: none in the code. Out of scope kept out
 
 | # | Recommendation | Why it is critical | Effort | Decision |
 |---|---|---|---|---|
-| R1 | A switch after `\|\|` only widens what a later `&&` trusts (`ok = here \| {target}`), as a `!`- or `coproc`-led switch already does | `a \|\| git checkout -b x && git commit` groups as `(a \|\| b) && c`: when `a` succeeds the switch is skipped and the commit runs on the starting branch. Checked in bash with `git` shadowed: `git rev-parse --verify feat/x \|\| git checkout -b feat/x && git commit -m x` and `git status \|\| git checkout -b x && git commit -m x` commit on `main` and the guard allows both; `git checkout main \|\| git checkout -b x && git commit -m x` from `feat/y` commits on `main`, allowed. A silent commit to `main` in ordinary shell; the trust rule dates from round 1, so it is outside round 3's promise (`defect-class` reader) | small | pending |
+| R1 | A switch after `\|\|` only widens what a later `&&` trusts (`ok = here \| {target}`), as a `!`- or `coproc`-led switch already does | `a \|\| git checkout -b x && git commit` groups as `(a \|\| b) && c`: when `a` succeeds the switch is skipped and the commit runs on the starting branch. Checked in bash with `git` shadowed: `git rev-parse --verify feat/x \|\| git checkout -b feat/x && git commit -m x` and `git status \|\| git checkout -b x && git commit -m x` commit on `main` and the guard allows both; `git checkout main \|\| git checkout -b x && git commit -m x` from `feat/y` commits on `main`, allowed. A silent commit to `main` in ordinary shell; the trust rule dates from round 1, so it is outside round 3's promise (`defect-class` reader) | small | next round — `04-guard-trust-after-or.md` |
 
 Notes, not critical (kept here rather than in `DEVELOPMENT.md` at the user's instruction):
 
