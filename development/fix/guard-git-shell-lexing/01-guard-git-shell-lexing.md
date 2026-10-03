@@ -104,7 +104,7 @@ All judged by the guard's decision with `main` checked out unless stated otherwi
 | A3 | Reads `#` as bash does: `# it's fine\ngit commit -m x\n# that's it` is refused; `echo ok # git commit -m x` is allowed; `echo ok#1 && git commit -m m` is still refused. |
 | A4 | Joins a backslash-newline: `git \\\ncommit -m x` is refused; `git \\\npush origin main` is refused from `main` and from `feat/x`. |
 | A5 | Plays safe on the rare forms: every remaining bypass from the reproduction — `echo $'it\'s'; git commit -m x # '`, the PowerShell here-string, `<# it's #>` and backtick-quote cases, and `cat <<EOF >/dev/null\nit's\nEOF\ngit commit -m x # '` — is refused on `main`. A command using one of these forms that names neither commit nor push is allowed on `main`, and all of them are allowed on `feat/x`. |
-| A6 | Changes nothing else: every existing test in `tests/test_guard_git.py` passes unmodified, and a differential over a corpus — every command string in the existing tests plus generated variations — gives the same allow/refuse decision as the guard on `main`, except for the inputs named in A1–A5. |
+| A6 | Changes nothing else: every existing test in `tests/test_guard_git.py` passes unmodified, and a differential over a corpus — every command the existing suite passes to the guard, plus generated variations — gives the same allow/refuse decision as the guard on `main`, except where the input contains a word-start `#`, an unquoted `<<`, a backslash-newline or an unmodelled construct *and* the new decision matches how bash reads the command (or is the play-safe refusal on `main`). One accepted cost: a command that switches branch with `&&` and then commits with a `$'...'` message on `main` is now refused. |
 
 ### Open questions
 
@@ -161,8 +161,8 @@ is added:
 | Signature | Module | Purpose | Covers |
 |---|---|---|---|
 | `segments(command: str) -> list[Segment] \| None` | `guard_git.py` | Unchanged signature. Now lexes the command after heredoc bodies, word-start comments and backslash-newlines have been removed; `None` also for a heredoc whose delimiter never arrives. | A1, A2, A3, A4, A6 |
-| `violation(command: str, branch: str) -> str` | `guard_git.py` | Unchanged signature. Refuses on `main` when the command carries an unmodelled construct and names commit or push, with a reason naming the construct kinds; otherwise judges as before. | A1–A6 |
-| `UNMODELLED_OPENERS: tuple[str, ...] = ("$'", "@'", '@"', "<#", "`'", '`"')` | `guard_git.py` | The character pairs, outside quotes, that open a construct the scanner does not read. | A5 |
+| `violation(command: str, branch: str) -> str` | `guard_git.py` | Unchanged signature. Refuses on `main` when the command carries an unmodelled construct and names commit or push, with the fixed reason in guide step 7; otherwise judges as before. | A1–A6 |
+| `UNMODELLED_OPENERS: tuple[str, ...] = ("$'", "@'", '@"', "<#", "`'", '`"')` | `guard_git.py` | The character pairs that open a construct the scanner does not read: all of them outside quotes, and `` `" `` inside double quotes too, where PowerShell uses it. | A5 |
 
 Private, for the build to write but not to list in `STRUCTURE.md`: `_prepare(command: str) ->
 tuple[str | None, bool]` — the transformed text (or `None` for an unterminated heredoc) and
@@ -179,22 +179,31 @@ whether an unmodelled opener was seen.
    double quotes; nothing escapes inside single quotes. Return `(command, False)` for now.
    Wire `segments()` to lex `_prepare(command)[0]`, returning `None` when it is `None`.
    Existing suite must still be 220 green — this proves the pass is an identity.
-3. **Backslash-newline.** Outside single quotes, delete `\` followed by `\n`. (A `\` inside a
-   comment is already gone with the comment, so `echo ok # path\` + newline + `git commit`
-   keeps its two lines.)
+3. **Backslash-newline.** Inside the scan, not as a regex pre-pass: outside single quotes, an
+   *unescaped* `\` followed by `\n` is deleted with it; `\\` + newline is an escaped backslash
+   and a real line break. (A `\` inside a comment is already gone with the comment, so
+   `echo ok # path\` + newline + `git commit` keeps its two lines.)
 4. **Comments.** Outside quotes, a `#` at the start of the string or after whitespace or one
    of `;&|()<>` and the newline starts a comment: skip to the next newline and keep that
    newline. `#` anywhere else (`ok#1`, `${#x}`, `$#`, `--grep=#12`) is an ordinary character;
-   keep `lexer.commenters = ""`.
+   keep `lexer.commenters = ""`. The newline that ends a comment is processed as an ordinary
+   unquoted newline, so heredocs queued earlier on that line start their bodies there
+   (`cat <<EOF # note` + newline + body).
 5. **Heredocs.** Outside quotes, `<<` not followed by a third `<` opens a heredoc: read an
-   optional `-`, optional blanks, then the delimiter word with any quotes removed (bash's
-   rule: the delimiter is the word with quote characters stripped). Emit the operator and the
-   word as written. Queue the heredoc. At the next unquoted newline, for each queued heredoc
+   optional `-`, optional blanks, then the delimiter word with quotes and backslashes removed
+   (bash's rule; `<<\EOF`, `<<'EOF'` and `<<"EOF"` all close on `EOF`). The word ends at the
+   first blank or bash metacharacter (`;&|()<>` or newline); `<<` with no word after it makes
+   the command unreadable (`None`). `<<<` is consumed as one unit and is not a heredoc. A `<<`
+   inside quotes — including `"$(cat <<'EOF' ... EOF
+)"`, the pipeline's own commit form — is
+   ordinary quoted text, as today. Emit the operator and the word as written. Queue the heredoc. At the next unquoted newline, for each queued heredoc
    in order, consume lines until one equals the delimiter (for `<<-`, after stripping leading
    tabs); drop them, keep one newline. If the input ends first, return `(None, flag)`.
 6. **Unmodelled openers.** Outside quotes (and outside comments and heredoc bodies, which are
-   skipped), set the flag on any pair in `UNMODELLED_OPENERS`. For `$'`, also consume the
-   ANSI-C string honouring `\'` so quote tracking stays correct after it.
+   skipped), set the flag on any pair in `UNMODELLED_OPENERS`; inside double quotes, set it on
+   `` `" `` as well. Opener detection runs before the comment rule at the same position, so
+   `<#` sets the flag even though `<` would put the `#` at word start. For `$'`, also consume
+   the ANSI-C string honouring `\'` so quote tracking stays correct after it.
 7. **Distrust in `violation()`.** Before the existing logic: if `branch == PROTECTED`, the
    flag is set and `RISKY_PATTERN` matches the raw command, return a refusal: "Refused: this
    command uses syntax this guard does not read — `$'...'`, a PowerShell here-string, block
@@ -210,11 +219,11 @@ whether an unmodelled opener was seen.
 | # | Must prove | Covers |
 |---|---|---|
 | T1 | The reported heredoc command is allowed on `main` (red before the fix, green after) | A1 |
-| T2 | A heredoc body is data in every delimiter form, including `<<-` with tab-indented close and a git-looking body line; a command after the heredoc is still judged; `git commit -F - <<'EOF'` with an apostrophe in the body is refused as a commit to `main` and allowed on `feat/x`; `<<<` is not a heredoc; an unterminated heredoc makes `segments` return `None` | A2 |
+| T2 | A heredoc body is data in every delimiter form, including `<<-` with tab-indented close and a git-looking body line; a command after the heredoc is still judged; `git commit -F - <<'EOF'` with an apostrophe in the body is refused as a commit to `main` and allowed on `feat/x`; `<<<` is not a heredoc; `<<\EOF` closes on `EOF`; a heredoc on a line ending in a comment (`cat <<EOF # note`↵`it's`↵`EOF`↵`git commit -m x # '`) is refused on `main`; the `"$(cat <<'EOF' ... )"` commit form keeps today's outcome; `<<` with no word, and a heredoc whose delimiter never arrives, make `segments` return `None` | A2 |
 | T3 | `#` at word start comments to end of line, so quotes in comments no longer pair across lines (the bypass is refused); `echo ok # git commit -m x` is allowed; `#` inside a word, `${#x}` and `--grep=#12` are untouched; a `#` inside quotes is untouched | A3 |
-| T4 | Backslash-newline joins lines, so `git \`↵`commit` and `git \`↵`push origin main` are refused; a backslash-newline inside single quotes is kept | A4 |
-| T5 | Each bypass from the reproduction that rests on an unmodelled construct is refused on `main` with the new reason; the same forms without commit/push are allowed on `main`; all of them are allowed on `feat/x`; a push to `main` with an unmodelled construct is still refused from `feat/x` when the push itself parses | A5 |
-| T6 | Every existing test passes unmodified, and a differential over every command string in the existing tests plus generated variations agrees with the guard on `origin/main` except for the A1–A5 inputs — run in step 6 as evidence from a scratch script, not added to the suite, since after merge the comparison would be against itself | A6 |
+| T4 | Backslash-newline joins lines, so `git \`↵`commit` and `git \`↵`push origin main` are refused; a backslash-newline inside single quotes is kept; `\\` + newline is not a continuation | A4 |
+| T5 | Each bypass from the reproduction that rests on an unmodelled construct is refused on `main` with the new reason — including the exact backtick-quote string `$x = "say `"hi"; git commit -m x # "`, a multi-line `<# a`↵`it's`↵`#>`↵`git commit -m x # '`, and both `@'` and `@"` here-strings; the same forms without commit/push are allowed on `main`; all of them are allowed on `feat/x`; a push to `main` with an unmodelled construct is still refused from `feat/x` when the push itself parses | A5 |
+| T6 | Every existing test passes unmodified, and the differential agrees — run in step 6 as evidence from a scratch directory, not added to the suite, since after merge it would compare the guard with itself. **Baseline:** `git show origin/main:.claude/hooks/guard_git.py` saved as `guard_git_base.py`, imported with `.claude/hooks` on `sys.path` for `plan_state`. **Corpus:** every `(command, branch)` passed to `violation` and `segments` while the existing suite runs, recorded by a wrapper installed from a scratch conftest or plugin, plus variants of each: ` # '` appended, `# c`↵ prefixed, `\`↵ inserted between tokens, the command placed after a heredoc, and `echo $'x';` prefixed. **Branches:** `main` and `feat/x`. **Accepted difference:** as A6 states. Any other difference fails A6 | A6 |
 
 ### Risks
 
@@ -228,6 +237,9 @@ whether an unmodelled opener was seen.
   (`echo $'it\'s'; git push origin main # '` from `feat/x`) stays allowed: the concept limits
   the distrust to `main` checked out, and the remote's protection still refuses the push. A
   step 8 item, not a halt.
+- **Play-safe refusals the concept accepts.** On `main`, a command with an unmodelled
+  construct that names commit or push is refused even when it would be allowed today — e.g.
+  `git checkout -b feat/x && git commit -m $'a\nb'`. A6 names this cost. Not a halt.
 - **PowerShell forms cannot run in a real `pwsh` here.** Evidence for them is
   `violation()`'s verdict only. Not a halt.
 - **The cause is elsewhere.** If the build finds a bypass in A1–A5 that this pass cannot
@@ -235,6 +247,17 @@ whether an unmodelled opener was seen.
   row.
 - **A criterion turns out wrong**, e.g. a listed bypass that bash does not actually execute:
   halt rather than drop it.
+
+### Critique
+
+`plan-critic` verdict: accept with changes. Every finding applied:
+
+1. `` `" `` sits *inside* PowerShell double quotes, so an outside-quotes check missed the backtick bypass — applied: flagged inside double quotes too (`UNMODELLED_OPENERS` row, guide 6, T5).
+2. A heredoc on a line ending in a comment could lose its body handling and open a bypass — applied: the comment's newline is an ordinary newline for the heredoc queue (guide 4, T2).
+3. `<#` collides with the word-start comment rule — applied: opener detection runs first (guide 6, T5 multi-line form).
+4. T6 underspecified and A6's exception set named inputs while the change is rules — applied: T6 specified concretely; A6 reworded to a rule-based exception set and the `$'...'` cost recorded (section 1, Risks). This is the one change to section 1, made before acceptance.
+5. Missing intents — `"$(cat <<'EOF' ...)"`, `<<\EOF`, `<<<`, `\\`↵, delimiter end and missing word, `@"` — applied (guide 3 and 5, T2, T4, T5).
+6. Refusal reason described two ways — applied: the fixed text in guide 7, referenced from the Public API row.
 
 ### Coverage
 
