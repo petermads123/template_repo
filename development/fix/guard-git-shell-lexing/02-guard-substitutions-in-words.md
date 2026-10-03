@@ -1,6 +1,6 @@
 # The git guard judges command substitutions inside a word
 
-<!-- claude-plan step=8 status=active -->
+<!-- claude-plan step=8 status=done -->
 
 | Field | Value |
 |---|---|
@@ -20,7 +20,7 @@
 | 5 | Test | `/test` | in `/build` | done |
 | 6 | Concept check | `/concept-check` | in `/build` | done |
 | 7 | Ship | `/ship` | in `/build` | done |
-| 8 | Recommend | `/recommend` | with the user | pending |
+| 8 | Recommend | `/recommend` | with the user | done |
 | 9 | Pull request | `/create-pr` | with the user | pending |
 | 10 | Review | `/watch-pr` | on the pull request | pending |
 
@@ -732,12 +732,14 @@ Whole-tree gates at ship: `ruff check .` clean, `ruff format --check .` 11 files
 > section 1 promised, such as a class member it put out of scope, is a recommendation here,
 > and its round opens through `/fix`.
 
-| # | Recommendation | Why it is critical | Effort | Decision |
-|---|---|---|---|---|
-| R1 | | | | |
+None.
 
-Decisions: `deferred`, `rejected`, or `next round` — a new numbered file in this folder,
-taken back through steps 1 to 7 on the same branch.
+The `defect-class` reader found no bug in what A1–A9 promised and nothing critical. Its three
+ideas are notes in `DEVELOPMENT.md` (round 2 heading) and a starting point for round 3. The
+push-target gap (`git push origin "$(git branch --show-current)"` on `main`) stays below the
+bar because `main` is protected on the remote (verified 2026-10-03: GitHub reports
+`protected: true`). Round 1's recommendation R2 opens next as round 3,
+`03-guard-reserved-words.md`, as the user decided at round 1's step 8.
 
 ---
 
