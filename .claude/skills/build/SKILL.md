@@ -70,7 +70,8 @@ can overlap it.
 
 The model column is the skill's own frontmatter; pass it as the `model` argument to the
 `Agent` tool. Effort cannot be passed to a subagent, so the `effort: high` those skills pin
-is a statement of intent the subagent reads in its skill file rather than a setting.
+is a statement of intent the subagent reads in its skill file rather than a setting. Why
+each step runs on the model it does is in `models.md` beside this file.
 
 ### The readers you run for a step
 
