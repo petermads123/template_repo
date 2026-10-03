@@ -138,6 +138,19 @@ UNRESOLVED = "?"
 RISKY_SUBCOMMANDS = ("commit", "push")
 RISKY_PATTERN = re.compile(r"\b(?:" + "|".join(RISKY_SUBCOMMANDS) + r")\b")
 
+#: Character pairs that open a construct `_prepare` does not read: an ANSI-C
+#: string, a PowerShell here-string, a PowerShell block comment and a
+#: backtick-escaped quote. All are looked for outside quotes; `` `" `` is also
+#: looked for inside double quotes, where PowerShell uses it. A command that
+#: carries one is judged by `violation` with suspicion rather than trusted.
+UNMODELLED_OPENERS = ("$'", "@'", '@"', "<#", "`'", '`"')
+
+#: Characters after which a `#` starts a word, and so a comment.
+_COMMENT_BOUNDARY = " \t\r\n;&|()<>"
+
+#: Characters that end a heredoc's delimiter word.
+_DELIMITER_END = " \t\r\n;&|()<>"
+
 
 @dataclass(frozen=True)
 class Segment:
@@ -314,6 +327,216 @@ def _redirected(tokens: tuple[str, ...]) -> bool:
     return False
 
 
+def _skip_single(command: str, start: int) -> int:
+    """Find the end of a single-quoted string.
+
+    Args:
+        command: The command text.
+        start: Index of the opening quote.
+
+    Returns:
+        The index just past the closing quote, or the length of the command
+        when the string never closes.
+    """
+    end = command.find("'", start + 1)
+    return len(command) if end == -1 else end + 1
+
+
+def _skip_double(command: str, start: int) -> tuple[int, bool]:
+    """Find the end of a double-quoted string, dropping line continuations.
+
+    Args:
+        command: The command text.
+        start: Index of the opening quote.
+
+    Returns:
+        The index just past the closing quote (the length of the command when
+        the string never closes), and whether a backtick-escaped quote, which
+        only PowerShell reads as an escape, was seen inside.
+    """
+    index = start + 1
+    unmodelled = False
+    while index < len(command):
+        char = command[index]
+        if char == "\\" and command[index + 1 : index + 2] in ('"', "\\", "\n"):
+            index += 2
+            continue
+        if char == "`" and command[index + 1 : index + 2] == '"':
+            unmodelled = True
+        if char == '"':
+            return index + 1, unmodelled
+        index += 1
+    return len(command), unmodelled
+
+
+def _skip_ansi(command: str, start: int) -> int:
+    """Find the end of a `$'...'` string, where a backslash escapes a quote.
+
+    Args:
+        command: The command text.
+        start: Index of the `$`.
+
+    Returns:
+        The index just past the closing quote, or the length of the command
+        when the string never closes.
+    """
+    index = start + 2
+    while index < len(command):
+        if command[index] == "\\":
+            index += 2
+            continue
+        if command[index] == "'":
+            return index + 1
+        index += 1
+    return len(command)
+
+
+def _heredoc_word(command: str, start: int) -> tuple[str, int] | None:
+    """Read a heredoc's delimiter word, resolving its quoting as bash does.
+
+    Args:
+        command: The command text.
+        start: Index just past the `<<` and any `-`.
+
+    Returns:
+        The delimiter with quotes and backslashes removed, and the index just
+        past the word as written; None when there is no word.
+    """
+    index = start
+    while index < len(command) and command[index] in " \t":
+        index += 1
+    word = ""
+    begin = index
+    while index < len(command) and command[index] not in _DELIMITER_END:
+        char = command[index]
+        if char == "\\" and index + 1 < len(command):
+            word += command[index + 1]
+            index += 2
+        elif char in "'\"":
+            end = command.find(char, index + 1)
+            if end == -1:
+                return None
+            word += command[index + 1 : end]
+            index = end + 1
+        else:
+            word += char
+            index += 1
+    return (word, index) if index > begin and word else None
+
+
+def _heredoc_bodies(
+    command: str, start: int, queue: list[tuple[str, bool]]
+) -> int | None:
+    """Skip the bodies of the heredocs opened on the line that just ended.
+
+    Args:
+        command: The command text.
+        start: Index of the first line after the newline that ended the line.
+        queue: The delimiter and whether leading tabs are stripped (`<<-`),
+            for each heredoc, in the order they were opened.
+
+    Returns:
+        The index just past the last delimiter line, or None when the input
+        ends before a delimiter arrives.
+    """
+    position = start
+    for delimiter, strip_tabs in queue:
+        while True:
+            if position >= len(command):
+                return None
+            end = command.find("\n", position)
+            line = command[position:] if end == -1 else command[position:end]
+            position = len(command) if end == -1 else end + 1
+            if (line.lstrip("\t") if strip_tabs else line) == delimiter:
+                break
+    return position
+
+
+def _prepare(command: str) -> tuple[str | None, bool]:
+    """Remove what a shell never runs and `shlex` cannot read.
+
+    Walks the command once, tracking quotes as bash does. Outside quotes it
+    drops a `#` comment up to its newline, deletes a backslash-newline so the
+    lines join, and drops each heredoc body up to its delimiter line, leaving
+    the `<<` operator and its delimiter word. Everything else passes through
+    unchanged, so a command with none of these constructs lexes as before.
+
+    Args:
+        command: The full command line.
+
+    Returns:
+        The transformed text, or None when a heredoc is missing its delimiter
+        word or its closing line; and whether the command contains a construct
+        this scan does not read, one of `UNMODELLED_OPENERS`.
+    """
+    out: list[str] = []
+    queue: list[tuple[str, bool]] = []
+    unmodelled = False
+    boundary = True  # whether a `#` here would start a word
+    index = 0
+    length = len(command)
+
+    while index < length:
+        char = command[index]
+        pair = command[index : index + 2]
+
+        if pair in UNMODELLED_OPENERS:
+            unmodelled = True
+
+        if char == "\\":
+            if pair == "\\\n":
+                index += 2  # a continuation: the lines join
+                continue
+            out.append(command[index : index + 2])
+            index += 2
+            boundary = False
+        elif pair == "$'":
+            end = _skip_ansi(command, index)
+            out.append(command[index:end])
+            index, boundary = end, False
+        elif char == "'":
+            end = _skip_single(command, index)
+            out.append(command[index:end])
+            index, boundary = end, False
+        elif char == '"':
+            end, inner = _skip_double(command, index)
+            unmodelled = unmodelled or inner
+            out.append(command[index:end].replace("\\\n", ""))
+            index, boundary = end, False
+        elif char == "#" and boundary:
+            end = command.find("\n", index)
+            index = length if end == -1 else end
+        elif command[index : index + 3] == "<<<":
+            out.append("<<<")
+            index, boundary = index + 3, True
+        elif pair == "<<":
+            dash = command[index + 2 : index + 3] == "-"
+            word = _heredoc_word(command, index + 2 + dash)
+            if word is None:
+                return None, unmodelled
+            delimiter, end = word
+            out.append(command[index:end])
+            queue.append((delimiter, dash))
+            index, boundary = end, False
+        elif char == "\n":
+            out.append(char)
+            index += 1
+            boundary = True
+            if queue:
+                resumed = _heredoc_bodies(command, index, queue)
+                if resumed is None:
+                    return None, unmodelled
+                index, queue = resumed, []
+        else:
+            out.append(char)
+            index += 1
+            boundary = char in _COMMENT_BOUNDARY
+
+    if queue:
+        return None, unmodelled
+    return "".join(out), unmodelled
+
+
 def segments(command: str) -> list[Segment] | None:
     """Split a shell command into its individual invocations.
 
@@ -324,7 +547,10 @@ def segments(command: str) -> list[Segment] | None:
         One segment per invocation, in order, or None if the command could not
         be read at all — an unbalanced quote, most often.
     """
-    lexer = shlex.shlex(command, posix=True, punctuation_chars=PUNCTUATION_CHARS)
+    prepared, _ = _prepare(command)
+    if prepared is None:
+        return None
+    lexer = shlex.shlex(prepared, posix=True, punctuation_chars=PUNCTUATION_CHARS)
     lexer.whitespace_split = True
     lexer.whitespace = INLINE_WHITESPACE
     # `shlex` comments out the rest of the line from a bare `#`, even inside a
@@ -467,6 +693,17 @@ def violation(command: str, branch: str) -> str:
     Returns:
         An explanation to show Claude, or an empty string to allow the command.
     """
+    _, unmodelled = _prepare(command)
+    if unmodelled and branch == PROTECTED and RISKY_PATTERN.search(command):
+        return (
+            "Refused: this command uses syntax this guard does not read — "
+            "`$'...'`, a PowerShell here-string, block comment or "
+            "backtick-escaped quote — and it names `commit` or `push` while "
+            f"`{PROTECTED}` is checked out.\n"
+            "Rewrite it without that syntax, or move onto a branch first:\n"
+            "    git checkout -b <type>/<kebab-case-topic>"
+        )
+
     parsed = segments(command)
     if parsed is None:
         if branch == PROTECTED and RISKY_PATTERN.search(command):
