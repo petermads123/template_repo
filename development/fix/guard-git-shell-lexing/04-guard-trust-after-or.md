@@ -1,6 +1,6 @@
 # The git guard does not trust a switch that `||` may skip
 
-<!-- claude-plan step=7 status=active -->
+<!-- claude-plan step=8 status=active -->
 
 | Field | Value |
 |---|---|
@@ -19,7 +19,7 @@
 | 4 | Verify | `/verify` | in `/build` | done |
 | 5 | Test | `/test` | in `/build` | done |
 | 6 | Concept check | `/concept-check` | in `/build` | done |
-| 7 | Ship | `/ship` | in `/build` | pending |
+| 7 | Ship | `/ship` | in `/build` | done |
 | 8 | Recommend | `/recommend` | with the user | pending |
 | 9 | Pull request | `/create-pr` | with the user | pending |
 | 10 | Review | `/watch-pr` | on the pull request | pending |
@@ -478,7 +478,7 @@ now:
 | `true \|\| echo '(' \| git checkout -b x && git commit -m x` | `COMMIT on main` |
 | `{ true \|\| echo } \| git checkout -b x && git commit -m x; }` | `COMMIT on main` |
 | `{ true \|\| echo ')' \| git checkout -b x && git commit -m x; }` | `COMMIT on main` |
-| `! true \| echo ";" \| git checkout -b feat/x && git commit -m x` | `COMMIT on main` |
+| `! true \| echo ";" \| git checkout -b feat/x && git commit -m x` | `COMMIT on main` only when the checkout fails (the negated pipeline then succeeds); with a succeeding checkout the commit runs on `feat/x` |
 
 A fix reads the token stream with quoting kept (or marks each token as quoted) so a quoted word is
 never an operator; it touches `_lex`, `_is_separator` and every consumer of `segments`, which is a
@@ -583,8 +583,10 @@ Re-run directly against the code as it stands: round 1's `r6/r1.py` (0 fails), r
 
 | Field | Value |
 |---|---|
-| Commits | |
-| Pushed to | |
+| Commits | `3e998f2` Concept; `8aedf3a` Plan (draft); `c080a37` Plan; `dbbf117` Plan (template text); `327f9f3` Plan accepted; `71eb9bb` WIP step 3 (reproduction, red); `1a498a8` Trust a branch switch after \|\| only together with its left side; `9fe2069` Verify; `4fcef3d` Verify (showcase note); `c37bb2e` WIP step 5 (red); `d113162` Test; `a05ba32` Concept check; then `Ship: guard trust after \|\|` |
+| Pushed to | `origin/fix/guard-git-shell-lexing` |
+
+Gates on the whole tree at ship: `ruff check .` clean, `ruff format --check .` 41 files formatted, `mypy` no issues in 11 files, `pytest -q` 1161 passed. Diff review: no debug output, TODO or scratch files; docstrings, comments and STRUCTURE.md match `_walk_run`; section 5's ninth tokenizer row reworded to say it lands on `main` only when the checkout fails. Every step 1 to 6 left a commit.
 
 ---
 
