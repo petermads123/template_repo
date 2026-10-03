@@ -109,39 +109,9 @@ the code and the plan file. A step's subagent cannot start another agent, so ins
 
 ### Each step picks its own model
 
-Every skill pins a model and effort in its frontmatter, so a step runs on what it needs
-rather than on whatever the session happens to be set to. A skill's override lasts the
-turn, which is exactly why steps 3 to 7 run as **subagents**: chained in one turn they
-would all run on the first skill's model. `/build` passes each step's model to its
-subagent; effort cannot be passed, so the subagent reads it from its skill file as intent.
-
-| Step | Model | Effort | Why |
-|---|---|---|---|
-| `/fix` diagnosis | `opus` | `high` | A wrong root cause costs the whole build and ships a fix that does not fix |
-| 1 Conceptualize | `opus` | `high` | Shaping the concept is the most expensive thing to get wrong |
-| 2 Plan | `opus` | `high` | The design fork, and signatures step 4 checks literally |
-| 3–7 `/build` | `opus` | `medium` | Orchestration: reads the marker, spawns, relays, halts |
-| 3 Implement | `sonnet` | `high` | Transcribing a plan that has already done the thinking |
-| 4 Verify | `sonnet` | `high` | Mechanical checks plus classifying each mismatch |
-| 5 Test | `sonnet` | `high` | Edge cases and the bugs they expose |
-| 6 Concept check | `sonnet` | `high` | A different model from the one that wrote the plan |
-| 7 Ship | `sonnet` | `high` | Gates on the whole round, diff review; procedural |
-| 8 Recommend | `opus` | `high` | Judging whether anything is critical enough to hold the pull request |
-| 9 Pull request | `sonnet` | `high` | Verification and writing, both well-specified |
-| 10 Review | `sonnet` | `medium` | Most check-ins find nothing; the judgment is fix-or-new-round |
-
-`/feature` carries step 1's settings because it opens step 1 in the same turn, and so does
-`/fix`, whose diagnosis is the same judgment made one step earlier. For the same reason
-`/recommend`, opened by `/build`, and the `/create-pr` it hands on to run on the build's
-turn model; their rows apply when the user invokes them directly.
-`/small-change` runs `opus` at `medium`: bypassing the pipeline is a judgment call made
-without any of its safety nets, so the step that decides whether a change really is small
-gets the clever model.
-
-Every Sonnet step runs at `high`, and `max` (the top level) is unused. Aliases rather than pinned IDs, so
-a newer Opus or Sonnet is picked up without editing a dozen files. `ultracode` is a
-session-level effort setting and not valid in frontmatter, where the levels are `low`,
-`medium`, `high`, `xhigh` and `max`.
+Every skill pins `model` and `effort` in its frontmatter, and steps 3 to 7 run as subagents
+because a skill's override lasts the turn. The per-step table and the reasoning behind each
+choice live in `.claude/skills/build/models.md`.
 
 ### Review and merge
 
@@ -181,27 +151,9 @@ one thread is feedback, not authorisation to merge. When unsure, ask.
 
 ### Step 10 runs until the pull request closes
 
-Opening the pull request is not finishing the work. Step 10 re-checks it about once an hour,
-acts on review comments and CI, and ends only when the pull request merges or closes. The
-plan file is already `done`, so the watch is session state and the pull request thread is
-the record; `/watch-pr` in a fresh session finds the pull request from the branch.
-
-`/create-pr` invokes `/watch-pr` unasked, because the alternative is a published pull
-request nobody is watching. It is also the one step that mostly does nothing, and a quiet
-check-in re-arms silently rather than reporting.
-
-Its judgment call is whether a review comment is a fix or a new round. The same small-or-
-large test decides, and the same rule applies: **when it is close, route up.** An
-over-routed comment costs a conversation; an under-routed one puts unplanned, untested
-behaviour into a pull request a reviewer has already read. A comment that fits neither is
-left open and handed to the user — guessing at a comment you cannot place is worse than
-saying you cannot place it.
-
-A bot's finding, Copilot's included, is a claim to verify against the code rather than a
-request to obey. Because thread resolution gates the merge and a bot never resolves its own
-thread, every bot thread must end resolved — which makes "resolve it" the cheapest way to
-green. So **a dismissed bot finding is always reported to the user**, with the reason, in
-the same breath as the merge.
+Opening the pull request is not finishing the work: `/create-pr` invokes `/watch-pr` unasked,
+and it runs until the pull request merges or closes. How it re-checks, routes review comments
+and handles bot findings lives in that skill.
 
 ### The gates are the point
 
