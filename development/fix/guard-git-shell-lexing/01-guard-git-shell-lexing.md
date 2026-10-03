@@ -1,6 +1,6 @@
 # The git guard reads commands the way the shell does
 
-<!-- claude-plan step=5 status=active -->
+<!-- claude-plan step=6 status=active -->
 
 | Field | Value |
 |---|---|
@@ -17,7 +17,7 @@
 | 2 | Plan | `/plan` | with the user | done |
 | 3 | Implement | `/implement` | in `/build` | done |
 | 4 | Verify | `/verify` | in `/build` | done |
-| 5 | Test | `/test` | in `/build` | pending |
+| 5 | Test | `/test` | in `/build` | done |
 | 6 | Concept check | `/concept-check` | in `/build` | pending |
 | 7 | Ship | `/ship` | in `/build` | pending |
 | 8 | Recommend | `/recommend` | with the user | pending |
@@ -288,6 +288,14 @@ Refused on `main` as unreadable, as the Defect block's Observed row says.
 
 Built as planned. Helpers beyond `_prepare`: `_skip_single`, `_skip_double`, `_skip_ansi`, `_heredoc_word`, `_heredoc_bodies`. A backslash-newline inside double quotes is also deleted (bash joins there too). `violation()` calls `_prepare` for the flag and `segments()` for the text. After the fix the reproduction is green and all 221 guard tests pass.
 
+**Deviations from section 2, found in step 5** (each a case where step 3's scanner lost a refusal the step-2 guard gave, which A6 forbids unless the new decision matches bash; each checked against real bash 5.2 with `git` shadowed, probes in the build scratchpad). All fixed inside section 1:
+
+- Section 2's Risks entry calling arithmetic `<<` "the safe direction" was wrong: off `main` an unreadable command is allowed, so `echo $((1<<2)); git push origin main` from a branch went from refused to allowed. `_prepare` now copies `$((...))` and `((...))` through untouched.
+- A heredoc whose delimiter never arrives no longer makes `segments` return `None` (section 2's Public API row for `segments`): bash runs the commands before it and takes the rest as the body, so `_prepare` does too. A `<<` with no delimiter word is passed through to `shlex` as an operator, as before. `_prepare` is now `-> tuple[str, bool]`, never `None`.
+- `_COMMENT_BOUNDARY` was too wide. `#` after the `)` of a `$( )`, inside `${ }`, and after `\r` is part of a word in bash; after a subshell's `)` it is a comment. `_prepare` now keeps a stack of what it is inside (`$( )`, `<( )`, subshell, `${ }`, backticks, double quotes) and `\r` is no boundary. A comment inside backticks ends at the closing backtick.
+- Quotes nest in `"$( )"`, so a double-quoted string is walked by the same loop rather than skipped by `_skip_double`, which is removed. This also fixes `.replace("\\\n", "")` eating the second backslash of `"a\\<NL>"`.
+- An unquoted heredoc delimiter joins backslash-newline on the closing line (`E\`+`OF` closes), a quoted one does not; and `\r` belongs to the delimiter word, so a CRLF script closes on `EOF\r` as bash does. (The input-space designer's claim that bash never closes it was wrong; the probe shows it does.)
+
 ---
 
 ## 4. Verification log
@@ -314,8 +322,25 @@ Built as planned. Helpers beyond `_prepare`: `_skip_single`, `_skip_double`, `_s
 
 | Intent | Test names | Result |
 |---|---|---|
+| T1 | `test_violation_allows_a_heredoc_with_a_stray_quote_on_main` (step 3, unchanged) | green |
+| T2 | `test_violation_reads_a_heredoc_body_as_data_in_every_delimiter_form` (6), `..._still_judges_a_command_after_a_heredoc` (8), `..._refuses_a_heredoc_fed_commit_as_a_commit_not_as_unreadable`, `..._keeps_the_pipelines_own_commit_form` (2), `..._closes_the_first_heredoc_on_the_first_delimiter`, `..._closes_a_heredoc_where_bash_does` (2), `..._gives_a_quoted_delimiter_no_line_joining`, `..._takes_the_rest_of_an_unterminated_heredoc_as_its_body`, `..._keeps_a_push_that_runs_before_an_unterminated_heredoc` (2), `..._reads_a_shift_as_arithmetic_not_as_a_heredoc` (5), `..._reads_nested_subshells_that_look_like_arithmetic`, `segments` heredoc tests (operator and word kept, five delimiter forms, `<<-` spaces, two on a line, lone `<<`, no word, never closes, unclosed quote, `<<<` twice) | green |
+| T3 | `..._refuses_a_commit_hidden_by_quotes_in_comments`, `..._allows_a_word_start_comment_naming_a_commit`, `..._keeps_a_hash_inside_a_word_live`, `..._starts_a_comment_after_each_operator_and_blank` (6), `..._reads_a_hash_that_bash_keeps_in_a_word_as_text` (12), `..._comments_out_what_bash_does_after_a_closing_paren_or_redirect` (3), `..._ends_a_comment_inside_backticks_at_the_backtick`, `..._comments_inside_a_substitution_run_to_the_line_end`, `..._reads_a_hash_inside_quotes_as_text` (2), `..._distrusts_a_switch_whose_and_is_only_in_a_comment`, three `segments` comment tests, empty input (10) | green |
+| T4 | `..._joins_a_backslash_newline` (4), `..._keeps_a_branch_switch_across_a_continuation`, `segments` continuation tests (single quotes, escaped backslash, in a comment, before `&&`), `..._keeps_an_escaped_backslash_before_a_newline_in_double_quotes` | green |
+| T5 | `test_unmodelled_openers_is_the_documented_set`, refusal on `main` (6) and allowed off `main` (6) for every bypass, exact-branch limit (2), nothing-risky allowed (4), openers hidden by quotes, comments and bodies (5), backtick-quote in double quotes, no flag inside a body, the `&&` plus `$'` cost, pushes from a branch (3), reason text, and three recorded misses | green |
+| T6 | Existing 220 tests unmodified and green; the differential is step 6's evidence, not a test | green (suite) |
+
+Run: `pytest` 352 guard tests (221 before), all green; against the step-3 scanner 20 of the new tests fail, one per bug above.
+
+Bugs the tests found, all fixed in `.claude/hooks/guard_git.py` (see section 3, deviations): arithmetic `<<` and an unterminated heredoc losing refusals, `#` after `$( )`/`${ }`/`\r` read as a comment, `#` inside backticks, quotes inside `"$( )"`, the escaped-backslash continuation replace, an unquoted delimiter not joining continuations, `\r` ending a delimiter word.
 
 Edge cases considered and deliberately skipped, with reasons:
+
+- A substitution in an unquoted heredoc body (`cat <<EOF` ... `$(git commit)` ... `EOF`): bash runs it; the guard reads the body as data. A2 words unquoted bodies as data, so it is within the agreed concept; pinned by a test as a recorded miss. **For step 8.**
+- `git $'\x63ommit'` and `git co""mmit` behind an unmodelled construct: the raw-text search never sees the word `commit`. Adversarial rather than a slip; pinned as a recorded miss. **For step 8.**
+- The distrust searches the raw command, comments and bodies included (plan's guide 7 chose this on purpose): the harmless `printf $'x'` beside a body that says "push" is refused on `main`. Only on `main`, only with an unmodelled construct, A6's accepted cost; pinned by a test. **For step 8** if it proves noisy.
+- `((a)+(b))` as arithmetic, `case` patterns' unmatched `)` inside `$( )`, `<(` process substitution edge cases, PowerShell `` ` `` line continuations: contrived, and the failure is a conservative refusal or the unchanged old behaviour.
+- A heredoc spanning a quoted newline on its opener line: rare; bash's own order is subtle.
+- Numbers, `None`, wrong types, purity and idempotency: `str` in, immutable; `main()` filters non-strings; idempotency already covered.
 
 ---
 
