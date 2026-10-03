@@ -1,6 +1,6 @@
 # The git guard does not trust a switch that `||` may skip
 
-<!-- claude-plan step=8 status=active -->
+<!-- claude-plan step=8 status=done -->
 
 | Field | Value |
 |---|---|
@@ -20,7 +20,7 @@
 | 5 | Test | `/test` | in `/build` | done |
 | 6 | Concept check | `/concept-check` | in `/build` | done |
 | 7 | Ship | `/ship` | in `/build` | done |
-| 8 | Recommend | `/recommend` | with the user | pending |
+| 8 | Recommend | `/recommend` | with the user | done |
 | 9 | Pull request | `/create-pr` | with the user | pending |
 | 10 | Review | `/watch-pr` | on the pull request | pending |
 
@@ -601,10 +601,23 @@ Gates on the whole tree at ship: `ruff check .` clean, `ruff format --check .` 4
 
 | # | Recommendation | Why it is critical | Effort | Decision |
 |---|---|---|---|---|
-| R1 | | | | |
+| R1 | Read quoting and command position in the tokenizer, so a quoted separator word (`echo ";"`, `echo "&&"`, `'&'`, `\;`), a literal brace or paren word (`echo {`, `echo '('`) and a carriage return after an operator are never taken for operators | Each lets a commit land on `main` while the guard allows it, checked in bash with `git` shadowed: `true \|\| echo ";" \| git checkout -b x && git commit -m x` and the eight rows in section 5, plus `git checkout -b x &&\r\ngit commit -m x` (section 6). Older than this branch (`segments('echo ";" x')` splits into two segments since round 1; 43eeea3 allows every row), and round 4 made the tokens load-bearing for the `\|\|` operand and the `!` scope. A different root cause from round 4's, so out of its scope by name | large | next round — `05-guard-quoted-operators.md` (the user's choice at step 5: "round 5 after this round") |
 
 Decisions: `deferred`, `rejected`, or `next round` — a new numbered file in this folder,
 taken back through steps 1 to 7 on the same branch.
+
+Notes, not critical (kept here rather than in `DEVELOPMENT.md` at the user's instruction):
+
+- `defect-class` reader: no other place replaces `ok` after a switch; pipelines, control
+  structures, substitutions and frames were traced and are safe or covered. Bugs in A1–A5: none.
+- The bash oracle is rebuilt in scratch every round and had a defect of its own twice (round 2's
+  empty `PATH`, round 4's empty-argument checkout). A committed operator-pair matrix (prefix ×
+  OP1 × switch × OP2 × commit/push over `&&`, `||`, `;`, `|`, `|&`, `&`, newline) — a pure-Python
+  invariant everywhere plus an opt-in bash oracle test skipped without bash — would have shown
+  `|| switch &&` in round 1. Medium effort; worth folding into round 5's plan, since round 5
+  rewrites the tokenizer every rule reads.
+- Nearest non-tokenizer miss, recorded since round 3: a function is judged where it is defined,
+  not where it is called (`f() { git commit -m x; }; git checkout main; f` from `feat/y`).
 
 ---
 
