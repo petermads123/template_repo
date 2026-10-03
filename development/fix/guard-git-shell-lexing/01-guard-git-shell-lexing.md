@@ -100,7 +100,7 @@ All judged by the guard's decision with `main` checked out unless stated otherwi
 | # | The finished feature... |
 |---|---|
 | A1 | Given the reported command — `python3 - <<'EOF'`, a body holding `x = '''main's push'''`, then `EOF` — allows it on `main`, where today it refuses it as unreadable. |
-| A2 | Never reads a heredoc body as commands: `cat <<'EOF' > notes.txt\ngit commit -m x\nEOF` is allowed; a `<<-` heredoc with a tab-indented closing delimiter and a stray apostrophe in the body is allowed; bodies after `<<EOF`, `<<'EOF'` and `<<"EOF"` all count as data. A command after the heredoc is still judged: `cat <<EOF > f\nhello\nEOF\ngit commit -m x` is refused. A commit taking its message from a heredoc — `git commit -F - <<'EOF'\nfix main's guard\nEOF` — is refused as a commit to `main`, not as unreadable, and is allowed on `feat/x`. |
+| A2 | Reads a heredoc body as bash does: the text of a body is never read as commands — `cat <<'EOF' > notes.txt\ngit commit -m x\nEOF` is allowed, and a `<<-` heredoc with a tab-indented closing delimiter and a stray apostrophe in the body is allowed. A body after a quoted delimiter (`<<'EOF'`, `<<"EOF"`, `<<\EOF`) is pure data. In a body after an unquoted delimiter (`<<EOF`) bash runs `$( … )` and backtick command substitutions, so those are judged like any other command: `cat <<EOF > f\n$(git commit -m x)\nEOF` is refused on `main`, and `cat <<EOF > f\n`git push origin main`\nEOF` is refused from `main` and from `feat/x`. *(Amended at Halt 1 on the user's answer.)* A command after the heredoc is still judged: `cat <<EOF > f\nhello\nEOF\ngit commit -m x` is refused. A commit taking its message from a heredoc — `git commit -F - <<'EOF'\nfix main's guard\nEOF` — is refused as a commit to `main`, not as unreadable, and is allowed on `feat/x`. |
 | A3 | Reads `#` as bash does: `# it's fine\ngit commit -m x\n# that's it` is refused; `echo ok # git commit -m x` is allowed; `echo ok#1 && git commit -m m` is still refused. |
 | A4 | Joins a backslash-newline: `git \\\ncommit -m x` is refused; `git \\\npush origin main` is refused from `main` and from `feat/x`. |
 | A5 | Plays safe on the rare forms: every remaining bypass from the reproduction — `echo $'it\'s'; git commit -m x # '`, the PowerShell here-string, `<# it's #>` and backtick-quote cases, and `cat <<EOF >/dev/null\nit's\nEOF\ngit commit -m x # '` — is refused on `main`. A command using one of these forms that names neither commit nor push is allowed on `main`, and all of them are allowed on `feat/x`. |
@@ -196,7 +196,11 @@ whether an unmodelled opener was seen.
    the command unreadable (`None`). `<<<` is consumed as one unit and is not a heredoc. A `<<`
    inside quotes — including `"$(cat <<'EOF' ... EOF
 )"`, the pipeline's own commit form — is
-   ordinary quoted text, as today. Emit the operator and the word as written. Queue the heredoc. At the next unquoted newline, for each queued heredoc
+   ordinary quoted text, as today. Emit the operator and the word as written.
+   *(Amended at Halt 1.)* A body after an unquoted delimiter is not simply dropped: its
+   `$( … )` and backtick command substitutions are kept, each as a command of its own
+   (separated by newlines, as if they stood on their own lines), and the rest of the body
+   text is dropped. A body after a quoted delimiter is dropped whole. Queue the heredoc. At the next unquoted newline, for each queued heredoc
    in order, consume lines until one equals the delimiter (for `<<-`, after stripping leading
    tabs); drop them, keep one newline. If the input ends first, return `(None, flag)`.
 6. **Unmodelled openers.** Outside quotes (and outside comments and heredoc bodies, which are
@@ -437,6 +441,8 @@ substitutions in the body, so the body is not pure data. A2 says bodies after `<
 built, the fix opens a commit-to-`main` bypass the old guard refused, which also fails A6.
 
 **Question for the user:** how should an unquoted heredoc body (`<<EOF`) be read?
+
+**Answer (2026-10-03):** (a) — "If you think a is the best option and reliable please use this one." A2 is amended in section 1 to say so; section 2's guide step 5 follows below. The build resumes at step 5, which implements the change and its tests.
 
 - **(a) Read the commands inside it** *(recommended)*: text in an unquoted body stays data,
   but any `$( … )` or backtick command inside it is judged like any other command, as bash
