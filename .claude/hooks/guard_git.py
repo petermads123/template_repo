@@ -489,7 +489,7 @@ def _logical_line(command: str, position: int, join: bool) -> tuple[str, int]:
 
 def _heredoc_bodies(
     command: str, start: int, queue: list[tuple[str, bool, bool]]
-) -> int:
+) -> tuple[int, list[str]]:
     """Skip the bodies of the heredocs opened on the line that just ended.
 
     Args:
@@ -500,17 +500,153 @@ def _heredoc_bodies(
             they were opened.
 
     Returns:
-        The index just past the last delimiter line. When the input ends before
-        a delimiter arrives that is the end of the input: bash warns and takes
-        the rest as the body, and so does this.
+        The index just past the last delimiter line, and the text of each body
+        whose delimiter was unquoted -- the only bodies bash expands -- with
+        continuation lines joined. When the input ends before a delimiter
+        arrives that is the end of the input: bash warns and takes the rest as
+        the body, and so does this.
     """
     position = start
+    expanded: list[str] = []
     for delimiter, strip_tabs, quoted in queue:
+        lines: list[str] = []
         while position < len(command):
             line, position = _logical_line(command, position, join=not quoted)
             if (line.lstrip("\t") if strip_tabs else line) == delimiter:
                 break
-    return position
+            lines.append(line)
+        if not quoted:
+            expanded.append("\n".join(lines))
+    return position, expanded
+
+
+def _close_paren(text: str, start: int) -> int | None:
+    """Find the parenthesis that closes a `$( )`, reading quotes as bash does.
+
+    Args:
+        text: The text holding the substitution.
+        start: Index just past the opening `$(`.
+
+    Returns:
+        The index of the closing `)`, or None when it never arrives -- bash
+        reports an unexpected end of file and runs nothing. A `)` inside quotes,
+        after a backslash or in a comment does not count, and a nested `$( )` is
+        matched on its own. A bare `case` pattern's `)` is not told apart from
+        the end: that is a miss, in the safe direction of the text after it
+        being read as body.
+    """
+    depth = 0
+    index = start
+    while index < len(text):
+        char = text[index]
+        if char == "\\":
+            index += 2
+        elif char == "'":
+            end = text.find("'", index + 1)
+            if end == -1:
+                return None
+            index = end + 1
+        elif char in '"`':
+            closed = _quoted_end(text, index)
+            if closed is None:
+                return None
+            index = closed
+        elif text[index : index + 2] == "$(":
+            nested = _close_paren(text, index + 2)
+            if nested is None:
+                return None
+            index = nested + 1
+        elif char == "#" and (index == start or text[index - 1] in _COMMENT_BOUNDARY):
+            end = text.find("\n", index)
+            index = len(text) if end == -1 else end
+        elif char == "(":
+            depth += 1
+            index += 1
+        elif char == ")":
+            if depth == 0:
+                return index
+            depth -= 1
+            index += 1
+        else:
+            index += 1
+    return None
+
+
+def _quoted_end(text: str, start: int) -> int | None:
+    """Find the end of a double-quoted string or a backtick pair.
+
+    Args:
+        text: The text holding it.
+        start: Index of the opening `"` or backtick.
+
+    Returns:
+        The index just past the closing mark, or None when it never closes. A
+        `$( )` inside double quotes is matched with `_close_paren`, because
+        quotes nest there.
+    """
+    mark = text[start]
+    index = start + 1
+    while index < len(text):
+        char = text[index]
+        if char == "\\":
+            index += 2
+        elif char == mark:
+            return index + 1
+        elif mark == '"' and text[index : index + 2] == "$(":
+            nested = _close_paren(text, index + 2)
+            if nested is None:
+                return None
+            index = nested + 1
+        else:
+            index += 1
+    return None
+
+
+def _body_substitutions(body: str) -> list[str]:
+    r"""Pull the command substitutions out of an unquoted heredoc body.
+
+    Bash treats such a body like a double-quoted string with the quote marks
+    ordinary: `\` escapes only `$`, a backtick and itself, a quote of either
+    kind means nothing, and `$( )`, `$(( ))`, `${ }` and backticks expand. Only
+    the first runs a command of its own; arithmetic is not one, though a
+    substitution inside it is, and `${x:-$(cmd)}` runs `cmd`.
+
+    Args:
+        body: The body text, with continuation lines already joined.
+
+    Returns:
+        The text of each command substitution that bash would run, in order,
+        for `_prepare` to read as commands. A substitution that never closes
+        runs nothing in bash and is left out, along with the rest of the body.
+    """
+    found: list[str] = []
+    index = 0
+    while index < len(body):
+        char = body[index]
+        if char == "\\":
+            index += 2 if body[index + 1 : index + 2] in ("$", "`", "\\") else 1
+        elif char == "`":
+            end = _quoted_end(body, index)
+            if end is None:
+                break
+            inner = body[index + 1 : end - 1]
+            found.append(re.sub(r"\\([$`\\])", r"\1", inner))
+            index = end
+        elif body[index : index + 2] == "$(":
+            if (
+                body[index : index + 3] == "$(("
+                and _arith_end(body, index + 1) is not None
+            ):
+                index += 3  # arithmetic is no command; look inside it
+                continue
+            end = _close_paren(body, index + 2)
+            if end is None:
+                break
+            found.append(body[index + 2 : end])
+            index = end + 1
+        else:
+            index += 1
+    return found
 
 
 def _prepare(command: str) -> tuple[str, bool]:
@@ -640,7 +776,14 @@ def _prepare(command: str) -> tuple[str, bool]:
             index += 1
             boundary = True
             if queue:
-                index, queue = _heredoc_bodies(command, index, queue), []
+                index, bodies = _heredoc_bodies(command, index, queue)
+                queue = []
+                for body in bodies:
+                    for inner in _body_substitutions(body):
+                        text, opener = _prepare(inner)
+                        if _lex(text) is not None:
+                            out.append(text + "\n")  # a command of its own
+                            unmodelled = unmodelled or opener
         elif char == "(":
             arith = _arith_end(command, index) if pair == "((" else None
             if arith is not None:
@@ -667,6 +810,28 @@ def _prepare(command: str) -> tuple[str, bool]:
     return "".join(out), unmodelled
 
 
+def _lex(prepared: str) -> list[str] | None:
+    """Split prepared text into shell tokens.
+
+    Args:
+        prepared: Command text after `_prepare`.
+
+    Returns:
+        The tokens, quoting resolved, or None if a quote never closes or the
+        text ends in a backslash.
+    """
+    lexer = shlex.shlex(prepared, posix=True, punctuation_chars=PUNCTUATION_CHARS)
+    lexer.whitespace_split = True
+    lexer.whitespace = INLINE_WHITESPACE
+    # `shlex` comments out the rest of the line from a bare `#`, even inside a
+    # word, which silently discarded everything after `echo ok#1 &&`.
+    lexer.commenters = ""
+    try:
+        return list(lexer)
+    except ValueError:
+        return None
+
+
 def segments(command: str) -> list[Segment] | None:
     """Split a shell command into its individual invocations.
 
@@ -679,16 +844,8 @@ def segments(command: str) -> list[Segment] | None:
         bodies, comments and continuations are removed first, and a heredoc
         whose delimiter never arrives takes the rest of the input as its body.
     """
-    prepared, _ = _prepare(command)
-    lexer = shlex.shlex(prepared, posix=True, punctuation_chars=PUNCTUATION_CHARS)
-    lexer.whitespace_split = True
-    lexer.whitespace = INLINE_WHITESPACE
-    # `shlex` comments out the rest of the line from a bare `#`, even inside a
-    # word, which silently discarded everything after `echo ok#1 &&`.
-    lexer.commenters = ""
-    try:
-        tokens = list(lexer)
-    except ValueError:
+    tokens = _lex(_prepare(command)[0])
+    if tokens is None:
         return None
 
     parsed: list[Segment] = []

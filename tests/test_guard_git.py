@@ -1409,10 +1409,260 @@ def test_violation_documents_two_known_misses_of_the_raw_text_search() -> None:
     assert violation("echo $'it\\'s'; git co\"\"mmit -m x # '", PROTECTED) == ""
 
 
-def test_violation_documents_that_a_substitution_in_a_heredoc_body_is_data() -> None:
-    # Bash runs `$(...)` in an unquoted heredoc body; the guard reads the whole
-    # body as data, as acceptance criterion A2 words it.
-    assert violation("cat <<EOF\n$(git commit -m x)\nEOF", PROTECTED) == ""
+# --- substitutions in an unquoted heredoc body -------------------------------
+#
+# Bash expands `$( )` and backticks in a body whose delimiter was written without
+# quotes, and runs what they hold. Every expectation below was checked against
+# bash 5.2 with `git` shadowed by an echo function.
+
+
+@pytest.mark.parametrize(
+    "command",
+    [
+        "cat <<EOF > f\n$(git commit -m x)\nEOF",
+        "cat <<EOF > f\n`git commit -m x`\nEOF",
+        "cat <<EOF > f\n`git push origin main`\nEOF",
+    ],
+    ids=["dollar-paren-commit", "backtick-commit", "backtick-push"],
+)
+def test_violation_refuses_a_substitution_in_an_unquoted_body_on_main(
+    command: str,
+) -> None:
+    assert refused(command, PROTECTED)
+
+
+@pytest.mark.parametrize(
+    "command",
+    [
+        "cat <<EOF > f\n`git push origin main`\nEOF",
+        "cat <<EOF > f\n$(git push origin main)\nEOF",
+    ],
+    ids=["backtick", "dollar-paren"],
+)
+def test_violation_refuses_a_push_to_main_in_an_unquoted_body_from_a_branch(
+    command: str,
+) -> None:
+    assert violation(command, OTHER).startswith(PUSH_REASON)
+
+
+def test_violation_names_the_commit_not_the_heredoc_for_a_body_substitution() -> None:
+    command = "cat <<EOF > f\n$(git commit -m x)\nEOF"
+
+    assert violation(command, PROTECTED).startswith(COMMIT_REASON)
+    assert violation(command, OTHER) == ""
+
+
+@pytest.mark.parametrize(
+    "opener",
+    ["<<'EOF'", '<<"EOF"', "<<\\EOF", '<<E"O"F', "<<-'EOF'"],
+    ids=["single", "double", "backslash", "quote-inside-word", "dash-single"],
+)
+@pytest.mark.parametrize("branch", [PROTECTED, OTHER])
+def test_violation_leaves_a_quoted_delimiter_body_pure_data(
+    opener: str, branch: str
+) -> None:
+    command = f"cat {opener} > f\n$(git commit -m x)\n`git push origin main`\nEOF"
+
+    assert violation(command, branch) == ""
+
+
+@pytest.mark.parametrize(
+    "body",
+    [
+        "\\$(git commit -m x)",
+        "\\`git commit -m x\\`",
+        "$((1<<2))",
+        "$(( 1 + 2 ))",
+        "${x}",
+        "${#x} and ${x:-default}",
+        "cost $ 5, $1 and $$",
+        "# $(not closed",
+        "`never closed git commit",
+        "$(git commit -m x",
+    ],
+    ids=[
+        "escaped-dollar",
+        "escaped-backticks",
+        "shift-arithmetic",
+        "arithmetic",
+        "parameter",
+        "parameter-forms",
+        "lone-dollars",
+        "unclosed-in-comment-like-text",
+        "unclosed-backtick",
+        "unclosed-dollar-paren",
+    ],
+)
+def test_violation_does_not_read_text_or_arithmetic_in_an_unquoted_body_as_a_command(
+    body: str,
+) -> None:
+    assert violation(f"cat <<EOF > f\n{body}\nEOF", PROTECTED) == ""
+
+
+def test_violation_reads_an_escaped_backslash_before_a_substitution_as_live() -> None:
+    # `\\` is one backslash, so the `$(` after it is not escaped. Bash runs it.
+    command = "cat <<EOF > f\n\\\\$(git commit -m x)\nEOF"
+
+    assert violation(command, PROTECTED).startswith(COMMIT_REASON)
+
+
+@pytest.mark.parametrize(
+    "body",
+    [
+        "'$(git commit -m x)'",
+        '"$(git commit -m x)"',
+        "it's $(git commit -m x)",
+        '$(echo "it\'s"; git commit -m x)',
+        "$(git \\\ncommit -m x)",
+        "$(echo y\ngit commit -m x)",
+        "$( (git commit -m x) )",
+        "$((git commit -m x); echo)",
+        "$(echo ')'; git commit -m x)",
+        "$(git commit -m x # ) not the end\n)",
+        "${y:-$(git commit -m x)}",
+        "$(( $(git commit -m x) + 1 ))",
+        "`echo y; git commit -m x`",
+        "# a comment is only text here: $(git commit -m x)",
+    ],
+    ids=[
+        "single-quoted",
+        "double-quoted",
+        "stray-apostrophe",
+        "quote-pair-inside",
+        "continuation",
+        "second-line",
+        "subshell",
+        "two-parens-not-arithmetic",
+        "paren-in-quotes",
+        "paren-in-comment",
+        "parameter-default",
+        "inside-arithmetic",
+        "backtick-second-command",
+        "hash-is-text",
+    ],
+)
+def test_violation_refuses_every_body_substitution_form_bash_runs(body: str) -> None:
+    assert violation(f"cat <<EOF > f\n{body}\nEOF", PROTECTED).startswith(COMMIT_REASON)
+
+
+@pytest.mark.parametrize(
+    "command",
+    [
+        "cat <<EOF > f\n$(date)\nEOF",
+        "cat <<EOF > f\nrun `git status` and $(git log --oneline)\nEOF",
+        'cat <<EOF > f\n$(echo "it\'s")\nEOF',
+        "cat <<EOF > f\nit's `date`\nEOF",
+        "cat <<EOF > f\n$(cat <<'INNER'\ngit commit -m x\nINNER\n)\nEOF",
+    ],
+    ids=[
+        "date",
+        "read-only-git",
+        "quote-inside",
+        "apostrophe-and-date",
+        "nested-heredoc",
+    ],
+)
+def test_violation_allows_a_harmless_body_substitution_on_main(command: str) -> None:
+    assert violation(command, PROTECTED) == ""
+
+
+def test_violation_still_judges_the_command_after_a_body_with_substitutions() -> None:
+    command = 'cat <<EOF > f\n$(echo "it\'s"; date)\nEOF\ngit commit -m x'
+
+    assert violation(command, PROTECTED).startswith(COMMIT_REASON)
+
+
+def test_violation_keeps_quote_pairing_after_a_body_substitution_with_a_stray_quote() -> (
+    None
+):
+    # The apostrophe sits inside the substitution's own double quotes; it must not
+    # pair with the one in the comment after the real commit.
+    command = "cat <<EOF > f\n$(echo \"it's\")\nEOF\ngit commit -m x # '"
+
+    assert violation(command, PROTECTED).startswith(COMMIT_REASON)
+
+
+def test_violation_reads_a_backtick_pair_around_an_apostrophe_as_unrunnable() -> None:
+    # Bash rejects the unbalanced quote, so nothing runs; the guard drops it rather
+    # than letting it make the whole command unreadable.
+    command = "cat <<EOF > f\n`it's`\nEOF\ngit push origin main"
+
+    assert violation(command, OTHER).startswith(PUSH_REASON)
+
+
+def test_violation_judges_a_substitution_in_the_second_of_two_heredocs() -> None:
+    command = "cat <<'A' <<B\n$(git commit -m x)\nA\n$(git commit -m y)\nB"
+
+    assert violation(command, PROTECTED).startswith(COMMIT_REASON)
+    # Only the quoted one is data: swap them and the first is the live one.
+    quoted_second = "cat <<A <<'B'\n$(date)\nA\n$(git commit -m y)\nB"
+    assert violation(quoted_second, PROTECTED) == ""
+
+
+def test_violation_expands_the_rest_of_an_unterminated_unquoted_body() -> None:
+    assert violation("cat <<EOF\n$(git commit -m x)", PROTECTED).startswith(
+        COMMIT_REASON
+    )
+    assert violation("cat <<'EOF'\n$(git commit -m x)", PROTECTED) == ""
+
+
+def test_violation_joins_a_continuation_before_reading_a_body_substitution() -> None:
+    # `$` and `(` are separated by a backslash-newline that bash deletes.
+    command = "cat <<EOF > f\n$\\\n(git commit -m x)\nEOF"
+
+    assert violation(command, PROTECTED).startswith(COMMIT_REASON)
+
+
+def test_violation_flags_unmodelled_syntax_inside_a_body_substitution() -> None:
+    command = "cat <<EOF > f\n$(git commit -m $'a')\nEOF"
+
+    assert violation(command, PROTECTED).startswith(UNMODELLED_REASON)
+
+
+def test_violation_does_not_look_inside_quotes_within_a_body_substitution() -> None:
+    # The same limit a plain `echo "$(git commit)"` has outside a heredoc: the guard
+    # does not read substitutions nested in quotes or backticks. Recorded so a change
+    # to it is a decision.
+    assert violation('cat <<EOF\n$(echo "$(git commit -m x)")\nEOF', PROTECTED) == ""
+    assert violation('echo "$(git commit -m x)"', PROTECTED) == ""
+
+
+def test_segments_puts_a_body_substitution_on_its_own_line_after_the_command() -> None:
+    command = "cat <<EOF > f\n$(git commit -m x)\nEOF"
+
+    assert segments(command) == [
+        Segment(("cat", "<<", "EOF", ">", "f"), ""),
+        Segment(("git", "commit", "-m", "x"), "\n"),
+    ]
+
+
+def test_segments_orders_dollar_paren_and_backtick_substitutions_as_written() -> None:
+    command = "cat <<EOF\n`git add .` text $(git commit -m x)\nEOF\nls"
+
+    assert segments(command) == [
+        Segment(("cat", "<<", "EOF"), ""),
+        Segment(("git", "add", "."), "\n"),
+        Segment(("git", "commit", "-m", "x"), "\n"),
+        Segment(("ls",), "\n"),
+    ]
+
+
+def test_segments_leaves_a_quoted_delimiter_body_out_entirely() -> None:
+    command = "cat <<'EOF'\n$(git commit -m x)\nEOF\nls"
+
+    assert segments(command) == [
+        Segment(("cat", "<<", "EOF"), ""),
+        Segment(("ls",), "\n"),
+    ]
+
+
+def test_segments_unescapes_a_nested_backtick_pair_for_the_inner_command() -> None:
+    command = "cat <<EOF\n`echo \\`git commit -m x\\``\nEOF"
+
+    parsed = segments(command)
+
+    assert parsed is not None
+    assert parsed[1].tokens[0] == "echo"
 
 
 def test_violation_distrust_searches_the_raw_command_comments_included() -> None:
