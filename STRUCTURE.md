@@ -176,7 +176,34 @@ bash with `git` shadowed:
 
 Round 3 (`development/fix/guard-git-shell-lexing/03-...`) adds the reproduction for the reserved
 words, under its own heading at the end of the file: `if git commit -m x; then echo ok; fi` refused
-on `main` instead of allowed.
+on `main` instead of allowed. The rest of the round's suite follows it, each shape checked against
+bash with `git` shadowed where bash can run it:
+
+- **Reserved words at a command position** — twenty-seven commands refused on `main` (every leader,
+  chains such as `if !`, `! !` and `time !`, after `&&`, `||`, `|`, `&`, `;` and a newline, inside
+  `$( )`, backticks, `<( )`, a subshell, a group and an unquoted heredoc body, after an assignment
+  or a redirection); a quoted heredoc body left as data; a push refused from a branch with `HEAD`
+  resolved against the branch it is on.
+- **Hidden switches** — a switch after a leader counted for a later commit from a branch and from a
+  detached HEAD; a switch to another branch, a `-C` switch and `-m then` allowed.
+- **Trust** — a switch led by `!` or `coproc` (also after `time`, chained, a push, a switch to
+  `main`) refused; the same inside a negated pipeline or group (`! true | git checkout ...`,
+  `! (git checkout ...)&&`, `coproc { }`); `&&` trust kept where no `!` leads the switch, a
+  negation ended by `;`, and `ok | {target}` rather than `possible | {target}`; the order of the
+  reasons; the accepted cost of a switch in a condition pinned (refused on `main`, allowed from a
+  branch) with the compound-command and quoted or misplaced leader over-refusals.
+- **Leaders as arguments** — `echo if case; git commit` inside a substitution refused (a leader
+  that is an argument opens no `case`), while a `case` after a real leader still opens one.
+- **Words that are not commands** — `echo if`, `for git in`, `select`, `case git in`, `IF` and
+  `Then` allowed; `{ }`, `time`, `case`, both function forms unchanged; a leader with nothing behind it.
+- **Loops** — a switch anywhere in a bash, nested, substituted, unclosed or PowerShell loop counted
+  for the whole loop; PowerShell keywords in any case; the range bounded (a switch after `done`, a
+  loop-free commit, a `-C` switch, `do { }` in a bash loop); a `done` that is a case pattern or
+  quoted not closing the loop, and the places a real one does; a stray `done`; a loop in a
+  subshell pinned as running on.
+- **`git_subcommand`** — every leader, chained leaders and wrappers, the arguments returned, the
+  name-taking words, case and the glued `!git` not stepped, leaders alone, a leader after the
+  command read as an argument.
 
 ### `tests/test_plan_state.py`
 
@@ -345,15 +372,22 @@ The reserved words that take a command next — `if`, `then`, `else`, `elif`, `w
 `do`, `!` and `coproc` — are stepped over the same way, singly or chained, so a `git` behind
 one is judged like any other (`for`, `select`, `case`, `function` and `in` are followed by a
 name or pattern and never stepped over). The one list is shared with the pre-pass's `case`
-placement. Trust follows the separator, except that a switch led by `!` or `coproc` only
-widens what an `&&` can trust, because the `&&` after a negated command runs when it failed
-and `coproc` returns at once. bash's own `if`/`while`/`until` logic is not modelled:
+placement, and a leader opens a command only where a command could start (`echo if case` reads
+`case` as an argument). Trust follows the separator, except that a switch led by `!` or `coproc`
+— or inside the pipeline or group such a word leads, until a `;`, newline, `&`, `&&` or `||` ends
+the list outside any group — only widens what an `&&` can trust, because the `&&` after a negated
+command runs when it failed and `coproc` returns at once. bash's own `if`/`while`/`until` logic is not modelled:
 `then`, `do`, `else` and `elif` follow `;` or a newline, so every branch is in play, and
 `if git checkout -b feat/x; then git commit -m x; fi` is refused from `main`. A branch
 switch anywhere in a loop counts for all of it — bash loops from `for`, `select`, `while` or
-`until` to the matching `done`, PowerShell's `foreach` and `do { } while ()` to the end of
-the command, a loop's condition included. Known miss: a function is judged where it is
-defined, not where it is called.
+`until` to the matching `done`, PowerShell's `foreach`, `for`, `while` and `do { } while ()`
+(keywords in any case) to the end of the command, a loop's condition included. A `done` closes a
+loop only where bash reads one — not after `|`, not ahead of a case pattern's `)`, and not at all
+when the command writes a quoted `done` — and a `do {` inside a bash loop is bash's. Known
+over-refusals: a quoted or misplaced leader is stepped over, a compound command ends an `&&`
+chain's trust, a loop in a subshell runs on. Known misses: a function is judged where it is
+defined, not where it is called; a loop-variable switch target; a redirection on a compound
+command, which bash runs before its body; PowerShell's glued braces and `ForEach-Object`.
 
 `shlex` is not a shell, so a private pass runs in front of it and removes what
 bash never runs: a `#` at the start of a word comments out the rest of its line, a

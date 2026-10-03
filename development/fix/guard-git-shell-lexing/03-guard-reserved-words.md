@@ -1,6 +1,6 @@
 # The git guard steps over shell reserved words
 
-<!-- claude-plan step=5 status=active -->
+<!-- claude-plan step=6 status=active -->
 
 | Field | Value |
 |---|---|
@@ -17,7 +17,7 @@
 | 2 | Plan | `/plan` | with the user | done |
 | 3 | Implement | `/implement` | in `/build` | done |
 | 4 | Verify | `/verify` | in `/build` | done |
-| 5 | Test | `/test` | in `/build` | pending |
+| 5 | Test | `/test` | in `/build` | done |
 | 6 | Concept check | `/concept-check` | in `/build` | pending |
 | 7 | Ship | `/ship` | in `/build` | pending |
 | 8 | Recommend | `/recommend` | with the user | pending |
@@ -369,8 +369,69 @@ Built as planned. Two implementation choices inside the plan: `_command_index` n
 
 > Written in step 5: the dynamic half.
 
+Two test-designers ran (contract, input-space). Suite: 854 to 1042 tests, all green; ruff, ruff
+format, mypy clean. Every new `violation` test was run red against the step 4 code where it
+tests a fix (a)-(e) below, and green after.
+
+**Bugs the designers' cases exposed, fixed in `.claude/hooks/guard_git.py`** (each verified
+against bash with `git` shadowed, `scratchpad/r5_check.py`):
+
+| Fix | Cause | Change |
+|---|---|---|
+| (a) A6 | `_scan.finish_word` put the next word at command position after any leader word, even an argument, so `echo "$(echo if case; git commit -m x)"` read `case` as opening a pattern | a leader opens a command only if it was itself at a command position |
+| (b) A2/A4 | `_leads_uncertainly` looked only at the switch's own segment, missing `! true \| git checkout ...`, `! (git checkout ...)&&`, `coproc (...)&&` | `_judge` keeps a `negating` state set by a `!`/`coproc` segment and ended by `;`, newline, `&`, `&&`, `||` at group depth 0; `(`/`{` count up, a close counts down (a glued close is not seen, which only keeps the state longer) |
+| (c) A5 | `_loop_ranges` closed a loop on any segment starting with `done` after quote removal: `x\|done)`, `"done"`, `\done` | a `done` closes only when its separator is not `\|`, `\|\|`, `&&`, `(`, `{`, `)`, `}`, the next segment's separator is not `)` (a pattern), and the command writes no quoted `done` (`_quoted_done` on the prepared text; then every loop runs on) |
+| (d) A5 | PowerShell keywords compared case-sensitively | `ForEach`, `For`, `While` (any case other than bash's lower case) and `Do {` start a to-the-end loop |
+| (e) A5 | bash `do { :; }` taken for PowerShell `do { } while` | a lone `do` before `{` counts only when no bash loop is open |
+
+Side effect of (c), pinned: `(for ...; done); cmd` leaves the next command with separator `)`, the
+same as a case pattern, so the loop runs on (over-refusal).
+
 | Intent | Test names | Result |
 |---|---|---|
+| T1 | `test_violation_refuses_a_commit_after_if_on_main` (step 3, unchanged) | pass |
+| T2 | `test_violation_refuses_a_commit_after_every_reserved_word_on_main` (27), `..._allows_a_commit_in_a_quoted_heredoc_body_after_a_reserved_word`, `..._refuses_a_push_after_a_reserved_word_from_a_branch`, `..._resolves_head_after_a_reserved_word_against_the_branch`, `test_git_subcommand_steps_over_each_reserved_word` (9), `..._steps_over_chained_reserved_words_and_wrappers` (11), `..._returns_a_switch_after_a_reserved_word_with_its_arguments`, `..._leaves_a_redirected_git_after_a_leader_to_violation` | pass |
+| T3 | `test_violation_counts_a_switch_after_a_reserved_word` (5), `..._allows_what_a_reserved_word_does_not_make_a_risk` (3), `..._counts_a_hidden_switch_on_a_detached_head` (3) | pass |
+| T4 | `..._does_not_trust_a_switch_a_bang_or_coproc_leads` (7), `..._does_not_trust_a_negated_push_target_either`, `..._negated_switch_to_main_from_a_branch`, `..._inside_a_negated_pipeline_or_group` (8, fix b), `..._keeps_and_trust_where_no_bang_or_coproc_leads_the_switch` (10), `..._widens_a_negated_switch_only_from_what_the_chain_trusts`, `..._orders_the_unresolved_reason_after_a_negated_switch`, `..._pins_the_accepted_cost_of_a_switch_in_a_condition` (3), `..._pins_the_refusal_after_a_trusted_compound_command` (3), `..._pins_a_quoted_or_misplaced_leader_as_an_over_refusal` (6) | pass |
+| T5 | `..._counts_a_switch_anywhere_in_a_loop_for_the_whole_loop` (11), `..._reads_powershell_loop_keywords_in_any_case` (8, fix d), `..._bounds_a_loops_widening_to_the_loop` (7, fix e), `..._does_not_close_a_loop_on_a_done_that_is_not_the_reserved_word` (7, fix c), `..._closes_a_loop_on_a_done_in_every_place_bash_reads_one`, `..._pins_a_loop_in_a_subshell_as_running_on`, `..._keeps_a_loop_open_through_a_stray_done`, `..._is_the_same_for_a_repeated_call` (3) | pass |
+| T6 | `..._keeps_words_that_are_not_commands_as_words` (7), `..._keeps_the_outcome_of_forms_that_were_already_read` (5), `..._allows_a_reserved_word_with_no_command_behind_it` (6), `..._does_not_open_a_case_after_a_leader_used_as_an_argument` (6, fix a), `..._still_opens_a_case_after_a_leader_at_a_command_position`, `test_git_subcommand_does_not_step_over_words_that_are_not_leaders` (13), `..._is_empty_when_only_reserved_words_are_given` (6), `..._reads_a_reserved_word_after_git_as_an_argument` | pass |
+| T7 | step 6 (the differential); the 853 existing tests pass unmodified | pass (existing) |
+
+No existing test was changed.
+
+Merge of the designers' cases, applied or rebutted:
+
+- Applied as tests: every case of both reports except those below. Both designers' suspected
+  bugs were real and are fixed (a)-(e); the contract designer's contradictions 1 and 2 and the
+  input-space designer's 1, 2, 3 (partly), 4 and 5.
+- Rebutted or pinned: contradiction 3 / input-space case 13 and `git_subcommand` case 8 (a leader
+  stepped after an assignment, redirection, wrapper or in quotes) pinned as over-refusal, not
+  fixed, at the orchestrator's decision. Contract 15 / contradiction 6 (`&& for ...; done &&`)
+  pinned as over-refusal.
+- Contradictions 4 and 5 (prose): the module docstring now says one exception plus the pipeline
+  and group rule; `git_subcommand`'s docstring is left as is (private callers rely on it, the
+  tests now state the contract).
+
+Recorded for step 8 (not fixed, not in `DEVELOPMENT.md`):
+
+1. A redirection with a substitution on a compound command (`if ...; fi <<<"$(git checkout main)"`,
+   also `case`/`{ }`) runs before the body; round 2 orders it after.
+2. A loop-variable switch target: `for b in main; do git checkout "$b"; done; git commit -m x`
+   from a branch is allowed (the target is read literally as `$b`).
+3. PowerShell glued braces: `if($?){git commit -m x}` and `do{git ...}` leave `{git` as one token.
+4. PowerShell `ForEach-Object` / `%` pipelines are not loops to the loop pass.
+
+Edge cases considered and deliberately skipped, with reasons:
+
+- Numbers, purity, idempotency of `git_subcommand`: pure functions on tuples; idempotency
+  asserted once for `violation`.
+- A bash oracle run for PowerShell-only forms: not checkable in bash; stated from PowerShell's
+  grammar.
+- `! true | git checkout -b feat/x && git commit` in the oracle: the oracle's `checkout -b`
+  succeeds, so `!` skips the commit; the bypass needs a failing checkout (an existing branch), as
+  the test comment says.
+- Negation inside a substitution frame (`echo "$(! git checkout ...)" && ...`): the `negating`
+  state ignores depth, over-widening only.
 
 Edge cases considered and deliberately skipped, with reasons:
 

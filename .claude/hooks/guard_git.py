@@ -105,16 +105,29 @@ The reserved words that take a command next -- `if`, `then`, `else`, `elif`,
 or chained (`if !`, `! !`, `time ! git`), so a `git` behind one is judged like
 any other. `for`, `select`, `case`, `function` and `in` are followed by a name or
 a pattern and are never stepped over. Trust follows the separator, as for any
-command, with two exceptions: a switch led by `!` or `coproc` only widens the
+command, with one exception: a switch led by `!` or `coproc` only widens the
 branches an `&&` can trust, because the `&&` after a negated command runs when it
-failed and `coproc` returns at once. Playing safe, bash's own `if`, `while` and
+failed and `coproc` returns at once. That holds for everything the word leads --
+a pipeline (`! a | git checkout ...`) or a group (`! (git checkout ...)`) -- until
+a `;`, a newline, `&`, `&&` or `||` ends the list outside any group. A leader opens a
+command only where a command could start, so `echo if case` reads `case` as an
+argument. Playing safe, bash's own `if`, `while` and
 `until` logic is not modelled: `then`, `do`, `else` and `elif` follow `;` or a
 newline, so every branch is in play there, and `if git checkout -b feat/x; then
 git commit -m x; fi` is refused from `main`. A loop runs its body again, so a
 branch switch anywhere in one counts for all of it: bash loops run from `for`,
-`select`, `while` or `until` to the matching `done`, PowerShell's `foreach` and
-`do { } while ()` to the end of the command, and a loop's condition counts with
-its body. Known miss: a function is judged where it is defined, not where it is
+`select`, `while` or `until` to the matching `done`, PowerShell's `foreach`, `for`,
+`while` and `do { } while ()` -- keywords in any case -- to the end of the command,
+and a loop's condition counts with its body. A `done` closes a loop only where
+bash reads one: not after `|`, not ahead of a case pattern's `)`, and not at all
+when the command writes a quoted `done`, which a tokenizer cannot tell from the
+word, so every loop then runs on. A `do {` inside a bash loop is bash's. Known
+over-refusals, kept: a quoted or misplaced leader (`'if' git commit`, `x=1 if
+git commit`) is stepped over, a compound command ends an `&&` chain's trust, and
+a loop in a subshell, `(for ...; done); cmd`, runs on. Known misses: a switch
+target that is a variable, a redirection on a compound command, which bash runs
+before its body, and PowerShell's glued braces and `ForEach-Object` pipelines.
+Known miss: a function is judged where it is defined, not where it is
 called, so `f() { git commit; }; git checkout main; f` is not seen.
 
 A push's destination is read with the same care: the arguments are walked rather
@@ -814,6 +827,9 @@ _STEPPED_LEADERS = _COMMAND_LEADERS - {"time"}
 #: the next `&&`.
 _UNCERTAIN_LEADERS = frozenset({"!", "coproc"})
 
+#: Separators that end the list a `!` or `coproc` leads, outside any group.
+_LIST_ENDS = frozenset({";", "\n", "&", "&&", "||"})
+
 #: Words that open a bash loop, and the leaders among them.
 _LOOP_COMMANDS = frozenset({"for", "select"})
 _LOOP_LEADERS = frozenset({"while", "until"})
@@ -957,7 +973,9 @@ def _scan(
         ):
             cases.pop()
         if word or not plain:
-            command_position = plain and word in _COMMAND_LEADERS
+            # A leader opens a command only where a command could start: in
+            # `echo if case` the `if` is an argument and `case` is one too.
+            command_position = plain and command_position and word in _COMMAND_LEADERS
         word, plain = "", True
 
     while index < length:
@@ -1457,17 +1475,52 @@ def violation(command: str, branch: str) -> str:
         return _unreadable(command, branch)
 
 
-def _loop_ranges(parsed: list[Segment]) -> dict[int, set[str]]:
+#: Separators a bash `done` never follows: it ends a list, so it comes after `;`,
+#: a newline or `&`. After `|` it is a case pattern.
+_NOT_BEFORE_DONE = frozenset({"|", "||", "&&", "(", "{", ")", "}"})
+
+#: Loop words PowerShell spells in any case; bash spells them in lower case only.
+_POWERSHELL_LOOPS = frozenset({"foreach", "for", "while"})
+
+
+def _quoted_done(text: str) -> bool:
+    r"""Report whether a word that reads `done` once unquoted is written with quotes.
+
+    A tokenizer drops the quotes, so `"done"` and `\done` look like the
+    reserved word that closes a loop; the prepared text still has them.
+
+    Args:
+        text: The command after `_prepare`.
+
+    Returns:
+        True if some word holds a quote or a backslash and reads `done` without.
+    """
+    for word in re.findall(r"[^\s;&|()<>{}]+", text):
+        if re.search(r"['\"\\]", word) and re.sub(r"['\"\\]", "", word) == "done":
+            return True
+    return False
+
+
+def _loop_ranges(
+    parsed: list[Segment], quoted_done: bool = False
+) -> dict[int, set[str]]:
     """Find the loops in a command and the branches switched to inside each.
 
     A switch late in a loop body governs the next iteration, so every switch
     inside a loop counts for the whole loop. Bash loops run from `for`,
     `select`, `while` or `until` to the matching `done`; PowerShell loops --
     `foreach`, or a `do` before a `{` -- run to the end of the command. A start
-    with no `done` runs to the end, and a `done` with no start is ignored.
+    with no `done` runs to the end, and a `done` with no start is ignored. A
+    `done` closes a loop only where the shell reads one: not after `|`, not in
+    front of a case pattern's `)`, and not at all when the command writes a
+    quoted `done` -- it cannot be told apart, so every loop then runs on. The
+    keywords of PowerShell's loops match in any case, and a lone `do` before a
+    `{` inside a bash loop is bash's own.
 
     Args:
         parsed: The invocations of the command, in order.
+        quoted_done: Whether the command writes `done` with quotes or a
+            backslash, as `_quoted_done` finds.
 
     Returns:
         For the first invocation of each loop -- that of its condition's
@@ -1482,13 +1535,28 @@ def _loop_ranges(parsed: list[Segment]) -> dict[int, set[str]]:
         name = _command_index(tokens)
         word = tokens[name] if name < len(tokens) else ""
         leaders = _walk_prefix(tokens)[1]
+        following = parsed[index + 1] if index < last else None
         if tokens[:1] == ("done",):
-            if open_loops:
+            pattern = following is not None and following.separator == ")"
+            if (
+                open_loops
+                and not quoted_done
+                and not pattern
+                and segment.separator not in _NOT_BEFORE_DONE
+            ):
                 ranges.append((open_loops.pop(), index))
         elif word in _LOOP_COMMANDS or _LOOP_LEADERS.intersection(leaders):
             open_loops.append(index)
-        elif word == "foreach" or (
-            tokens == ("do",) and index < last and parsed[index + 1].separator == "{"
+        elif (
+            (word != word.lower() and word.lower() in _POWERSHELL_LOOPS)
+            or word.lower() == "foreach"
+            or (
+                len(tokens) == 1
+                and tokens[0].lower() == "do"
+                and not open_loops
+                and following is not None
+                and following.separator == "{"
+            )
         ):
             ranges.append((index, last))
     ranges.extend((start, last) for start in open_loops)
@@ -1517,7 +1585,7 @@ def _judge(command: str, branch: str) -> str:
     Returns:
         What `violation` returns.
     """
-    _, unmodelled = _prepare(command)
+    prepared, unmodelled = _prepare(command)
     if unmodelled and branch == PROTECTED and RISKY_PATTERN.search(command):
         return (
             "Refused: this command uses syntax this guard does not read — "
@@ -1540,8 +1608,19 @@ def _judge(command: str, branch: str) -> str:
     # One frame per substitution being run: the branches the containing command
     # could start on, and the branches the substitution has switched to.
     frames: list[tuple[set[str], set[str]]] = []
-    loops = _loop_ranges(parsed)
+    loops = _loop_ranges(parsed, _quoted_done(prepared))
+    # Set by a `!` or `coproc`, until the list it leads has ended; `groups` counts
+    # the `(` and `{` opened since. A glued close is not counted, which only
+    # keeps the state longer.
+    negating = False
+    groups = 0
     for number, segment in enumerate(parsed):
+        if segment.separator in ("(", "{"):
+            groups += 1
+        elif segment.separator in (")", "}"):
+            groups = max(groups - 1, 0)
+        elif negating and groups == 0 and segment.separator in _LIST_ENDS:
+            negating = False
         if number in loops:
             ok |= loops[number]
             possible |= loops[number]
@@ -1589,12 +1668,15 @@ def _judge(command: str, branch: str) -> str:
         if target and not _redirected(segment.tokens):
             # What `!` negates and `coproc` backgrounds leaves the `&&` after it
             # unsure whether the switch happened.
-            ok = here | {target} if _leads_uncertainly(segment.tokens) else {target}
+            unsure = negating or _leads_uncertainly(segment.tokens)
+            ok = here | {target} if unsure else {target}
             possible.add(target)
             for _, targets in frames:
                 targets.add(target)
         else:
             ok = set(here)
+        if _leads_uncertainly(segment.tokens):
+            negating, groups = True, 0
 
     return ""
 

@@ -2947,3 +2947,534 @@ def test_violation_refuses_a_commit_after_if_on_main() -> None:
     command = "if git commit -m x; then echo ok; fi"
 
     assert violation(command, PROTECTED).startswith(COMMIT_REASON)
+
+
+@pytest.mark.parametrize(
+    "command",
+    [
+        "if git diff --quiet; then :; else git commit -am x; fi",
+        "if false; then :; elif git commit -m x; then :; fi",
+        "if true; then git commit -m x; fi",
+        "while git commit -m x; do break; done",
+        "until git commit -m x; do :; done",
+        "! git commit -m x",
+        "! ! git commit -m x",
+        "if ! git commit -m x; then :; fi",
+        "time ! git commit -m x",
+        "time -p git commit -m x",
+        "coproc git commit -m x",
+        "for ((i=0;i<1;i++)); do git commit -m x; done",
+        "true && if true; then git commit -m x; fi",
+        "false || if true; then git commit -m x; fi",
+        "ls | if true; then git commit -m x; fi",
+        "sleep 0 & ! git commit -m x",
+        "true\nif true\nthen git commit -m x\nfi",
+        "true\nwhile git commit -m x; do break; done",
+        "x=$(if true; then git commit -m x; fi)",
+        'echo "$(! git commit -m x)"',
+        "echo `! git commit -m x`",
+        "cat <(until git commit -m x; do :; done)",
+        "(if true; then git commit -m x; fi)",
+        "{ ! git commit -m x; }",
+        "cat <<EOF\n$(if true; then git commit -m x; fi)\nEOF",
+        "then GIT_EDITOR=true git commit -m x",
+        "else >log git commit -m x",
+    ],
+)
+def test_violation_refuses_a_commit_after_every_reserved_word_on_main(
+    command: str,
+) -> None:
+    assert violation(command, PROTECTED).startswith(COMMIT_REASON)
+
+
+def test_violation_allows_a_commit_in_a_quoted_heredoc_body_after_a_reserved_word() -> (
+    None
+):
+    command = "cat <<'EOF'\nif git commit -m x; then :; fi\nEOF"
+
+    assert violation(command, PROTECTED) == ""
+
+
+def test_violation_refuses_a_push_after_a_reserved_word_from_a_branch() -> None:
+    command = "for b in a; do git push origin main; done"
+
+    assert violation(command, OTHER).startswith(PUSH_REASON)
+    assert violation(command, PROTECTED).startswith(PUSH_REASON)
+
+
+def test_violation_resolves_head_after_a_reserved_word_against_the_branch() -> None:
+    command = "if true; then git push origin HEAD; fi"
+
+    assert violation(command, PROTECTED).startswith(PUSH_REASON)
+    assert violation(command, OTHER) == ""
+
+
+@pytest.mark.parametrize(
+    "command",
+    [
+        "if true; then git checkout main; fi; git commit -m x",
+        "for i in 1; do git checkout main; done && git commit -m x",
+        "! git checkout main; git commit -m x",
+        'if true; then echo "$(git checkout main)"; fi; git commit -m x',
+        "if true; then git checkout feat/z; fi; git checkout main; git commit -m x",
+    ],
+)
+def test_violation_counts_a_switch_after_a_reserved_word(command: str) -> None:
+    assert violation(command, OTHER).startswith(COMMIT_REASON)
+
+
+@pytest.mark.parametrize(
+    "command",
+    [
+        "if true; then git checkout feat/z; fi; git commit -m x",
+        "if true; then git -C ../o checkout main; fi; git commit -m x",
+        "if true; then git commit -m then; fi",
+    ],
+)
+def test_violation_allows_what_a_reserved_word_does_not_make_a_risk(
+    command: str,
+) -> None:
+    assert violation(command, OTHER) == ""
+
+
+@pytest.mark.parametrize(
+    "command",
+    [
+        "if true; then git checkout main; fi; git commit -m x",
+        "for i in 1 2; do git commit -m x; git checkout main; done",
+        "! git checkout main; git commit -m x",
+    ],
+)
+def test_violation_counts_a_hidden_switch_on_a_detached_head(command: str) -> None:
+    assert violation(command, "").startswith(COMMIT_REASON)
+
+
+# --- trust: `!` and `coproc` --------------------------------------------------
+
+
+@pytest.mark.parametrize(
+    "command",
+    [
+        "! git checkout -b feat/x && git commit -m x",
+        "if ! git checkout -b feat/x; then git commit -m x; fi",
+        "coproc git checkout -b feat/x && git commit -m x",
+        "time ! git checkout -b feat/x && git commit -m x",
+        "! time git checkout -b feat/x && git commit -m x",
+        "time -p ! git checkout -b feat/x && git commit -m x",
+        "! ! git checkout -b feat/x && git commit -m x",
+    ],
+)
+def test_violation_does_not_trust_a_switch_a_bang_or_coproc_leads(
+    command: str,
+) -> None:
+    assert violation(command, PROTECTED).startswith(COMMIT_REASON)
+
+
+def test_violation_does_not_trust_a_negated_push_target_either() -> None:
+    command = "! git checkout -b feat/x && git push origin HEAD"
+
+    assert violation(command, PROTECTED).startswith(PUSH_REASON)
+
+
+def test_violation_does_not_trust_a_negated_switch_to_main_from_a_branch() -> None:
+    assert violation("! git checkout main && git commit -m x", OTHER).startswith(
+        COMMIT_REASON
+    )
+
+
+@pytest.mark.parametrize(
+    "command",
+    [
+        "! true | git checkout -b feat/x && git commit -m x",
+        "! true | cat | git checkout -b feat/x && git commit -m x",
+        "! (git checkout -b feat/x)&&git commit -m x",
+        "! (git checkout -b feat/x) && git commit -m x",
+        "! { git checkout -b feat/x; } && git commit -m x",
+        "coproc (git checkout -b feat/x)&&git commit -m x",
+        "coproc { git checkout -b feat/x; } && git commit -m x",
+        "! (true; git checkout -b feat/x)&&git commit -m x",
+    ],
+)
+def test_violation_does_not_trust_a_switch_inside_a_negated_pipeline_or_group(
+    command: str,
+) -> None:
+    # Bash: with `feat/x` already existing the checkout fails, `!` turns that
+    # into success, and the commit runs on `main`.
+    assert violation(command, PROTECTED).startswith(COMMIT_REASON)
+
+
+@pytest.mark.parametrize(
+    "command",
+    [
+        "git checkout -b feat/x && git commit -m x",
+        "git checkout -b feat/x && ! git diff --cached --quiet && git commit -m x",
+        "git checkout -b feat/x && time git commit -m x",
+        "git checkout -b feat/x && time -p git commit -m x",
+        "time git checkout -b feat/x && git commit -m x",
+        "git checkout -b feat/x && ! git commit -m x",
+        "git checkout -b feat/x && time ! git diff --quiet && git commit -m x",
+        "git checkout -b feat/x && coproc true && git commit -m x",
+        "! git diff --quiet && git checkout -b feat/x && git commit -m x",
+        "! true | cat; git checkout -b feat/x && git commit -m x",
+    ],
+)
+def test_violation_keeps_and_trust_where_no_bang_or_coproc_leads_the_switch(
+    command: str,
+) -> None:
+    assert violation(command, PROTECTED) == ""
+
+
+def test_violation_widens_a_negated_switch_only_from_what_the_chain_trusts() -> None:
+    # `ok | {target}`, not `possible | {target}`: `main` must not return.
+    command = "git checkout -b feat/x && ! git checkout -b feat/z && git commit -m x"
+
+    assert violation(command, PROTECTED) == ""
+
+
+def test_violation_orders_the_unresolved_reason_after_a_negated_switch() -> None:
+    assert violation(
+        "! git checkout - && git push origin feat/topic", OTHER
+    ).startswith(UNRESOLVED_REASON)
+    assert violation(
+        "git checkout -; if true; then git commit -m x; fi", PROTECTED
+    ).startswith(COMMIT_REASON)
+    assert violation(
+        "git checkout -; if true; then git commit -m x; fi", OTHER
+    ).startswith(UNRESOLVED_REASON)
+
+
+@pytest.mark.parametrize(
+    "command",
+    [
+        "if git checkout -b feat/x; then git commit -m x; fi",
+        "while git checkout -b feat/x; do git commit -m x; break; done",
+        "if true; git checkout -b feat/x; then git commit -m x; fi",
+    ],
+)
+def test_violation_pins_the_accepted_cost_of_a_switch_in_a_condition(
+    command: str,
+) -> None:
+    # Bash commits on `feat/x`. Refused on `main` because `then` and `do` follow
+    # `;` and so every branch is in play: the accepted cost of playing safe.
+    assert violation(command, PROTECTED).startswith(COMMIT_REASON)
+    assert violation(command, OTHER) == ""
+
+
+@pytest.mark.parametrize(
+    "command",
+    [
+        "git checkout -b feat/x && if true; then :; fi && git commit -m x",
+        "git checkout -b feat/x && for f in a; do git add $f; done && git commit -m x",
+        'git checkout -b feat/x && echo "$(if true; then git commit -m x; fi)"',
+    ],
+)
+def test_violation_pins_the_refusal_after_a_trusted_compound_command(
+    command: str,
+) -> None:
+    # Bash commits on `feat/x`. A compound command's `fi` or `done` follows `;`,
+    # so the chain's trust ends there: a deliberate over-refusal.
+    assert violation(command, PROTECTED).startswith(COMMIT_REASON)
+
+
+@pytest.mark.parametrize(
+    "command",
+    [
+        "'if' git commit -m x",
+        '"!" git commit -m x',
+        "\\! git commit -m x",
+        "x=1 if git commit -m x",
+        ">/dev/null ! git commit -m x",
+        "sudo -n ! git commit -m x",
+    ],
+)
+def test_violation_pins_a_quoted_or_misplaced_leader_as_an_over_refusal(
+    command: str,
+) -> None:
+    # Bash reads none of these as a reserved word and runs no git; the walk
+    # steps over a leader wherever it sits in the prefix, after the quotes are
+    # gone. Recorded so changing it is a decision.
+    assert violation(command, PROTECTED).startswith(COMMIT_REASON)
+
+
+# --- leaders that are only arguments -----------------------------------------
+
+
+@pytest.mark.parametrize(
+    "command",
+    [
+        'echo "$(echo if case; git commit -m x)"',
+        'echo "$(echo while case; git commit -m x)"',
+        'echo "$(echo coproc case; git commit -m x)"',
+        'echo "$(echo then case; git commit -m x)"',
+        'echo "$(echo do case; git commit -m x)"',
+        'echo "$(echo ! case; git commit -m x)"',
+    ],
+)
+def test_violation_does_not_open_a_case_after_a_leader_used_as_an_argument(
+    command: str,
+) -> None:
+    # `case` after `echo if` is an argument, so the `)` that closes the
+    # substitution is not a pattern's and the commit inside it runs.
+    assert violation(command, PROTECTED).startswith(COMMIT_REASON)
+
+
+def test_violation_still_opens_a_case_after_a_leader_at_a_command_position() -> None:
+    command = 'echo "$(if true; then case a in a) git commit -m x;; esac; fi)"'
+
+    assert violation(command, PROTECTED).startswith(COMMIT_REASON)
+
+
+# --- words that are not commands stay words ----------------------------------
+
+
+@pytest.mark.parametrize(
+    "command",
+    [
+        "echo if git commit",
+        "echo then git commit",
+        "for git in commit; do :; done",
+        "select git in commit; do break; done",
+        "case git in commit) :;; esac",
+        "IF git commit -m x",
+        "Then git commit -m x",
+    ],
+)
+def test_violation_keeps_words_that_are_not_commands_as_words(command: str) -> None:
+    assert violation(command, PROTECTED) == ""
+
+
+@pytest.mark.parametrize(
+    "command",
+    [
+        "{ git commit -m x; }",
+        "time git commit -m x",
+        "case a in a) git commit -m x;; esac",
+        "f() { git commit -m x; }",
+        "function f { git commit -m x; }",
+    ],
+)
+def test_violation_keeps_the_outcome_of_forms_that_were_already_read(
+    command: str,
+) -> None:
+    assert violation(command, PROTECTED).startswith(COMMIT_REASON)
+
+
+@pytest.mark.parametrize(
+    "command", ["!", "if", "! ; git status", "done", "then", "! !"]
+)
+def test_violation_allows_a_reserved_word_with_no_command_behind_it(
+    command: str,
+) -> None:
+    assert violation(command, PROTECTED) == ""
+
+
+# --- loops -------------------------------------------------------------------
+
+
+@pytest.mark.parametrize(
+    "command",
+    [
+        "for i in 1 2; do git commit -m x; git checkout main; done",
+        "while true; do git commit -m x; git checkout main; break; done",
+        "until false; do git commit -m x; git checkout main; break; done",
+        "select b in a; do git commit -m x; git checkout main; break; done",
+        'while [ -n "$(git commit -m x)" ]; do git checkout main; done',
+        "for i in 1; do for j in 1; do git commit -m x; done; git checkout main; done",
+        "for a in 1 2; do git commit -m x; for b in 1; do :; done; git checkout main; done",
+        "x=$(for i in 1 2; do git commit -m x; git checkout main; done)",
+        "for i in 1 2; do git commit -m x; git checkout main",
+        "foreach ($b in 1,2) { git commit -m x; git checkout main }",
+        "do { git commit -m x; git checkout main } while ($x)",
+    ],
+)
+def test_violation_counts_a_switch_anywhere_in_a_loop_for_the_whole_loop(
+    command: str,
+) -> None:
+    assert violation(command, OTHER).startswith(COMMIT_REASON)
+
+
+@pytest.mark.parametrize(
+    "command",
+    [
+        "ForEach ($b in 1,2) { git commit -m x; git checkout main }",
+        "FOREACH ($b in 1,2) { git commit -m x; git checkout main }",
+        "Do { git commit -m x; git checkout main } While ($x)",
+        "DO { git commit -m x; git checkout main } WHILE ($x)",
+        "While ($true) { git commit -m x; git checkout main }",
+        "For ($i=0; $i -lt 2; $i++) { git commit -m x; git checkout main }",
+        "for ($i=0; $i -lt 2; $i++) { git commit -m x; git checkout main }",
+        "foreach ($b in 1,2) { git commit -m x; git checkout main }",
+    ],
+)
+def test_violation_reads_powershell_loop_keywords_in_any_case(command: str) -> None:
+    assert violation(command, OTHER).startswith(COMMIT_REASON)
+
+
+@pytest.mark.parametrize(
+    "command",
+    [
+        "for i in 1 2; do git commit -m x; done; git checkout main",
+        "git commit -m x; for i in 1; do git checkout main; done",
+        "done; git commit -m x; git checkout main",
+        "for i in 1 2; do git commit -m x; git checkout feat/z; done",
+        "for i in 1 2; do git commit -m x; git -C ../o checkout main; done",
+        "for i in 1; do { :; }; done; git commit -m x; git checkout main",
+        "for i in 1; do { git commit -m x; }; done; git checkout main",
+    ],
+)
+def test_violation_bounds_a_loops_widening_to_the_loop(command: str) -> None:
+    assert violation(command, OTHER) == ""
+
+
+@pytest.mark.parametrize(
+    "command",
+    [
+        "for i in 1 2; do case $i in x|done) :;; esac; git commit -m x; git checkout main; done",
+        "for i in 1 2; do case $i in done) :;; esac; git commit -m x; git checkout main; done",
+        "for i in 1 2; do case $i in x) :;; done) :;; esac; git commit -m x; git checkout main; done",
+        'for i in 1 2; do "done" 2>/dev/null; git commit -m x; git checkout main; done',
+        "for i in 1 2; do \\done 2>/dev/null; git commit -m x; git checkout main; done",
+        "for i in 1 2; do 'done'; git commit -m x; git checkout main; done",
+        'for i in 1 2; do d"on"e; git commit -m x; git checkout main; done',
+    ],
+)
+def test_violation_does_not_close_a_loop_on_a_done_that_is_not_the_reserved_word(
+    command: str,
+) -> None:
+    assert violation(command, OTHER).startswith(COMMIT_REASON)
+
+
+def test_violation_closes_a_loop_on_a_done_in_every_place_bash_reads_one() -> None:
+    for command in (
+        "for i in 1; do :; done; git commit -m x; git checkout main",
+        "for i in 1; do :; done\ngit commit -m x; git checkout main",
+        "for i in 1; do : & done; git commit -m x; git checkout main",
+        "for i in 1; do :; done && git commit -m x; git checkout main",
+    ):
+        assert violation(command, OTHER) == "", command
+
+
+def test_violation_pins_a_loop_in_a_subshell_as_running_on() -> None:
+    # Bash closes the loop at `done`. The `)` after it makes the next command's
+    # separator `)`, which is also what a case pattern leaves, so the guard does
+    # not close the loop: a deliberate over-refusal.
+    command = "(for i in 1; do :; done); git commit -m x; git checkout main"
+
+    assert violation(command, OTHER).startswith(COMMIT_REASON)
+
+
+def test_violation_keeps_a_loop_open_through_a_stray_done() -> None:
+    assert violation("done; git commit -m x; git checkout main", OTHER) == ""
+    assert violation(
+        "for i in 1 2; do git commit -m x; git checkout main; done; done", OTHER
+    ).startswith(COMMIT_REASON)
+
+
+@pytest.mark.parametrize(
+    "command",
+    [
+        "if true; then git checkout main; fi; git commit -m x",
+        "for i in 1 2; do git commit -m x; git checkout main; done",
+        "do { git commit -m x; git checkout main } while ($x)",
+    ],
+)
+def test_violation_is_the_same_for_a_repeated_call(command: str) -> None:
+    assert violation(command, OTHER) == violation(command, OTHER)
+
+
+# --- git_subcommand after reserved words -------------------------------------
+
+
+@pytest.mark.parametrize(
+    "leader", ["if", "then", "else", "elif", "while", "until", "do", "!", "coproc"]
+)
+def test_git_subcommand_steps_over_each_reserved_word(leader: str) -> None:
+    assert git_subcommand((leader, "git", "commit", "-m", "x")) == (
+        "commit",
+        ("-m", "x"),
+    )
+
+
+@pytest.mark.parametrize(
+    "tokens",
+    [
+        ("if", "git", "commit"),
+        ("!", "!", "git", "commit"),
+        ("time", "!", "git", "commit"),
+        ("time", "-p", "git", "commit"),
+        ("time", "-p", "!", "git", "commit"),
+        ("!", "time", "-p", "git", "commit"),
+        ("then", "time", "-p", "!", "git", "commit"),
+        ("elif", "then", "do", "git", "commit"),
+        ("do", "GIT_EDITOR=true", "git", "commit"),
+        ("else", ">", "log", "git", "commit"),
+        ("elif", "/usr/bin/git", "commit"),
+    ],
+)
+def test_git_subcommand_steps_over_chained_reserved_words_and_wrappers(
+    tokens: tuple[str, ...],
+) -> None:
+    assert git_subcommand(tokens) == ("commit", ())
+
+
+def test_git_subcommand_returns_a_switch_after_a_reserved_word_with_its_arguments() -> (
+    None
+):
+    assert git_subcommand(("then", "git", "checkout", "main")) == (
+        "checkout",
+        ("main",),
+    )
+    assert git_subcommand(("!", "git", "checkout", "-b", "feat/x")) == (
+        "checkout",
+        ("-b", "feat/x"),
+    )
+    assert git_subcommand(("coproc", "git", "push")) == ("push", ())
+
+
+@pytest.mark.parametrize(
+    "tokens",
+    [
+        ("for", "git", "in", "commit"),
+        ("select", "git", "in", "commit"),
+        ("case", "git", "in"),
+        ("function", "git"),
+        ("in", "git", "commit"),
+        ("fi", "git", "commit"),
+        ("done", "git", "commit"),
+        ("esac", "git", "commit"),
+        ("time", "for", "git", "in", "commit"),
+        ("IF", "git", "commit"),
+        ("Then", "git", "commit"),
+        ("!git", "commit"),
+        ("echo", "if", "git", "commit"),
+    ],
+)
+def test_git_subcommand_does_not_step_over_words_that_are_not_leaders(
+    tokens: tuple[str, ...],
+) -> None:
+    assert git_subcommand(tokens) == ("", ())
+
+
+@pytest.mark.parametrize(
+    "tokens",
+    [(), ("then",), ("!", "!"), ("time", "-p", "!"), ("if", "!"), ("coproc",)],
+)
+def test_git_subcommand_is_empty_when_only_reserved_words_are_given(
+    tokens: tuple[str, ...],
+) -> None:
+    assert git_subcommand(tokens) == ("", ())
+
+
+def test_git_subcommand_reads_a_reserved_word_after_git_as_an_argument() -> None:
+    assert git_subcommand(("git", "commit", "-m", "then")) == (
+        "commit",
+        ("-m", "then"),
+    )
+    assert git_subcommand(("if", "git")) == ("", ())
+
+
+def test_git_subcommand_leaves_a_redirected_git_after_a_leader_to_violation() -> None:
+    assert git_subcommand(("then", "git", "-C", "../o", "checkout", "main")) == (
+        "checkout",
+        ("main",),
+    )
