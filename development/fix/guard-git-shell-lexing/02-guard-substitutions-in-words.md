@@ -1,6 +1,6 @@
 # The git guard judges command substitutions inside a word
 
-<!-- claude-plan step=2 status=active -->
+<!-- claude-plan step=3 status=active -->
 
 | Field | Value |
 |---|---|
@@ -14,7 +14,7 @@
 | # | Step | Skill | Runs | Status |
 |---|---|---|---|---|
 | 1 | Conceptualize | `/conceptualize` | with the user | done |
-| 2 | Plan | `/plan` | with the user | pending |
+| 2 | Plan | `/plan` | with the user | done |
 | 3 | Implement | `/implement` | in `/build` | pending |
 | 4 | Verify | `/verify` | in `/build` | pending |
 | 5 | Test | `/test` | in `/build` | pending |
@@ -118,7 +118,7 @@ All judged with `main` checked out unless stated; "a branch" is `feat/x`.
 | A6 | Refuses a commit or push when `main` is any branch it could land on: from a branch, `git checkout main; git commit -m x`, `git checkout main\ngit commit -m x`, `git switch main \|\| true; git push`, `(git checkout main) && git commit -m x` and `x=$(git checkout main) && git commit -m x` are refused; `git checkout feat/y; git commit -m x` is allowed from a branch; `git checkout -b feat/x; git commit -m x` is still refused on `main`. |
 | A7 | Plays safe on bash 5.3 funsub: `echo ${ git commit -m x; }`, `echo ${\| git commit -m x; }` and `echo "${ git commit -m x; }"` *(added at step 2)* are refused on `main` with the unmodelled-syntax reason, allowed from a branch, and allowed on `main` when they name neither commit nor push. |
 | A8 | Leaves harmless substitutions alone: `echo "$(git status)"`, `v="$(git rev-parse HEAD)"`, ``echo `date` `` and `echo "$(git log -1 --format=%s)" \| grep commit` are allowed on `main`; the pipeline's `git commit -m "$(cat <<'EOF' … EOF\n)"` is refused on `main` and allowed on a branch. |
-| A9 | Changes nothing else: round 1's A1–A6 still hold; every existing test passes, except five round 1 tests that pin the old behaviour, which are rewritten to the new one — `test_violation_does_not_look_inside_quotes_within_a_body_substitution` (pins the miss), and `test_segments_puts_a_body_substitution_on_its_own_line_after_the_command`, `test_segments_orders_dollar_paren_and_backtick_substitutions_as_written` and `test_segments_unescapes_a_nested_backtick_pair_for_the_inner_command` (pin where an extracted command sits in `segments`' output), and `test_violation_does_not_carry_an_unresolvable_switch_across_a_weak_join` (pins `git checkout - ; git commit` as allowed from a branch, which A6's rule now refuses) *(widened from two named tests at step 2, pending the user's acceptance of the plan)*; and a differential against the guard as round 1 left it (commit `f8775d0`) over every command the existing suite passes to the guard plus generated variations agrees, except where the input contains a command substitution, a funsub opener or an untrusted switch to `main` or an unresolvable target — and there the new decision matches bash with `git` shadowed, or is the play-safe refusal on `main`. |
+| A9 | Changes nothing else: round 1's A1–A6 still hold; every existing test passes, except five round 1 tests that pin the old behaviour, which are rewritten to the new one — `test_violation_does_not_look_inside_quotes_within_a_body_substitution` (pins the miss), and `test_segments_puts_a_body_substitution_on_its_own_line_after_the_command`, `test_segments_orders_dollar_paren_and_backtick_substitutions_as_written` and `test_segments_unescapes_a_nested_backtick_pair_for_the_inner_command` (pin where an extracted command sits in `segments`' output), and `test_violation_does_not_carry_an_unresolvable_switch_across_a_weak_join` (pins `git checkout - ; git commit` as allowed from a branch, which A6's rule now refuses) *(widened from two named tests at step 2; accepted with the plan)*; and a differential against the guard as round 1 left it (commit `f8775d0`) over every command the existing suite passes to the guard plus generated variations agrees, except where the input contains a command substitution, a funsub opener or an untrusted switch to `main` or an unresolvable target — and there the new decision matches bash with `git` shadowed, or is the play-safe refusal on `main`. |
 
 ### Open questions
 
