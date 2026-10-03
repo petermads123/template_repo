@@ -1,6 +1,6 @@
 # The git guard judges command substitutions inside a word
 
-<!-- claude-plan step=3 status=active -->
+<!-- claude-plan step=4 status=active -->
 
 | Field | Value |
 |---|---|
@@ -15,7 +15,7 @@
 |---|---|---|---|---|
 | 1 | Conceptualize | `/conceptualize` | with the user | done |
 | 2 | Plan | `/plan` | with the user | done |
-| 3 | Implement | `/implement` | in `/build` | pending |
+| 3 | Implement | `/implement` | in `/build` | done |
 | 4 | Verify | `/verify` | in `/build` | pending |
 | 5 | Test | `/test` | in `/build` | pending |
 | 6 | Concept check | `/concept-check` | in `/build` | pending |
@@ -424,6 +424,16 @@ E        +      where '' = violation('echo "$(git commit -m x)"', 'main')
 ```
 
 The command is allowed (empty reason) while bash runs git: the shape the Defect block's Observed row describes.
+
+**Built as planned, with these deviations and additions:**
+
+- **A test outside A9's five went red and was updated:** `test_unmodelled_openers_is_the_documented_set` pins the exact `UNMODELLED_OPENERS` value, which the plan itself changes (Public API table, A7, T7 "pinned to its new value"). It was updated to the new tuple. This is a mechanical consequence of the plan rather than a behaviour change, so it was not treated as the Risks-section halt; step 6 should confirm that reading.
+- `test_segments_unescapes_a_nested_backtick_pair_for_the_inner_command` stayed green after the change but was rewritten as A9 lists it, to pin the new position (`git commit` at depth 2 before `echo _` at depth 1). The other four A9 tests (`..._quotes_within_a_body_substitution`, `..._after_the_command`, `..._as_written`, `..._weak_join`) went red and were rewritten to the new behaviour (the first and the weak-join test were renamed to say what they now prove).
+- A standalone `}` does not open a new slot (guide step 3 lists it): a command cannot start right after `}` without a `;`, `&`, `|` or newline, which already do. A slot is also not opened after the `&` or `|` of a redirection (`>&`, `<&`, `&>`, `>|`), so a group never lands in the middle of a command.
+- `segments()` also splits a token that holds a mark glued to punctuation that is no operator (`>&\x1d`, `<(\x1d`), appending the non-mark pieces to the current invocation. Without it a group after such a punctuation run would stay inside a word and never be judged.
+- Guarded against runaway input beyond the plan: substitutions nested deeper than 30 are not followed and set the unmodelled flag; a `failed` set of positions stops a run of unclosed `$(` from being re-walked exponentially (400 unclosed openers: 0.19 s); a heredoc opened inside a substitution whose body follows the closing `)` sets the unmodelled flag.
+- The refusal order in `violation` is main/commit, then push, then unresolved (guide step 7). Where both used to apply the old guard gave the unresolved message first; no existing test pins that.
+- Oracle note for step 6: a bash `git()` that keeps `HEAD` in a shell variable is wrong across `$( )`/`<( )` subshells, where the change is lost. A file-backed `HEAD` is used instead (`scratchpad/oracle.py`); with it the guard never allowed what bash ran onto `main`, and refused extra only where it plays safe (a `;` after a switch, concurrent `<( )`).
 
 ---
 

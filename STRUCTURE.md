@@ -132,6 +132,13 @@ The shell-lexing cases close the file. The reproduction for the defect `fix/guar
 - **Continuations** — a backslash-newline joins `git` and `commit` or `push` in either branch, inside double quotes and across an `&&`, but not in single quotes, not after an escaped backslash and not inside a comment.
 - **Unmodelled syntax** — the exact `UNMODELLED_OPENERS` set; each reproduction bypass refused on `main` with its own reason and allowed on a branch, in a detached HEAD and on `Main`; forms that name neither commit nor push, or hide the opener in quotes, a comment or a body, allowed; the accepted `&&` plus `$'...'` cost pinned; and recorded misses (a hex-escaped or split-quote subcommand, a risky word in a comment still refusing) so changing them is a decision.
 
+Round 2 of the same fix (`development/fix/guard-git-shell-lexing/02-...`) adds the reproduction
+for command substitutions inside a word: `echo "$(git commit -m x)"` refused on `main` instead of
+allowed. Five round 1 tests that pinned the old behaviour were rewritten to the new one — the
+substitution miss, the three that pin where an extracted command sits in `segments`' output, and
+the unresolvable switch across a weak join — and the `UNMODELLED_OPENERS` pin gained the funsub
+openers. The rest of the round's suite is written at step 5.
+
 ### `tests/test_plan_state.py`
 
 Covers `.claude/hooks/plan_state.py`. `parse` against a complete marker, a file with none,
@@ -272,14 +279,16 @@ into one invocation per segment. The grouping delimiters `(`, `)`, `{` and `}` s
 a command hidden inside `(git commit -m "x")` is seen rather than left with `(` sitting
 where its name should be.
 
-Each segment is judged against the branch that will be checked out when it runs. Only `&&`
-guarantees its left side succeeded, so a branch switch carries forward across a run of
-separators that is `&&` and newlines, and across nothing else: `git checkout -b feat/x &&
-git commit` is allowed from `main`, and so is the same pair with the `&&` ending the line,
-while `;`, `|`, `||`, `&`, a bare newline or a mixed run such as `; &&` is refused. A switch
-that may not have taken effect here is distrusted the same way: one made inside a subshell
-that has since closed, or aimed elsewhere by a global `-C`, `--git-dir` or `--work-tree`,
-leaves the branch as it was. What still cannot be read is refused when it names `commit` or
+Each segment is judged against the set of branches that may be checked out when it runs.
+Only `&&` guarantees its left side succeeded, so a branch switch replaces the set across a
+run of separators that is `&&` and newlines, and only widens it across anything else:
+`git checkout -b feat/x && git commit` is allowed from `main`, and so is the same pair with
+the `&&` ending the line, while after `;`, `|`, `||`, `&`, a bare newline or a mixed run
+such as `; &&` HEAD may be on the branch it started on or on any branch switched to since,
+and a commit or push is refused when `main` is one of them — from a branch too, so
+`git checkout main; git commit` is refused. A switch made inside a subshell that has since
+closed is distrusted the same way, as possibly having happened; one aimed elsewhere by a
+global `-C`, `--git-dir` or `--work-tree` changes nothing here. What still cannot be read is refused when it names `commit` or
 `push` — matched on word boundaries, so `committee` is not a commit — while `main` is
 checked out, and allowed anywhere else.
 
@@ -299,18 +308,29 @@ backslash-newline joins two lines, and a heredoc body (`<<WORD`, `<<-WORD`, quot
 never `<<<`) is dropped up to its delimiter line, leaving the `<<` and its word so the
 invocation still reads as a redirection. A heredoc whose delimiter never arrives takes the rest of
 the input as its body, as bash does. A body after a quoted delimiter is pure data; one after an
-unquoted delimiter is expanded by bash, so its `$( )` and backtick substitutions are kept, each as
-a command on a line of its own, and the rest of the text is dropped — an escaped `$(` is text,
+unquoted delimiter is expanded by bash, so its `$( )` and backtick substitutions are extracted
+(below) and the rest of the text is dropped — an escaped `$(` is text,
 `$(( ))` is arithmetic and `${ }` a parameter (a substitution inside either still runs), and a
 substitution that never closes runs nothing. The pass tracks what it is inside — `$( )`, `${ }`,
 backticks, double quotes, `$(( ))` and `(( ))` — because the rules change there: a `#` after a
 `$( )` or inside `${ }` is part of a word, `<<` in arithmetic is a shift, and quotes nest in
 `"$( )"`. Known misses, kept deliberately: a subcommand spelled with hex escapes or split
-quotes, which the raw-text search does not read as `commit`, and a substitution nested in quotes
-or backticks, which the guard does not read in a plain command either. The pass also reports a construct it does not read — a pair in
-`UNMODELLED_OPENERS`: `$'...'`, PowerShell here-strings, `<# #>` comments, backtick-escaped
-quotes. It does not guess: with `main` checked out, such a command that names `commit` or
+quotes, which the raw-text search does not read as `commit`, and `"${x:-'$(cmd)'}"`, whose
+single quotes are literal in bash but read as quoting here. The pass also reports a construct
+it does not read — a pair in `UNMODELLED_OPENERS`: `$'...'`, PowerShell here-strings, `<# #>`
+comments, backtick-escaped quotes, bash 5.3's `${ cmd; }`. It does not guess: with `main` checked out, such a command that names `commit` or
 `push` is refused with its own message, and anywhere else it is judged as parsed.
+
+Bash runs a command substitution before the command around it, wherever it sits in a word,
+so `_prepare` takes each one out — `$( )` quoted or not, backticks, `<( )` and `>( )`, and
+the ones in an unquoted heredoc body — and writes it, between two private marks (`\x1d`,
+`\x1e`, blanked if the input carries them), in front of the simple command that contains
+it. The word keeps a placeholder, `_`. `segments` reads the marks as `Segment.depth`, so
+the extracted commands get every rule a plain command gets: separators, `&&` trust,
+wrappers, subshells, nesting. `violation` runs a substitution on the branches in effect for
+its containing command, and a switch inside it counts for that command. A backtick inside
+double quotes also stays in the text, because PowerShell reads it as an escape; a
+substitution that never closes stays in the text and is not extracted.
 
 A push's destination is read with the same care. The arguments are walked rather than
 filtered, so an option that takes a value — `-o`, `--push-option`, `--repo`,
@@ -327,13 +347,14 @@ meets an unknown branch is refused with a message saying so rather than the one 
 
 | Signature | Description |
 |---|---|
-| `Segment` | Frozen dataclass: `tokens` and the `separator` that preceded them — one of `SEPARATORS`, a newline, or a grouping delimiter (`""` for the first). |
-| `segments(command: str) -> list[Segment] \| None` | Split a command into invocations after comments, continuations and heredoc bodies are removed, or None if it cannot be read: an unbalanced quote or a trailing backslash. A heredoc whose delimiter never arrives takes the rest of the input as its body. The substitutions of an unquoted body stay, each as an invocation of its own after the opening line. |
+| `Segment` | Frozen dataclass: `tokens`, the `separator` that preceded them — one of `SEPARATORS`, a newline, a grouping delimiter (`""` for the first) or `SUBSTITUTED` — and `depth: int = 0`, the number of command substitutions the invocation sits inside. |
+| `SUBSTITUTED: str` | `"$("`, the separator of an invocation whose command substitutions ran immediately before it. |
+| `segments(command: str) -> list[Segment] \| None` | Split a command into invocations after comments, continuations and heredoc bodies are removed, or None if it cannot be read: an unbalanced quote or a trailing backslash. A heredoc whose delimiter never arrives takes the rest of the input as its body. Every command substitution becomes invocations of its own, one depth deeper, immediately before the invocation that contains it. |
 | `git_subcommand(tokens: tuple[str, ...]) -> tuple[str, tuple[str, ...]]` | Identify the git subcommand and its arguments. |
 | `push_targets_main(args: tuple[str, ...], branch: str) -> bool` | Whether a push would update `main`. |
 | `switch_target(subcommand: str, args: tuple[str, ...]) -> str` | The branch a `checkout`/`switch` moves to, `""` when it moves none, or the sentinel `UNRESOLVED` (`"?"`) for a target only the running shell can resolve — `-` and `@{-1}`. |
-| `violation(command: str, branch: str) -> str` | The reason to refuse, or `""` to allow. While `main` is checked out, a command carrying any of `UNMODELLED_OPENERS` that names `commit` or `push` is refused outright. |
-| `UNMODELLED_OPENERS: tuple[str, ...]` | `("$'", "@'", '@"', "<#", "`'", '`"')`: the pairs that open syntax the pre-pass does not read — an ANSI-C string, a PowerShell here-string, a PowerShell block comment, a backtick-escaped quote. Looked for outside quotes, and `` `" `` inside double quotes too. A command carrying one is what `violation` refuses on `main` when it names `commit` or `push`. |
+| `violation(command: str, branch: str) -> str` | The reason to refuse, or `""` to allow. Judges every invocation, substitutions included, against every branch it may run on. While `main` is checked out, a command carrying any of `UNMODELLED_OPENERS` that names `commit` or `push` is refused outright. |
+| `UNMODELLED_OPENERS: tuple[str, ...]` | `("$'", "@'", '@"', "<#", "`'", '`"', "${ ", "${\t", "${\n", "${\|")`: the openers of syntax the pre-pass does not read — an ANSI-C string, a PowerShell here-string, a PowerShell block comment, a backtick-escaped quote, bash 5.3's `${ cmd; }`. Each is matched as a prefix. Looked for outside quotes, and `` `" `` and the `${` forms inside double quotes too. A command carrying one is what `violation` refuses on `main` when it names `commit` or `push`. |
 | `main() -> None` | Entry point: allow or refuse the command. |
 
 ### `.claude/hooks/lint_py.py`

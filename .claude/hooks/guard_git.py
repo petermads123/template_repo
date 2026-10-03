@@ -23,27 +23,42 @@ it is inside, because bash's rules change there: a `#` after the `)` of a
 comment; quotes nest inside `"$( )"`; `<<` inside `$(( ))` or `(( ))` is a
 shift, not a heredoc; and an unquoted delimiter lets a backslash-newline join
 the closing line. Constructs it does not read -- `$'...'`, PowerShell
-here-strings, `<# #>` comments and backtick-escaped quotes -- are not guessed
-at: while `main` is checked out, a command carrying one that names `commit` or
-`push` anywhere, comments and bodies included, is refused outright, and
-elsewhere it is judged as parsed, as unreadable input always was. A heredoc
-body is data only when any part of its delimiter is quoted (`<<'EOF'`,
-`<<"EOF"`, a backslash before a letter). After an unquoted one bash expands the body and runs its `$( )` and
-backtick substitutions, so those are kept, each as a command on a line of its
-own, and the rest of the body is dropped: an escaped `$(` is text, `$(( ))` is
-arithmetic and `${ }` is a parameter, none of them a command, while a
-substitution inside either of the last two still runs. Known misses, all
-deliberate: a subcommand spelled with hex escapes or split quotes
-(`git co""mmit`) does not name `commit` to the raw-text search, and a
-substitution nested in quotes or backticks inside a substitution is no more
-read than one in a plain `echo "$(git commit)"`.
+here-strings, `<# #>` comments, backtick-escaped quotes and bash 5.3's
+`${ cmd; }` -- are not guessed at: while `main` is checked out, a command
+carrying one that names `commit` or `push` anywhere, comments and bodies
+included, is refused outright, and elsewhere it is judged as parsed, as
+unreadable input always was.
 
-Each segment is judged against the branch that will be checked out when it runs,
-not the one checked out now: `git checkout -b feat/x && git commit` is allowed
-from `main`, because `&&` runs its right side only if the switch succeeded. No
-other separator carries that guarantee — after `;` or a newline the commit runs
-whether the switch worked or not — so across those the branch is taken as it is
-now.
+Bash runs a command substitution before the command around it, wherever it
+sits in a word, so the pass takes each one out and writes it, between two
+private marks, in front of the simple command that contains it; the word keeps
+a placeholder, `_`. That covers `$( )` quoted or not, backticks, `<( )` and
+`>( )`, and nests. `segments` reads the marks as a depth, so the extracted
+commands get every rule a plain command gets, separators, `&&` trust,
+wrappers and subshells included. A heredoc body is data only when any part of
+its delimiter is quoted (`<<'EOF'`, `<<"EOF"`, a backslash before a letter).
+After an unquoted one bash expands the body and runs its `$( )` and backtick
+substitutions, so those are extracted the same way, in front of the command
+that opened the heredoc, and the rest of the body is dropped: an escaped `$(`
+is text, `$(( ))` is arithmetic and `${ }` is a parameter, none of them a
+command, while a substitution inside either of the last two still runs. A
+backtick inside double quotes is also left in the text, because PowerShell
+reads it as its escape character, so both readings are judged. A substitution
+that never closes is left in the text, not extracted. Known misses, all
+deliberate: a subcommand spelled with hex escapes or split quotes
+(`git co""mmit`) does not name `commit` to the raw-text search, and in
+`"${x:-'$(cmd)'}"` the single quotes are literal in bash but read as quoting
+here, which hides the substitution.
+
+Each segment is judged against the branches that may be checked out when it
+runs, not the one checked out now: `git checkout -b feat/x && git commit` is
+allowed from `main`, because `&&` runs its right side only if the switch
+succeeded. No other separator carries that guarantee -- after `;` or a newline
+the commit runs whether the switch worked or not -- so across those HEAD may be
+on the branch it started on or on any branch switched to since, and a commit
+or push is refused if `main` is one of them. A substitution runs on the
+branches in effect for the command that contains it, and a switch inside it
+counts for that command and for what follows.
 
 What still cannot be read is refused rather than allowed when it names `commit`
 or `push` and `main` is checked out. Such a command would usually fail in the
@@ -769,7 +784,11 @@ def _scan(
 
     def inside(position: int) -> tuple[str, bool, int] | None:
         """Prepare the substitution whose text begins at `position`."""
-        if position - 2 in failed or nesting >= _MAX_NESTING:
+        nonlocal unmodelled
+        if nesting >= _MAX_NESTING:
+            unmodelled = True  # too deep to follow: play safe
+            return None
+        if position - 2 in failed:
             return None
         text, flag, end, closed = _scan(command, position, ")", failed, nesting + 1)
         if not closed:
@@ -848,7 +867,10 @@ def _scan(
                 index += 1
                 continue
             end = _quoted_end(command, index)
-            if end is not None and nesting < _MAX_NESTING:
+            if end is not None and nesting >= _MAX_NESTING:
+                unmodelled = True  # too deep to follow: play safe
+                end = None
+            if end is not None:
                 inner = re.sub(r"\\([$`\\])", r"\1", command[index + 1 : end - 1])
                 text, flag, _, _ = _scan(inner, 0, "", set(), nesting + 1)
                 place(text, flag, slot)
@@ -995,8 +1017,11 @@ def segments(command: str) -> list[Segment] | None:
         be read at all — an unbalanced quote or a trailing backslash. Heredoc
         bodies, comments and continuations are removed first, and a heredoc
         whose delimiter never arrives takes the rest of the input as its body.
-        The command substitutions of an unquoted body stay, each as an
-        invocation of its own after the line that opened the heredoc.
+        Every command substitution -- in a word, in backticks, in `<( )` or in
+        an unquoted heredoc body -- becomes invocations of its own, one depth
+        deeper, immediately before the invocation that contains it, which is
+        marked `SUBSTITUTED`; the first of them inherits the separator that
+        preceded the containing invocation.
     """
     tokens = _lex(_prepare(command)[0])
     if tokens is None:
@@ -1158,7 +1183,8 @@ def violation(command: str, branch: str) -> str:
         An explanation to show Claude, or an empty string to allow the command.
         With `main` checked out, a command that names `commit` or `push` and
         uses syntax this guard does not read -- see `UNMODELLED_OPENERS` -- is
-        refused with a reason saying so.
+        refused with a reason saying so. A `commit` or `push` is otherwise
+        refused when `main` is among the branches it may run on.
     """
     _, unmodelled = _prepare(command)
     if unmodelled and branch == PROTECTED and RISKY_PATTERN.search(command):
