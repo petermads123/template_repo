@@ -357,7 +357,7 @@ fix the reproduction is green and the suite is 1043 passed with no existing test
 | `pytest -q` | `1043 passed` |
 | Plan completeness | every signature in the Public API table exists as written: `violation(command: str, branch: str) -> str` unchanged; no public name added (`_walk_run`, `_OPERATORS`, `_Key`, `_segments(runs=)` are private) |
 | `STRUCTURE.md` | in sync (see auditor) |
-| `python -m <package>.<module>` | no new module; `python -m template_repo.hello_world` prints `Hello, World!` |
+| `python -m <package>.<module>` | no new module; `PYTHONPATH=src python -m template_repo.hello_world` prints `Hello, World!` (package not pip-installed in this venv) |
 
 **structure-auditor** (run before this step): one finding, the `!`/`coproc` scope prose
 (STRUCTURE.md and the module docstring) said `||` ends the scope but `_walk_run` tested `||`
