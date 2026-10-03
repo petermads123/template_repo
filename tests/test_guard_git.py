@@ -1784,6 +1784,75 @@ def test_violation_judges_a_body_substitution_of_an_unclosed_quoted_substitution
     assert violation(command, PROTECTED).startswith(PUSH_REASON)
 
 
+@pytest.mark.parametrize(
+    "command",
+    [
+        # Two double-quote frames are open when the body reaches the end.
+        'echo "$(echo "$(cat <<EOF\n$(git push origin main)\nEOF)")"',
+        'echo "$(echo "$(cat <<EOF\n$(git push origin main)\nEOF)")" && ls',
+        # A backtick substitution holding the heredoc, and one holding the body.
+        'echo "`cat <<EOF\n$(git push origin main)\nEOF`"',
+        'echo "$(cat <<EOF\n$(echo "$(git push origin main)")\nEOF)"',
+        # Single quotes before, after and inside the frames.
+        'echo \'"\' "$(cat <<EOF\n$(git push origin main)\nEOF)"',
+        "echo \"$(cat <<EOF\n$(git push origin main)\nEOF)\" 'x'",
+        "echo \"$(echo 'x' \"$(cat <<EOF\n$(git push origin main)\nEOF)\")\" 'y'",
+        # A double quote opened after the heredoc operator, on the same line.
+        'cat <<EOF "$(echo hi\nbody\n$(git push origin main)\nEOF',
+        'cat <<EOF "$(git push origin main)"\nbody\nEOF',
+        # A PowerShell backtick inside the string before the substitution.
+        'echo "a`b $(cat <<EOF\n$(git push origin main)\nEOF)"',
+        # Two heredocs on one line; the second, or neither, ever closes.
+        'echo "$(cat <<A <<B\nx\nA\n$(git push origin main)\nB)"',
+        'echo "$(cat <<A <<B\n$(git push origin main)\nA\n$(date)',
+        # Two quoted substitutions, the first closing properly.
+        'echo "$(cat <<A\n$(git push origin main)\nA\n)" "$(cat <<B\nx\nB\n)"',
+        'echo "a" "$(cat <<EOF\n$(git push origin main)\nEOF)" "b"',
+    ],
+)
+def test_violation_closes_every_open_quote_when_a_body_reaches_the_end(
+    command: str,
+) -> None:
+    # Each is a push to `main` in bash with `git` shadowed, and each leaves one
+    # or more double quotes open in the text the body swallowed.
+    assert violation(command, OTHER).startswith(PUSH_REASON)
+    assert violation(command, PROTECTED).startswith(PUSH_REASON)
+
+
+def test_violation_judges_a_commit_in_a_body_of_nested_quoted_substitutions() -> None:
+    command = 'echo "$(echo "$(cat <<EOF\n$(git commit -m x)\nEOF)")"'
+    assert violation(command, PROTECTED).startswith(COMMIT_REASON)
+    assert violation(command, OTHER) == ""
+
+
+@pytest.mark.parametrize(
+    "command",
+    [
+        'echo "$(cat <<EOF\n$(git status)\nEOF)"',
+        'echo "$(cat <<EOF\nhello\nEOF)"',
+        'echo "$(echo "$(cat <<EOF\n$(date)\nEOF)")"',
+        "echo \"$(cat <<'EOF'\n$(git push origin main)\nEOF)\"",
+        "echo '$(cat <<EOF\n$(git push origin main)\nEOF)'",
+        # The rest of the input is the body, so this push is text, as in bash.
+        'echo "$(cat <<EOF\nit\'s\nEOF)" ; git push origin main',
+    ],
+)
+def test_violation_allows_an_unclosed_quoted_heredoc_that_runs_no_git(
+    command: str,
+) -> None:
+    assert violation(command, PROTECTED) == ""
+    assert violation(command, OTHER) == ""
+
+
+def test_violation_keeps_an_unbalanced_quote_without_a_heredoc_unreadable() -> None:
+    # No heredoc ran to the end, so no quote is added: still unreadable, refused
+    # on `main` only when it names a risky command, allowed anywhere else.
+    assert violation('echo "unbalanced', PROTECTED) == ""
+    unreadable = 'echo "unbalanced; git push origin main'
+    assert "could not be read" in violation(unreadable, PROTECTED)
+    assert violation(unreadable, OTHER) == ""
+
+
 def test_violation_still_treats_a_quoted_delimiter_body_as_data_in_a_quote() -> None:
     command = "echo \"$(cat <<'EOF' > f\n$(git push origin main)\nEOF)\""
     assert violation(command, OTHER) == ""

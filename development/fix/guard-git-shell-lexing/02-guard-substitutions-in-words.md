@@ -1,6 +1,6 @@
 # The git guard judges command substitutions inside a word
 
-<!-- claude-plan step=5 status=active -->
+<!-- claude-plan step=6 status=active -->
 
 | Field | Value |
 |---|---|
@@ -17,7 +17,7 @@
 | 2 | Plan | `/plan` | with the user | done |
 | 3 | Implement | `/implement` | in `/build` | done |
 | 4 | Verify | `/verify` | in `/build` | done |
-| 5 | Test | `/test` | in `/build` | pending |
+| 5 | Test | `/test` | in `/build` | done |
 | 6 | Concept check | `/concept-check` | in `/build` | pending |
 | 7 | Ship | `/ship` | in `/build` | pending |
 | 8 | Recommend | `/recommend` | with the user | pending |
@@ -533,6 +533,17 @@ Round 2 added 196 test cases to `tests/test_guard_git.py` (501 to 697 in the who
 | Recorded misses, pinned | `test_violation_misses_a_substitution_after_a_quote_inside_a_quoted_parameter` (2), `test_violation_does_not_judge_substitutions_nested_past_the_limit_off_main` | pass |
 
 Gates after the step: `ruff check .` clean, `ruff format --check .` clean, `mypy` clean, `pytest` 697 passed.
+
+**Re-test after the step 6 send-back** (the `"` appended per open `dq` frame when heredoc bodies reach the end of the input). Probed in bash with `git` shadowed (script files, `stdin` closed, 5 s timeout) against `violation()`; the probe found no defect, so no production change. 22 cases added to `tests/test_guard_git.py` (702 to 724 passed):
+
+| Probe | Test names | Result |
+|---|---|---|
+| Nested dq frames, backtick holder, single quotes around and inside, a dq opened after the heredoc operator, a PowerShell backtick before the substitution, two heredocs with one unterminated, two quoted substitutions | `test_violation_closes_every_open_quote_when_a_body_reaches_the_end` (14; push refused on `main` and from a branch) | pass |
+| Commit in a nested body | `test_violation_judges_a_commit_in_a_body_of_nested_quoted_substitutions` | pass |
+| Harmless and data counterparts | `test_violation_allows_an_unclosed_quoted_heredoc_that_runs_no_git` (6: `git status`, plain text, nested `date`, quoted delimiter, single-quoted whole, a push after a heredoc whose body swallows it) | pass |
+| Genuinely unbalanced quote, no heredoc | `test_violation_keeps_an_unbalanced_quote_without_a_heredoc_unreadable` | pass |
+
+Gates: `ruff check .`, `ruff format --check .`, `mypy` clean, `pytest` 724 passed. Skipped on purpose: `echo "$(cat <<A\nx\nA\n$(cat <<B\n$(git push origin main)\nB)"` is allowed and bash raises a syntax error (nothing runs), so it teaches nothing the others do not.
 
 Edge cases considered and deliberately skipped, with reasons:
 
