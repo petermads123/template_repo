@@ -882,3 +882,548 @@ def test_violation_allows_a_heredoc_with_a_stray_quote_on_main() -> None:
     command = "python3 - <<'EOF'\nx = '''main's push'''\nEOF"
 
     assert not refused(command, PROTECTED)
+
+
+COMMIT_REASON = "Refused: this would commit to `main`"
+PUSH_REASON = "Refused: this would push to `main`"
+UNMODELLED_REASON = "Refused: this command uses syntax this guard does not read"
+UNREADABLE_REASON = "Refused: this command could not be read"
+
+
+# --- heredocs ----------------------------------------------------------------
+
+
+@pytest.mark.parametrize(
+    "command",
+    [
+        "cat <<'EOF' > notes.txt\ngit commit -m x\nEOF",
+        "cat <<EOF > notes.txt\ngit commit -m x\nEOF",
+        'cat <<"EOF" > notes.txt\ngit commit -m x\nEOF',
+        "cat <<\\EOF > notes.txt\ngit commit -m x\nEOF",
+        "cat <<-EOF\n\tdon't push\n\tEOF",
+        "cat <<EOF\nx\nEOF",
+    ],
+    ids=["single", "bare", "double", "backslash", "dash-tabs", "no-trailing-newline"],
+)
+def test_violation_reads_a_heredoc_body_as_data_in_every_delimiter_form(
+    command: str,
+) -> None:
+    assert violation(command, PROTECTED) == ""
+
+
+@pytest.mark.parametrize(
+    "command",
+    [
+        "cat <<EOF > f\nhello\nEOF\ngit commit -m x",
+        "cat <<A <<B\na\nA\nb\nB\ngit commit -m x",
+        "cat <<EOF > f && git commit -m x\nbody\nEOF",
+        "cat <<EOF # note\nit's\nEOF\ngit commit -m x # '",
+        "cat <<EOF|grep x\nbody\nEOF\ngit commit -m x",
+        "cat <<EOF;\nbody\nEOF\ngit commit -m x",
+        'cat <<E"O"F\nx\nEOF\ngit commit -m x',
+        "cat <<-\tEOF\n\tx\n\tEOF\ngit commit -m x",
+    ],
+    ids=[
+        "after",
+        "two-heredocs",
+        "opener-line",
+        "comment-on-opener",
+        "pipe-ends-word",
+        "semicolon-ends-word",
+        "quoted-inside-word",
+        "dash-then-blank",
+    ],
+)
+def test_violation_still_judges_a_command_after_a_heredoc(command: str) -> None:
+    assert violation(command, PROTECTED).startswith(COMMIT_REASON)
+
+
+def test_violation_refuses_a_heredoc_fed_commit_as_a_commit_not_as_unreadable() -> None:
+    command = "git commit -F - <<'EOF'\nfix main's guard\nEOF"
+
+    assert violation(command, PROTECTED).startswith(COMMIT_REASON)
+    assert violation(command, OTHER) == ""
+
+
+@pytest.mark.parametrize("branch", [PROTECTED, OTHER])
+def test_violation_keeps_the_pipelines_own_commit_form(branch: str) -> None:
+    command = "git commit -m \"$(cat <<'EOF'\nfix main's guard\n\nbody\nEOF\n)\""
+
+    expected = COMMIT_REASON if branch == PROTECTED else ""
+    assert violation(command, branch).startswith(expected)
+
+
+def test_violation_closes_the_first_heredoc_on_the_first_delimiter() -> None:
+    # Line 2 closes A and line 3 is B's body, so the commit is not run.
+    command = "cat <<A; cat <<B\nB\nA\ngit commit -m x\nB"
+
+    assert violation(command, PROTECTED) == ""
+
+
+@pytest.mark.parametrize(
+    "command",
+    [
+        "cat <<EOF\nE\\\nOF\ngit commit -m x\nEOF",
+        "cat <<EOF\r\nhi\r\nEOF\r\ngit commit -m x\r\n",
+    ],
+    ids=["continuation-joins-delimiter", "crlf-word-includes-return"],
+)
+def test_violation_closes_a_heredoc_where_bash_does(command: str) -> None:
+    assert violation(command, PROTECTED).startswith(COMMIT_REASON)
+
+
+def test_violation_gives_a_quoted_delimiter_no_line_joining() -> None:
+    command = "cat <<'EOF'\nE\\\nOF\ngit commit -m x\nEOF"
+
+    assert violation(command, PROTECTED) == ""
+
+
+def test_violation_takes_the_rest_of_an_unterminated_heredoc_as_its_body() -> None:
+    assert violation("cat <<EOF\nwill push later", PROTECTED) == ""
+    assert violation("cat <<EOF\ngit commit -m x", PROTECTED) == ""
+
+
+@pytest.mark.parametrize(
+    "command",
+    ["git push origin main; cat <<EOF", "git push origin main\ncat <<"],
+)
+def test_violation_keeps_a_push_that_runs_before_an_unterminated_heredoc(
+    command: str,
+) -> None:
+    assert violation(command, OTHER).startswith(PUSH_REASON)
+
+
+def test_segments_drops_the_body_of_a_heredoc_that_never_closes() -> None:
+    assert segments("cat <<EOF\nbody") == [Segment(("cat", "<<", "EOF"), "")]
+
+
+def test_segments_keeps_a_heredoc_operator_with_no_word_as_a_token() -> None:
+    assert segments("cat <<-") == [Segment(("cat", "<<", "-"), "")]
+
+
+def test_segments_returns_none_for_an_unclosed_quote_in_a_delimiter() -> None:
+    assert segments("cat <<'EOF\nx") is None
+
+
+def test_segments_keeps_a_lone_heredoc_operator_as_a_token() -> None:
+    assert segments("cat << \ngit status") == [
+        Segment(("cat", "<<"), ""),
+        Segment(("git", "status"), "\n"),
+    ]
+
+
+def test_segments_drops_a_heredoc_body_but_keeps_its_operator_and_word() -> None:
+    command = "cat <<'EOF' > notes.txt\ngit commit -m x\nEOF"
+
+    assert segments(command) == [Segment(("cat", "<<", "EOF", ">", "notes.txt"), "")]
+
+
+@pytest.mark.parametrize(
+    "command",
+    [
+        "cat <<EOF\nx's\nEOF\nls",
+        "cat <<'EOF'\nx's\nEOF\nls",
+        'cat <<"EOF"\nx\'s\nEOF\nls',
+        "cat <<\\EOF\nx's\nEOF\nls",
+        "cat <<-EOF\n\tx's\n\tEOF\nls",
+    ],
+    ids=["bare", "single", "double", "backslash", "dash"],
+)
+def test_segments_resumes_after_each_heredoc_form(command: str) -> None:
+    parsed = segments(command)
+
+    assert parsed is not None
+    assert len(parsed) == 2
+    assert parsed[1] == Segment(("ls",), "\n")
+
+
+def test_segments_does_not_strip_spaces_from_a_dash_heredoc_closing_line() -> None:
+    # `<<-` strips tabs only, so the spaced EOF is body and the last one closes.
+    assert segments("cat <<-EOF\n\tx\n  EOF\nEOF") == [
+        Segment(("cat", "<<", "-EOF"), "")
+    ]
+
+
+def test_segments_reads_two_heredocs_on_one_line_in_order() -> None:
+    assert segments("cat <<A; cat <<B\nB\nA\nx\nB") == [
+        Segment(("cat", "<<", "A"), ""),
+        Segment(("cat", "<<", "B"), ";"),
+    ]
+
+
+def test_segments_treats_a_triple_angle_as_a_here_string() -> None:
+    parsed = segments("cat <<< hi\ngit status")
+
+    assert parsed is not None
+    assert parsed[-1] == Segment(("git", "status"), "\n")
+
+
+def test_segments_does_not_read_a_here_string_as_a_heredoc() -> None:
+    assert violation("cat <<< hi\ngit commit -m x", PROTECTED).startswith(COMMIT_REASON)
+
+
+@pytest.mark.parametrize(
+    "command",
+    [
+        "echo $((1<<2)); git push origin main",
+        "echo $((1 << 2)); git push origin main",
+        "x=1; (( x <<= 1 )); git push origin main",
+        'echo "$((1<<2))"; git push origin main',
+        "let 'x=1<<2'; git push origin main",
+    ],
+    ids=["glued", "spaced", "command", "quoted", "let"],
+)
+def test_violation_reads_a_shift_as_arithmetic_not_as_a_heredoc(command: str) -> None:
+    assert violation(command, OTHER).startswith(PUSH_REASON)
+    assert violation(command, PROTECTED).startswith(PUSH_REASON)
+
+
+def test_violation_reads_nested_subshells_that_look_like_arithmetic() -> None:
+    assert violation("((echo a); git commit -m x)", PROTECTED).startswith(COMMIT_REASON)
+
+
+# --- comments ----------------------------------------------------------------
+
+
+def test_violation_refuses_a_commit_hidden_by_quotes_in_comments() -> None:
+    command = "# it's fine\ngit commit -m x\n# that's it"
+
+    assert violation(command, PROTECTED).startswith(COMMIT_REASON)
+
+
+def test_violation_allows_a_word_start_comment_naming_a_commit() -> None:
+    assert violation("echo ok # git commit -m x", PROTECTED) == ""
+
+
+def test_violation_keeps_a_hash_inside_a_word_live() -> None:
+    assert violation("echo ok#1 && git commit -m m", PROTECTED).startswith(
+        COMMIT_REASON
+    )
+
+
+@pytest.mark.parametrize(
+    "command",
+    [
+        "echo a;# it's\ngit commit -m x # '",
+        "echo a|# it's\ngit commit -m x # '",
+        "echo a &# it's\ngit commit -m x # '",
+        "(# it's\ngit commit -m x # ')",
+        "{ # it's\ngit commit -m x # '; }",
+        "echo a\t# it's\ngit commit -m x # '",
+    ],
+    ids=["semicolon", "pipe", "ampersand", "paren", "brace-blank", "tab"],
+)
+def test_violation_starts_a_comment_after_each_operator_and_blank(
+    command: str,
+) -> None:
+    assert violation(command, PROTECTED).startswith(COMMIT_REASON)
+
+
+@pytest.mark.parametrize(
+    "command",
+    [
+        "echo $(true)# ; git push origin main",
+        "x=a; echo ${x/ #/}; git push origin main",
+        "x=a; echo ${x:- #}; git push origin main",
+        'echo "$(echo " #")"; git push origin main',
+        "echo ok\r# ; git push origin main",
+        "echo 'a'# ; git push origin main",
+        "echo a\\ # ; git push origin main",
+        "echo `echo a #`; git push origin main",
+        "set -- a; echo $# ; git push origin main",
+        "x=abc; echo ${#x}; git push origin main",
+        "echo a=#b; git push origin main",
+        "echo {a,b}#; git push origin main",
+    ],
+    ids=[
+        "after-cmdsub",
+        "in-param-expansion",
+        "in-param-default",
+        "nested-quotes",
+        "after-return",
+        "after-single-quote",
+        "after-escaped-blank",
+        "inside-backticks",
+        "dollar-hash",
+        "length-expansion",
+        "after-equals",
+        "after-brace-expansion",
+    ],
+)
+def test_violation_reads_a_hash_that_bash_keeps_in_a_word_as_text(
+    command: str,
+) -> None:
+    assert violation(command, OTHER).startswith(PUSH_REASON)
+
+
+@pytest.mark.parametrize(
+    "command",
+    [
+        "(echo a)# ; git push origin main",
+        "echo a >#x\ngit push origin main",
+        "echo ##a; git push origin main",
+    ],
+    ids=["after-subshell", "after-redirect", "double-hash"],
+)
+def test_violation_comments_out_what_bash_does_after_a_closing_paren_or_redirect(
+    command: str,
+) -> None:
+    assert violation(command, OTHER) == ""
+
+
+def test_violation_ends_a_comment_inside_backticks_at_the_backtick() -> None:
+    assert violation("echo `echo a # c`; git commit -m x", PROTECTED).startswith(
+        COMMIT_REASON
+    )
+
+
+def test_violation_comments_inside_a_substitution_run_to_the_line_end() -> None:
+    command = "echo $(echo a # it's\n); git push origin main"
+
+    assert violation(command, OTHER).startswith(PUSH_REASON)
+
+
+@pytest.mark.parametrize(
+    "command",
+    ["git commit -m '# not a comment'", 'git commit -m "# not a comment"'],
+)
+def test_violation_reads_a_hash_inside_quotes_as_text(command: str) -> None:
+    assert violation(command, PROTECTED).startswith(COMMIT_REASON)
+
+
+def test_violation_distrusts_a_switch_whose_and_is_only_in_a_comment() -> None:
+    command = "git checkout -b feat/x # &&\ngit commit -m x"
+
+    assert violation(command, PROTECTED).startswith(COMMIT_REASON)
+
+
+def test_segments_drops_a_word_start_comment_and_keeps_its_newline() -> None:
+    assert segments("echo ok # it's\ngit status") == [
+        Segment(("echo", "ok"), ""),
+        Segment(("git", "status"), "\n"),
+    ]
+
+
+def test_segments_keeps_the_commands_after_a_closing_substitution_hash() -> None:
+    parsed = segments("echo $(true)# ; git status")
+
+    assert parsed is not None
+    assert parsed[-1] == Segment(("git", "status"), ";")
+
+
+@pytest.mark.parametrize("command", ["", "   ", "\n\n", "\\\n", "# only a comment"])
+@pytest.mark.parametrize("branch", [PROTECTED, OTHER])
+def test_violation_allows_input_with_no_command_in_it(
+    command: str, branch: str
+) -> None:
+    assert violation(command, branch) == ""
+    assert segments(command) == []
+
+
+# --- continuations -----------------------------------------------------------
+
+
+@pytest.mark.parametrize(
+    ("command", "branch"),
+    [
+        ("git \\\ncommit -m x", PROTECTED),
+        ("git \\\npush origin main", PROTECTED),
+        ("git \\\npush origin main", OTHER),
+        ('git commit -m "a\\\nb"', PROTECTED),
+    ],
+    ids=["commit", "push-from-main", "push-from-branch", "inside-double-quotes"],
+)
+def test_violation_joins_a_backslash_newline(command: str, branch: str) -> None:
+    assert refused(command, branch)
+
+
+def test_violation_keeps_a_branch_switch_across_a_continuation() -> None:
+    for command in (
+        "git checkout -b feat/x && \\\ngit commit -m x",
+        "git checkout -b feat/x \\\n&& git commit -m x",
+        "git checkout -b feat/x && # make it\ngit commit -m x",
+        "git checkout -b feat/x && git commit -F - <<'EOF'\nfix main's guard\nEOF",
+        "git checkout -b feat/x && cat <<EOF > f &&\nbody\nEOF\ngit commit -m x",
+    ):
+        assert violation(command, PROTECTED) == "", command
+
+
+def test_segments_joins_a_continuation_only_outside_single_quotes() -> None:
+    assert segments("git \\\ncommit -m x") == [
+        Segment(("git", "commit", "-m", "x"), "")
+    ]
+    assert segments("echo 'a\\\nb'") == [Segment(("echo", "a\\\nb"), "")]
+    assert segments('echo "a\\\nb"') == [Segment(("echo", "ab"), "")]
+
+
+def test_segments_does_not_join_an_escaped_backslash_to_the_next_line() -> None:
+    assert segments("echo a\\\\\ngit status") == [
+        Segment(("echo", "a\\"), ""),
+        Segment(("git", "status"), "\n"),
+    ]
+
+
+def test_violation_keeps_an_escaped_backslash_before_a_newline_in_double_quotes() -> (
+    None
+):
+    assert violation('echo "a\\\\\n"; git push origin main', OTHER).startswith(
+        PUSH_REASON
+    )
+    assert segments('echo "a\\\\\n"; git status') == [
+        Segment(("echo", "a\\\n"), ""),
+        Segment(("git", "status"), ";"),
+    ]
+
+
+def test_segments_leaves_a_continuation_inside_a_comment_alone() -> None:
+    assert segments("echo ok # path\\\ngit status") == [
+        Segment(("echo", "ok"), ""),
+        Segment(("git", "status"), "\n"),
+    ]
+
+
+def test_segments_joins_a_continuation_before_a_separator() -> None:
+    assert segments("echo a \\\n&& git status") == [
+        Segment(("echo", "a"), ""),
+        Segment(("git", "status"), "&&"),
+    ]
+
+
+# --- constructs the scanner does not read ------------------------------------
+
+UNMODELLED_BYPASSES = [
+    "echo $'it\\'s'; git commit -m x # '",
+    "$m = @'\nit's\n'@\ngit commit -m x # '",
+    "$m = @\"\nit's\n\"@\ngit commit -m x # '",
+    "<# it's #>\ngit commit -m x # '",
+    "<# a\nit's\n#>\ngit commit -m x # '",
+    '$x = "say `"hi"; git commit -m x # "',
+]
+
+
+def test_unmodelled_openers_is_the_documented_set() -> None:
+    assert guard_git.UNMODELLED_OPENERS == ("$'", "@'", '@"', "<#", "`'", '`"')
+
+
+@pytest.mark.parametrize("command", UNMODELLED_BYPASSES)
+def test_violation_refuses_unmodelled_syntax_naming_a_commit_on_main(
+    command: str,
+) -> None:
+    assert violation(command, PROTECTED).startswith(UNMODELLED_REASON)
+
+
+@pytest.mark.parametrize("command", UNMODELLED_BYPASSES)
+def test_violation_allows_unmodelled_syntax_off_main(command: str) -> None:
+    assert violation(command, OTHER) == ""
+
+
+@pytest.mark.parametrize("branch", ["", "Main"])
+def test_violation_limits_the_distrust_to_the_exact_protected_branch(
+    branch: str,
+) -> None:
+    assert violation("echo $'it\\'s'; git commit -m x # '", branch) == ""
+
+
+def test_violation_refuses_a_heredoc_hidden_bypass_by_the_heredoc_rule() -> None:
+    command = "cat <<EOF >/dev/null\nit's\nEOF\ngit commit -m x # '"
+
+    assert violation(command, PROTECTED).startswith(COMMIT_REASON)
+
+
+@pytest.mark.parametrize(
+    "command",
+    [
+        "printf $'a\\tb\\n' > f",
+        "$m = @'\nit's\n'@\nWrite-Output $m",
+        "<# note #>\ngit status",
+        "echo hi $'there'",
+    ],
+)
+def test_violation_allows_unmodelled_syntax_that_names_nothing_risky(
+    command: str,
+) -> None:
+    assert violation(command, PROTECTED) == ""
+
+
+@pytest.mark.parametrize(
+    "command",
+    [
+        "echo '@\"push\"@'",
+        'echo "<# push #>"',
+        "echo \"$'push'\"",
+        "echo hi # $'push'",
+        "cat <<'EOF'\n$'push'\nEOF",
+    ],
+    ids=["single-quoted", "double-quoted", "dollar-in-double", "comment", "body"],
+)
+def test_violation_ignores_openers_hidden_by_quotes_comments_and_bodies(
+    command: str,
+) -> None:
+    assert violation(command, PROTECTED) == ""
+
+
+def test_violation_flags_a_backtick_quote_inside_double_quotes() -> None:
+    command = 'echo "say `"hi`" and push"'
+
+    assert violation(command, PROTECTED).startswith(UNMODELLED_REASON)
+
+
+def test_violation_does_not_flag_unmodelled_text_inside_a_heredoc_body() -> None:
+    command = "cat <<'EOF' > notes\necho $'it\\'s'\nEOF\ngit commit -m x"
+
+    assert violation(command, PROTECTED).startswith(COMMIT_REASON)
+
+
+def test_violation_refuses_a_switch_then_ansi_message_on_main() -> None:
+    # The accepted cost A6 names: the branch switch is real, the distrust still fires.
+    command = "git checkout -b feat/x && git commit -m $'a\\nb'"
+
+    assert violation(command, PROTECTED).startswith(UNMODELLED_REASON)
+
+
+@pytest.mark.parametrize(
+    "command",
+    [
+        "# it's\ngit push origin main # '",
+        "cat <<'EOF' > f\nit's\nEOF\ngit push origin main",
+        "echo $'x'; git push origin main",
+    ],
+    ids=["comment", "heredoc", "ansi-string"],
+)
+def test_violation_keeps_refusing_a_push_to_main_from_a_branch(command: str) -> None:
+    assert violation(command, OTHER).startswith(PUSH_REASON)
+
+
+def test_violation_gives_the_unmodelled_reason_branch_advice() -> None:
+    reason = violation(UNMODELLED_BYPASSES[0], PROTECTED)
+
+    assert "git checkout -b" in reason
+    assert "`main`" in reason
+
+
+def test_violation_documents_two_known_misses_of_the_raw_text_search() -> None:
+    # A subcommand spelled with an escape or split quotes does not name `commit`
+    # to the raw-text search, so the distrust does not fire. Adversarial rather
+    # than a slip; recorded so a change to it is a decision.
+    assert violation("git $'\\x63ommit' -m x", PROTECTED) == ""
+    assert violation("echo $'it\\'s'; git co\"\"mmit -m x # '", PROTECTED) == ""
+
+
+def test_violation_documents_that_a_substitution_in_a_heredoc_body_is_data() -> None:
+    # Bash runs `$(...)` in an unquoted heredoc body; the guard reads the whole
+    # body as data, as acceptance criterion A2 words it.
+    assert violation("cat <<EOF\n$(git commit -m x)\nEOF", PROTECTED) == ""
+
+
+def test_violation_distrust_searches_the_raw_command_comments_included() -> None:
+    # Deliberate: the search is over the text as written, so a risky word in a
+    # comment beside an unmodelled construct still refuses on main.
+    assert violation("echo $'a' # then push", PROTECTED).startswith(UNMODELLED_REASON)
+
+
+# --- the unreadable fallback after the pass ----------------------------------
+
+
+def test_violation_still_calls_an_unbalanced_quote_unreadable() -> None:
+    assert violation("echo 'oops; git push", PROTECTED).startswith(UNREADABLE_REASON)
+    assert violation("echo 'oops; git push", OTHER) == ""
