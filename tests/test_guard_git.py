@@ -1677,3 +1677,10 @@ def test_violation_distrust_searches_the_raw_command_comments_included() -> None
 def test_violation_still_calls_an_unbalanced_quote_unreadable() -> None:
     assert violation("echo 'oops; git push", PROTECTED).startswith(UNREADABLE_REASON)
     assert violation("echo 'oops; git push", OTHER) == ""
+
+
+# --- command substitutions inside a word (fix round 2) -----------------------
+
+
+def test_violation_refuses_a_commit_in_a_double_quoted_substitution_on_main() -> None:
+    assert violation('echo "$(git commit -m x)"', PROTECTED).startswith(COMMIT_REASON)

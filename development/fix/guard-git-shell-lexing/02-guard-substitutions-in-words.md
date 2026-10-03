@@ -411,6 +411,20 @@ The T9 differential:
 > planned" is a complete and good entry. On a fix round, also the reproduction test's red
 > run, pasted here before the fix was written — step 6 cites it.
 
+**Reproduction, red** (`test_violation_refuses_a_commit_in_a_double_quoted_substitution_on_main`, run before any production change):
+
+```
+$ pytest tests/test_guard_git.py -k test_violation_refuses_a_commit_in_a_double_quoted_substitution_on_main
+tests/test_guard_git.py::test_violation_refuses_a_commit_in_a_double_quoted_substitution_on_main FAILED
+>       assert violation('echo "$(git commit -m x)"', PROTECTED).startswith(COMMIT_REASON)
+E       assert False
+E        +  where False = <built-in method startswith of str object at 0x...>('Refused: this would commit to `main`')
+E        +      where '' = violation('echo "$(git commit -m x)"', 'main')
+====================== 1 failed, 409 deselected in 0.21s =======================
+```
+
+The command is allowed (empty reason) while bash runs git: the shape the Defect block's Observed row describes.
+
 ---
 
 ## 4. Verification log
