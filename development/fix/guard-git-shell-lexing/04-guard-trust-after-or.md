@@ -1,6 +1,6 @@
 # The git guard does not trust a switch that `||` may skip
 
-<!-- claude-plan step=1 status=active -->
+<!-- claude-plan step=2 status=active -->
 
 | Field | Value |
 |---|---|
@@ -13,7 +13,7 @@
 
 | # | Step | Skill | Runs | Status |
 |---|---|---|---|---|
-| 1 | Conceptualize | `/conceptualize` | with the user | pending |
+| 1 | Conceptualize | `/conceptualize` | with the user | done |
 | 2 | Plan | `/plan` | with the user | pending |
 | 3 | Implement | `/implement` | in `/build` | pending |
 | 4 | Verify | `/verify` | in `/build` | pending |
@@ -27,8 +27,6 @@
 Statuses: `pending`, `in progress`, `done`.
 
 ## Builds on
-
-Opened on a bug report — run `/fix` first.
 
 | Round | File | What it delivered |
 |---|---|---|
@@ -57,64 +55,80 @@ What is already on the branch that this round must not break:
 
 ## 1. Concept
 
-> Written in step 1, agreed with the user before step 2 starts. Prose, not code. Steps 3
-> to 7 run without the user, and the one thing that stops them is a finding that would
-> change this section — so what is not decided here is decided by a halt.
-
 ### Defect
-
-> Fix rounds only — a round 1 that `/fix` opened, or a later round opened on a bug report,
-> whatever its folder is called. Delete this block on a feature round; its presence, filled,
-> is the only thing that marks a round as a fix round to every step after this one. Its
-> starting content is the `/fix` diagnosis, agreed with the user like the rest of section 1
-> and written to disk with it. The root cause is on the halting line: a build that finds a
-> different cause halts rather than fixing what it found.
 
 | Field | Value |
 |---|---|
-| Observed | What happens, quoted from the reproduction. |
-| Expected | What should happen, and what says so — a docstring, a test, an earlier round's criterion. |
-| Reproduction | The exact command or call and its output. Step 3 turns this into the first test and runs it red before fixing. |
-| Root cause | `file.py:NN`, and the decision on that line that is wrong. |
-| Introduced by | The commit, or "older than the history here". |
-| Class | Other inputs the same cause breaks, and the same shape elsewhere in the repo. |
-| Blast radius | Callers of the cause, tests that will move, anything that depends on the current behaviour. |
-| Scope | `this instance` or `the class` — the user's decision, with the reason. What the class holds that is not taken goes under Explicitly out of scope by name. |
+| Observed | `violation("git status \|\| git checkout -b x && git commit -m x", "main")` returns `""` (allowed). In bash with `git` shadowed by a function keeping HEAD in a file, the command prints `COMMIT on main`. |
+| Expected | Refused with the commit reason. `violation`'s docstring and STRUCTURE.md say a switch replaces the set of branches only across `&&`, and a commit is refused when `main` is any branch it could land on (round 2, A-criteria on the set-of-branches rule). |
+| Reproduction | `violation("git status \|\| git checkout -b x && git commit -m x", "main")` → `""`; bash → `COMMIT on main`. Also, all allowed and all commit or push on `main` in bash: `git rev-parse --verify feat/x \|\| git checkout -b feat/x && git commit -m x` (feat/x exists); `git checkout main \|\| git checkout -b x && git commit -m x` from `feat/y`; `true \|\| git checkout -b x && git push origin HEAD`; `true \|\| echo a \| git checkout -b x && git commit -m x`; `true \|\| git checkout -b x "$(echo)" && git commit -m x`; `false \|\| true \|\| git checkout -b x && git commit -m x`; `true \|\|` newline `git checkout -b x && git commit -m x`; `if true \|\| git checkout -b x && git commit -m x; then :; fi`; the same inside `echo "$(...)"`. |
+| Root cause | `.claude/hooks/guard_git.py:1672`, `ok = here \| {target} if unsure else {target}`: `ok` is the set of branches HEAD could be on if every command of the current `&&` chain succeeded, but a switch replaces it with `{target}` even when its pipeline is the right operand of `\|\|`. bash reads `a \|\| b && c` as `(a \|\| b) && c`, so `c` runs when `a` succeeded and the switch never ran. Line 1638 only reads the wrong value (the site). Sibling: `guard_git.py:1622` clears round 3's `!`/`coproc` `negating` state on a list end at any depth, so a `;`, `&&` or `\|\|` inside a substitution in the switch command ends the negation of the outer pipeline. |
+| Introduced by | Older than this branch: `main`'s guard has the same flaw in its earlier form (`effective = target` after any switch, reset only on a non-`&&` separator). The set-of-branches form came in round 2 (3df5e1e), the `negating` state in round 3 (6994e72). |
+| Class | (1) A switch in an `\|\|` operand followed by `&&`, in every form: through later pipeline stages (`\|`, `\|&`); after wrappers, assignments, redirections and reserved words; with substitutions in the switch command; chained `\|\|`; an `\|\|` after an `&&` chain; `coproc true \|\|`; a heredoc on the switch; an `&&` ending a line; the commit later in the chain after more `&&` segments; the commit inside a substitution; the whole inside `{ }`, `$( )` or an `if` condition; a named switch without `-b` (`git checkout main \|\| git checkout feat/x && git commit -m x` from `feat/y`); a push of `HEAD`. (2) The `negating` depth leak: `! true \| git checkout -b feat/x "$(true && true)" && git commit -m x` on `main` is allowed and bash commits on `main` (also `"$(true; true)"` and backticks); a new `\|\|` state built the same way would inherit it (`true \|\| git checkout -b x "$(true && true)" && git commit -m x`). Already refused, by `_join` reading `; } &&` and `) &&` as `;`: a group, subshell or compound command in the `\|\|` operand; `true \|\| ! git checkout -b x && ...` by the `unsure` branch. Checked and clean: `&`, non-last pipeline stages, `case`, `if`, loops, functions, groups. |
+| Blast radius | Only `_judge`, behind `violation`; the caller is `guard_git.main`, the hook. No test pins `\|\| <switch> && <commit>`. The comment at `guard_git.py:1603–1605`, the module docstring and STRUCTURE.md's guard paragraph state the invariant the code breaks and are updated with the fix. Nothing depends on the wrong answer. |
+| Scope | `the class`, plus the `negating` depth leak — the user's choice: the same mistake with the same fix shape, and a `\|\|` fix written like the `!` rule would inherit the leak. |
 
-Critique — the `diagnosis-critic`'s findings and what was done with each:
+Critique — the `diagnosis-critic`'s findings and what was done with each (verdict: cause confirmed, class incomplete):
+
+1. **The `negating` state clears at any depth (line 1622), an existing bypass and a trap for the new rule.** Applied: added to the class and taken into scope (A3).
+2. **Eleven shapes missing from the class.** Applied: listed in the Class row and in A2.
+3. **The operand's extent must be measured from the `||`'s own depth and group level, not "any group since".** Applied: `true || { git checkout -b x && git commit -m x; }` stays allowed (A4) while `{ true || git checkout -b x && git commit -m x; }` is refused (A2).
+4. **The already-refused cases are refused by the separator join, not by any `||` logic.** Applied: recorded in the Class row; no new rule for groups or compound commands.
+5. **Doc blast radius (comment at 1603–1605, STRUCTURE.md).** Applied: Blast radius row.
 
 ### What this is
 
+A branch switch is trusted by the `&&` after it only when it is certain to have run. A switch
+in the right operand of an `||` — which runs only when the left side failed — adds its branch
+to what the next `&&` can trust instead of replacing it, so the branch the command started on
+stays in play; the operand runs from the `||` through its pipeline and substitutions to the
+next `&&`, `;`, newline or `&` at the `||`'s own depth and group level. That keeps the
+create-or-switch idiom (`git checkout -b feat/x || git checkout feat/x && git commit`)
+allowed, because both sides land on `feat/x`. Round 3's `!`/`coproc` rule is made to end only
+at a list end at its own depth, so a `;`, `&&` or `||` inside a `$( )` in the same command no
+longer cancels it. The fix removes the replacement at `guard_git.py:1672` for `||` operands and
+the any-depth clear at `guard_git.py:1622`.
+
 ### Why it is worth building
+
+See the Defect block: a silent commit to `main` in ordinary shell, against the rule
+`CLAUDE.md` sets and the guard exists to enforce.
 
 ### Inputs and outputs
 
+Unchanged: `violation(command, branch)` takes the command line and the checked-out branch and
+returns a refusal reason or `""`. Only which commands are refused changes.
+
 ### How it connects to the rest of the repo
 
-Which existing modules it calls, which call it, what it does not touch.
+Changes `_judge` in `.claude/hooks/guard_git.py`; `guard_git.main` (the `PreToolUse` hook)
+calls it through `violation`. Tests in `tests/test_guard_git.py`; prose in the module
+docstring and STRUCTURE.md's guard section. No other hook touches it.
 
 ### Explicitly out of scope
 
-### Acceptance criteria
+Recorded in round 3's section 8, not in `DEVELOPMENT.md` (the user's instruction):
 
-> Numbered, observable, and phrased so that step 6 can mark each one met or not met.
-> These are the contract. Step 2 plans against them, step 5 tests them, step 6 audits
-> against them. If a criterion cannot be observed from outside the code, rewrite it.
->
-> On a fix round the first criterion is the reproduction passing — "Given <the
-> reproduction's input>, <expected> rather than <observed>" — and the last is that nothing
-> else changed, phrased so step 6 can evidence it with more than a green suite. If the
-> scope is `the class`, each input in the class gets its own row.
+- a redirection on a compound command, which bash runs before its body;
+- a switch target that is a variable (`git checkout "$b"`);
+- PowerShell glued braces (`if($?){git commit}`) and `ForEach-Object`/`%` pipelines;
+- a `coproc` or `&` loop racing a foreground switch;
+- wrappers not stepped over (`command`, `exec`, `builtin`, `eval`, `xargs`);
+- modelling bash's `if`/`while` logic exactly (round 3's play-safe choice stands).
+
+### Acceptance criteria
 
 | # | The finished feature... |
 |---|---|
-| A1 | |
-| A2 | |
+| A1 | Given `git status \|\| git checkout -b x && git commit -m x` with `main` checked out, `violation` refuses with the commit reason rather than returning `""`. |
+| A2 | Every other `\|\|`-operand form in the Class row is refused with the commit (or push) reason on `main`, or from `feat/y` for the named switch: a later pipeline stage (`\|`, `\|&`); a wrapper, assignment, redirection or reserved word before the switch; a substitution in the switch command; chained `\|\|`; `\|\|` after an `&&` chain; `coproc true \|\|`; a heredoc on the switch; `&&` ending a line; the commit after further `&&` segments; the commit inside a `$( )`; the whole inside `{ }`, `$( )` or an `if` condition; `true \|\| git checkout -b x && git push origin HEAD`; `git checkout main \|\| git checkout feat/x && git commit -m x` from `feat/y`. |
+| A3 | `! true \| git checkout -b feat/x "$(true && true)" && git commit -m x` is refused on `main`, as are its `"$(true; true)"` and backtick variants, and `true \|\| git checkout -b x "$(true && true)" && git commit -m x`. |
+| A4 | These stay allowed on `main`: `git checkout -b feat/x \|\| git checkout feat/x && git commit -m x`; `git fetch \|\| true && git checkout -b x && git commit -m x`; `true \|\| false && git checkout -b x && git commit -m x`; `true \|\| { git checkout -b x && git commit -m x; }`; `git checkout -b feat/x && ! git diff --cached --quiet && git commit -m x`. |
+| A5 | Nothing else changed: the existing 1042 tests pass unmodified and rounds 1–3's criteria still hold; a differential against the guard at 43eeea3 over the suite's commands, with `\|\|` and `!` variants, sends every differing row to bash with `git` shadowed — the oracle first shown live by a plain commit landing on `main` — and every difference involves `\|\|` or the `negating` leak, with the oracle agreeing or the new refusal play-safe, and zero rows where the guard allows a commit or push that bash lands on `main`. |
 
 ### Open questions
 
-> Must be empty before step 2 begins. An unanswered question here is a decision being
-> made by accident later — and nobody is watching when it happens.
+None.
 
 ---
 
