@@ -1938,6 +1938,249 @@ def test_violation_still_reads_the_body_that_follows_a_closing_paren_on_the_open
     assert violation(command, OTHER).startswith(PUSH_REASON)
 
 
+@pytest.mark.parametrize(
+    "command",
+    [
+        # Process substitution: the closing line, a body substitution, the
+        # command on the closing line, and the line break before the `)`.
+        "cat <(cat <<EOF\nhi\nEOF) ; git push origin main",
+        "tee >(cat <<EOF\nhi\nEOF) </dev/null ; git push origin main",
+        "cat <(cat <<EOF\n$(git push origin main)\nEOF)",
+        "cat <(cat <<EOF\nhi\nEOF git push origin main)",
+        "cat <(cat <<EOF\nhi\nEOF\n)\ngit push origin main",
+        # A `${x:-$(...)}` default, quoted and not: the `)` closes the
+        # substitution and the `}` after it closes the parameter.
+        'echo "${x:-$(cat <<EOF\nhi\nEOF)}" ; git push origin main',
+        "echo ${x:-$(cat <<EOF\nhi\nEOF)} ; git push origin main",
+        'echo "${x:-$(cat <<EOF\n$(git push origin main)\nEOF)}"',
+        'echo "${x:-$(cat <<EOF\nhi\nEOF git push origin main)}"',
+        # A `)` inside quotes or a comment on the closing line does not close
+        # the substitution in bash; a later line does, and the push runs. The
+        # guard reads the first `)` it sees, which can only add refusals.
+        'x=$(cat <<EOF\nhi\nEOF "a)b"\n); git push origin main',
+        "x=$(cat <<EOF\nhi\nEOF # a)\n); git push origin main",
+        "x=$(cat <<EOF\nhi\nEOF 'a)'\n); git push origin main",
+        "x=$(cat <<EOF\nhi\nEOF\\)\n); git push origin main",
+        # A `case` pattern's `)` on a line of its own is not the closer.
+        "x=$(case a in a) cat <<EOF\nhi\nEOF\n;; esac) ; git push origin main",
+        # A backtick pair and a nested `$( )` around the heredoc.
+        "x=$(echo `cat <<EOF\nhi\nEOF`) ; git push origin main",
+        "x=$(echo $(cat <<EOF\nhi\nEOF) ; git push origin main)",
+        "x=$(echo $(cat <<EOF\nhi\nEOF) ; echo)  ; git push origin main",
+        # Whatever follows the closing `)` is judged, whatever joins it.
+        'x="$(cat <<EOF\nhi\nEOF)x"; git push origin main',
+        'x="$(cat <<EOF\nhi\nEOF)#"; git push origin main',
+        "x=$(cat <<EOF\nhi\nEOF)#; git push origin main",
+        "x=$(cat <<EOF\nhi\nEOF) && git push origin main",
+        "x=$(cat <<EOF\nhi\nEOF) | git push origin main",
+        "x=$(cat <<EOF\nhi\nEOF) & git push origin main",
+        "x=$(cat <<EOF\nhi\nEOF)\n\ngit push origin main",
+        "x=$(cat <<EOF\nhi\nEOF\n) # c )\ngit push origin main",
+        # A body full of quote characters does not unbalance the line.
+        'echo "$(cat <<EOF\n"\nEOF)" ; git push origin main',
+        'echo "$(cat <<EOF\n\'\nEOF)" ; git push origin main',
+        'echo "$(cat <<EOF\n`\nEOF)" ; git push origin main',
+        'echo "$(cat <<EOF\n\\\nEOF)" ; git push origin main',
+    ],
+)
+def test_violation_reads_a_closing_line_in_every_kind_of_substitution(
+    command: str,
+) -> None:
+    # Each runs `git push origin main` in bash 5.2 with `git` shadowed.
+    assert violation(command, OTHER).startswith(PUSH_REASON)
+    assert violation(command, PROTECTED).startswith(PUSH_REASON)
+
+
+@pytest.mark.parametrize(
+    "command",
+    [
+        # A tab-stripped delimiter: one tab, several, and the rest of the line.
+        "x=$(cat <<-EOF\n\thi\n\tEOF); git push origin main",
+        "x=$(cat <<-EOF\n\t\thi\n\t\tEOF); git push origin main",
+        "x=$(cat <<-EOF\n\thi\n\t\t\tEOF); git push origin main",
+        "x=$(cat <<-EOF\n\thi\n\tEOF git push origin main)",
+        "x=$(cat <<-EOF\n\thi\nEOF\t)\ngit push origin main",
+        # A delimiter that is, or holds, a `)`.
+        "x=$(cat <<\\)\nhi\n)\n); git push origin main",
+        'x=$(cat <<")"\nhi\n)\n); git push origin main',
+        "x=$(cat <<')'\nhi\n)\n); git push origin main",
+        "x=$(cat <<'A)'\nhi\nA)\n); git push origin main",
+        "x=$(cat <<'A)'\nhi\nA)\n)\ngit push origin main",
+        "x=$(cat <<'A)'\nhi\nA))\ngit push origin main",
+        "x=$(cat <<'A)'\nhi\nA)); git push origin main",
+        'x=$(cat <<"E)"\nhi\nE)\n); git push origin main',
+        # A body line that begins with the delimiter text ends the body in
+        # bash too, so what is on it is a command.
+        "x=$(cat <<EOF\nEOFish) git push origin main\nEOF\n)",
+        "x=$(cat <<EOF\nEOFish\nEOF\n); git push origin main",
+        # Two substitutions on one line, each with a heredoc.
+        'echo "$(cat <<A\nx\nA\n)" "$(cat <<B\ny\nB\n)" ; git push origin main',
+        'echo "$(cat <<A\nx\nA)" "$(cat <<B\ny\nB)" ; git push origin main',
+        "echo $(cat <<A\nx\nA) $(cat <<B\ny\nB) ; git push origin main",
+        "echo $(cat <<A\nx\nA) $(cat <<B\n$(git push origin main)\nB)",
+        "echo $(cat <<A\n$(git push origin main)\nA) $(cat <<B\ny\nB)",
+        'echo "$(cat <<EOF\nEOF)$(cat <<EOF\nEOF)" ; git push origin main',
+        'echo "$(cat <<EOF\nEOF)$(cat <<EOF\nEOF)"\ngit push origin main',
+        # Two heredocs in one substitution; the last one closes it.
+        "echo $(cat <<A; cat <<B\nx\nA\ny\nB\n); git push origin main",
+        "echo $(cat <<A; cat <<B\nx\nA\ny\nB); git push origin main",
+        # A heredoc inside the body of another, one inside the other's `)`.
+        'echo "$(cat <<EOF\n$(cat <<IN\nhi\nIN)\nEOF)" ; git push origin main',
+    ],
+)
+def test_violation_reads_the_delimiter_shapes_a_closing_line_can_take(
+    command: str,
+) -> None:
+    # Each runs `git push origin main` in bash 5.2 with `git` shadowed.
+    assert violation(command, OTHER).startswith(PUSH_REASON)
+    assert violation(command, PROTECTED).startswith(PUSH_REASON)
+
+
+@pytest.mark.parametrize(
+    "command",
+    [
+        # `)` inside quotes or a comment on the closing line: bash does not
+        # close there, the push is part of the substitution's text or a
+        # comment, and the guard agrees.
+        'x=$(cat <<EOF\nhi\nEOF "a)b" git push origin main\n)',
+        "x=$(cat <<EOF\nhi\nEOF # git push origin main)\n)",
+        'x=$(cat <<EOF\nhi\nEOF "a)b"\n)',
+        # A comment after the closing `)` hides the push.
+        "x=$(cat <<EOF\nhi\nEOF) # git push origin main",
+        # Not a closing line: a leading space, a tab under plain `<<`, a
+        # carriage return on every line of a CRLF script, a heredoc in the
+        # body of an enclosing one that swallows the push.
+        "x=$(cat <<EOF\nhi\n EOF); git push origin main",
+        "x=$(cat <<EOF\nhi\n\tEOF); git push origin main",
+        "x=$(cat <<-EOF\n\thi\n \tEOF); git push origin main",
+        "x=$(cat <<EOF\r\nhi\r\nEOF)\r; git push origin main",
+        "x=$(cat <<EOF\r\nhi\r\nEOF)\r\ngit push origin main",
+        'echo "$(cat <<EOF\n$(cat <<IN\nhi\nIN) git push origin main\nEOF\n)"',
+    ],
+)
+def test_violation_allows_what_bash_does_not_run_after_a_closing_line(
+    command: str,
+) -> None:
+    # None of these runs a push in bash 5.2 with `git` shadowed.
+    assert violation(command, OTHER) == ""
+    assert violation(command, PROTECTED) == ""
+
+
+def test_violation_reads_a_closing_paren_followed_by_a_carriage_return() -> None:
+    # Only the line break after the `)` is a CRLF one: the delimiter line is
+    # exact, the `)` closes, and `\r` on the next command is part of its word
+    # end, not of the delimiter. Bash pushes `main`.
+    command = "x=$(cat <<EOF\nhi\nEOF)\r\ngit push origin main"
+    assert violation(command, OTHER).startswith(PUSH_REASON)
+    assert violation(command, PROTECTED).startswith(PUSH_REASON)
+
+
+@pytest.mark.parametrize(
+    "command",
+    [
+        # Bash rejects these ("unexpected EOF while looking for matching
+        # `)'") and runs nothing; the guard reads the line as closing, or the
+        # whole thing as a body, and over-refuses. A push either way.
+        "x=$(cat <<')'\nhi\n))\n); git push origin main",
+        "x=$(cat <<'A)'\nhi\nA)\nA)); git push origin main",
+        "x=$(cat <<EOF\nEOFish)\nEOF\n); git push origin main",
+        "x=$(cat <<EOF\nEOFish)\nEOF); git push origin main",
+        "x=$(cat <<EOF\nEOF)\nEOF\n); git push origin main",
+        "x=$(cat <<EOF\nEOF\n)); git push origin main",
+        "x=$( (cat <<EOF\nhi\nEOF) ; git push origin main )",
+        'echo "$(cat <<EOF\n$(cat <<IN\n$(git push origin main)\nIN)\nEOF)"',
+    ],
+)
+def test_violation_over_refuses_a_closing_line_bash_rejects(command: str) -> None:
+    # The liberal direction is the safe one: a line the guard reads as closing
+    # and bash does not (or the reverse) is a syntax error in bash, never a
+    # command that runs without the guard seeing it.
+    assert violation(command, OTHER).startswith(PUSH_REASON)
+
+
+@pytest.mark.parametrize(
+    ("command", "branch", "refused"),
+    [
+        # The `&&` chain before the substitution keeps its trust through the
+        # closing line and into the commit after it.
+        (
+            'git checkout -b x && echo "$(cat <<EOF\nhi\nEOF)" && git commit -m x',
+            PROTECTED,
+            False,
+        ),
+        (
+            "git checkout -b x && x=$(cat <<EOF\nhi\nEOF) && git commit -m x",
+            PROTECTED,
+            False,
+        ),
+        (
+            "git checkout -b x &&\nx=$(cat <<EOF\nhi\nEOF) && git commit -m x",
+            PROTECTED,
+            False,
+        ),
+        (
+            'echo "$(cat <<EOF\nhi\nEOF)" && git checkout -b x && git commit -m x',
+            PROTECTED,
+            False,
+        ),
+        # A `;` after the closing line is not a guarantee, so on `main` the
+        # commit may land there (the A6 rule).
+        (
+            'git checkout -b x && echo "$(cat <<EOF\nhi\nEOF)" ; git commit -m x',
+            PROTECTED,
+            True,
+        ),
+        (
+            'git checkout -b x && echo "$(cat <<EOF\nhi\nEOF)" ; git commit -m x',
+            OTHER,
+            False,
+        ),
+        # A switch to `main` after the substitution is still caught.
+        (
+            "git checkout main && x=$(cat <<EOF\nhi\nEOF) && git commit -m x",
+            OTHER,
+            True,
+        ),
+        (
+            'git checkout -b x && echo "$(cat <<EOF\nhi\nEOF)" && git checkout main && git commit -m x',
+            PROTECTED,
+            True,
+        ),
+    ],
+)
+def test_violation_keeps_and_trust_across_a_heredoc_closing_line(
+    command: str, branch: str, refused: bool
+) -> None:
+    # Outcomes match bash with `git` shadowed (the `;` case on `main` is the
+    # deliberate over-refusal of the untrusted-switch rule).
+    assert bool(violation(command, branch)) is refused
+
+
+@pytest.mark.parametrize(
+    "command",
+    [
+        "git commit -m \"$(cat <<'EOF'\nmsg\nEOF\n)\"",
+        "git commit -m \"$(cat <<'EOF'\nmsg)\nEOF\n)\"",
+        'git commit -m "$(cat <<EOF\nmsg\nEOF\n)"',
+        "git commit -m \"$(cat <<'EOF'\nmsg\nEOF)\"",
+        "git commit -m \"$(cat <<'EOF'\nit's 1) done\nEOF\n)\"",
+        "git commit -m \"$(cat <<'EOF'\nit's 1) done\nEOF)\"",
+    ],
+)
+def test_violation_keeps_the_outcome_of_the_pipelines_commit_form(
+    command: str,
+) -> None:
+    assert violation(command, PROTECTED).startswith(COMMIT_REASON)
+    assert violation(command, OTHER) == ""
+    assert violation("git checkout -b x && " + command, PROTECTED) == ""
+    assert (
+        violation(
+            "git checkout -b x && " + command + " && git push -u origin x", PROTECTED
+        )
+        == ""
+    )
+
+
 def test_violation_judges_a_commit_in_a_body_of_nested_quoted_substitutions() -> None:
     command = 'echo "$(echo "$(cat <<EOF\n$(git commit -m x)\nEOF)")"'
     assert violation(command, PROTECTED).startswith(COMMIT_REASON)

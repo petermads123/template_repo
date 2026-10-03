@@ -1,6 +1,6 @@
 # The git guard judges command substitutions inside a word
 
-<!-- claude-plan step=5 status=active -->
+<!-- claude-plan step=6 status=active -->
 
 | Field | Value |
 |---|---|
@@ -17,7 +17,7 @@
 | 2 | Plan | `/plan` | with the user | done |
 | 3 | Implement | `/implement` | in `/build` | done |
 | 4 | Verify | `/verify` | in `/build` | done |
-| 5 | Test | `/test` | in `/build` | pending |
+| 5 | Test | `/test` | in `/build` | done |
 | 6 | Concept check | `/concept-check` | in `/build` | pending |
 | 7 | Ship | `/ship` | in `/build` | pending |
 | 8 | Recommend | `/recommend` | with the user | pending |
@@ -591,6 +591,20 @@ Gates after the step: `ruff check .` clean, `ruff format --check .` clean, `mypy
 | Genuinely unbalanced quote, no heredoc | `test_violation_keeps_an_unbalanced_quote_without_a_heredoc_unreadable` | pass |
 
 Gates: `ruff check .`, `ruff format --check .`, `mypy` clean, `pytest` 724 passed. Skipped on purpose: `echo "$(cat <<A\nx\nA\n$(cat <<B\n$(git push origin main)\nB)"` is allowed and bash raises a syntax error (nothing runs), so it teaches nothing the others do not.
+
+**Re-test after the step-6 halt** (heredoc closing on the substitution's `)`; `_heredoc_bodies`). A narrow hunt around that rule only. 100 shapes the step 3 matrix did not try were run in bash 5.2 with `git` shadowed (file-backed `HEAD`, script files, `stdin` closed, 5 s timeout; scratchpad `r5/probe.py`, `r5/probe2.py`) on `main` and `feat/x` against `violation()`. **No bypass: the guard never allowed a command bash lands on `main` with.** It over-refused only where bash rejects the text as a syntax error, plus the pinned `;` rule of A6; so no production change. 87 cases added to `tests/test_guard_git.py` (766 to 853 passed in the suite, 763 in the file):
+
+| Probe | Test names | Result |
+|---|---|---|
+| Closing line in `<( )`/`>( )`, `${x:-$( )}` (quoted and not), `)` in a quote or comment on the line, `EOF\)`, `case` pattern, backtick pair, nested `$( )`, whatever follows the `)` (`&&`, `\|`, `&`, `#`, blank line, glued word), quote-laden bodies | `test_violation_reads_a_closing_line_in_every_kind_of_substitution` (28; push refused on `main` and from a branch) | pass |
+| Tab-stripped delimiters, a delimiter that is or holds `)`, a body line starting with the delimiter text, two substitutions or two heredocs on one line, a heredoc inside a body | `test_violation_reads_the_delimiter_shapes_a_closing_line_can_take` (24; push refused) | pass |
+| What bash does not run: `)` in quotes or a comment on the closing line, a comment after the `)`, a leading space, a tab under plain `<<`, an all-CRLF script, a heredoc swallowing the push | `test_violation_allows_what_bash_does_not_run_after_a_closing_line` (10; allowed) | pass |
+| `)` followed by a carriage return on an LF script | `test_violation_reads_a_closing_paren_followed_by_a_carriage_return` | pass |
+| Inputs bash rejects as a syntax error; the liberal direction | `test_violation_over_refuses_a_closing_line_bash_rejects` (8; refused from a branch) | pass |
+| `&&` trust before the substitution and through the closing line; the `;` over-refusal on `main`; a later switch to `main` | `test_violation_keeps_and_trust_across_a_heredoc_closing_line` (8) | pass |
+| The pipeline's commit form with `EOF\n)"` and `EOF)"`, an apostrophe and a `)` in the message | `test_violation_keeps_the_outcome_of_the_pipelines_commit_form` (6; refused on `main`, allowed on a branch and after `git checkout -b x &&`) | pass |
+
+Gates: `ruff check .`, `ruff format --check .`, `mypy` clean, `pytest` 853 passed. Skipped on purpose: the body-line prefix shape `EOFish)` as the only body line then a real `EOF)` is a syntax error in bash and pinned once in the over-refusal test; PowerShell closing-line forms (`pwsh` is not installed here); a CRLF closing line `EOF)\r` with a CRLF body, which bash never closes (allowed, pinned).
 
 Edge cases considered and deliberately skipped, with reasons:
 
