@@ -447,6 +447,24 @@ The command is allowed (empty reason) while bash runs git: the shape the Defect 
 
 **Send-back from step 6 (A2/A9), fixed.** `echo "$(cat <<EOF > f\n$(git push origin main)\nEOF)"` and its backtick-body twin were allowed from a branch while bash pushes `main`. Cause: the body substitution was extracted correctly, but the heredoc body ran to the end of the input and swallowed the closing `"`, so the prepared text had an unbalanced quote, `_lex` returned None and `violation` treated the command as unreadable (refused only on `main`). The unquoted form has no quote to lose, which is why only the double-quote path missed. Red run before the fix (`test_violation_judges_a_body_substitution_of_an_unclosed_quoted_substitution`, 3 of 4 parametrized cases failed: `violation(..., 'feat/topic') == ''`). Fix in `_scan`'s newline branch: when heredoc bodies reach the end of the input, one closing `"` is appended per open `dq` frame so `shlex` reads what is left; the extracted group was already in the slot. Verified in bash with `git` shadowed that the push runs. Suite: 702 passed (697 plus 4 new cases and 1 new data-form test).
 
+**Halt answered at step 6 (option 1): heredoc closing inside a substitution, red run before the fix** (`test_violation_judges_what_follows_a_heredoc_closed_by_the_substitutions_paren`, 8 cases for shapes (a), (b) quoted and unquoted, (c) and the process-substitution form; `test_violation_allows_a_harmless_command_after_a_heredoc_closed_by_a_paren`, 4 harmless counterparts, green throughout):
+
+```
+$ pytest tests/test_guard_git.py -k "closed_by_the_substitutions_paren or closed_by_a_paren"
+FAILED ...closed_by_the_substitutions_paren[echo "$(echo '"' "$(cat <<EOF\n$(git push origin main)\nEOF)")"]
+FAILED ...[echo "$(cat <<EOF\nhi\nEOF)" ; git push origin main]
+FAILED ...[echo "$(cat <<EOF\nhi\nEOF)"\ngit push origin main]
+FAILED ...[echo "$(cat <<'EOF'\nhi\nEOF)" ; git push origin main]
+FAILED ...[echo "$(cat <<EOF\nit's\nEOF)" ; git push origin main]
+FAILED ...[x=$(cat <<EOF\nhi\nEOF); git push origin main]
+FAILED ...[x=$(cat <<EOF\nhi\nEOF)\ngit push origin main]
+FAILED ...[cat <(cat <<EOF\nhi\nEOF) ; git push origin main]
+E        +      where '' = violation('echo "$(cat <<EOF\nhi\nEOF)" ; git push origin main', 'feat/topic')
+================= 8 failed, 4 passed, 633 deselected in 0.30s ==================
+```
+
+Every one of the eight was confirmed in bash 5.2 with `git` shadowed to push `main` (scratchpad `r3/chk_tests.py`).
+
 ---
 
 ## 4. Verification log

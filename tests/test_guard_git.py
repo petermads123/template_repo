@@ -1819,6 +1819,47 @@ def test_violation_closes_every_open_quote_when_a_body_reaches_the_end(
     assert violation(command, PROTECTED).startswith(PUSH_REASON)
 
 
+@pytest.mark.parametrize(
+    "command",
+    [
+        # (a) a body substitution, a single-quoted double quote before it.
+        'echo "$(echo \'"\' "$(cat <<EOF\n$(git push origin main)\nEOF)")"',
+        # (b) the command after a heredoc closed by a glued `)`.
+        'echo "$(cat <<EOF\nhi\nEOF)" ; git push origin main',
+        'echo "$(cat <<EOF\nhi\nEOF)"\ngit push origin main',
+        "echo \"$(cat <<'EOF'\nhi\nEOF)\" ; git push origin main",
+        'echo "$(cat <<EOF\nit\'s\nEOF)" ; git push origin main',
+        # (c) the unquoted form, which the guard has always missed.
+        "x=$(cat <<EOF\nhi\nEOF); git push origin main",
+        "x=$(cat <<EOF\nhi\nEOF)\ngit push origin main",
+        "cat <(cat <<EOF\nhi\nEOF) ; git push origin main",
+    ],
+)
+def test_violation_judges_what_follows_a_heredoc_closed_by_the_substitutions_paren(
+    command: str,
+) -> None:
+    # Bash ends the heredoc on `EOF)`, closes the substitution there and runs
+    # the rest of the line (checked with `git` shadowed).
+    assert violation(command, OTHER).startswith(PUSH_REASON)
+    assert violation(command, PROTECTED).startswith(PUSH_REASON)
+
+
+@pytest.mark.parametrize(
+    "command",
+    [
+        'echo "$(cat <<EOF\nhi\nEOF)"; ls',
+        "x=$(cat <<EOF\nhi\nEOF); git status",
+        "x=$(cat <<EOF\nhi\nEOF)\ngit log -1",
+        'echo "$(cat <<EOF\nit\'s\nEOF)" ; echo done',
+    ],
+)
+def test_violation_allows_a_harmless_command_after_a_heredoc_closed_by_a_paren(
+    command: str,
+) -> None:
+    assert violation(command, PROTECTED) == ""
+    assert violation(command, OTHER) == ""
+
+
 def test_violation_judges_a_commit_in_a_body_of_nested_quoted_substitutions() -> None:
     command = 'echo "$(echo "$(cat <<EOF\n$(git commit -m x)\nEOF)")"'
     assert violation(command, PROTECTED).startswith(COMMIT_REASON)
