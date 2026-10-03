@@ -1,6 +1,6 @@
 # The git guard reads commands the way the shell does
 
-<!-- claude-plan step=4 status=active -->
+<!-- claude-plan step=5 status=active -->
 
 | Field | Value |
 |---|---|
@@ -16,7 +16,7 @@
 | 1 | Conceptualize | `/conceptualize` | with the user | done |
 | 2 | Plan | `/plan` | with the user | done |
 | 3 | Implement | `/implement` | in `/build` | done |
-| 4 | Verify | `/verify` | in `/build` | pending |
+| 4 | Verify | `/verify` | in `/build` | done |
 | 5 | Test | `/test` | in `/build` | pending |
 | 6 | Concept check | `/concept-check` | in `/build` | pending |
 | 7 | Ship | `/ship` | in `/build` | pending |
@@ -296,12 +296,15 @@ Built as planned. Helpers beyond `_prepare`: `_skip_single`, `_skip_double`, `_s
 
 | Check | Result |
 |---|---|
-| `ruff check .` | |
-| `ruff format --check .` | |
-| `mypy` | |
-| Plan completeness | every signature in the Public API table exists as written |
-| `STRUCTURE.md` | in sync |
-| `python -m <package>.<module>` | |
+| `ruff check .` | `All checks passed!` |
+| `ruff format --check .` | `11 files already formatted` |
+| `mypy` | `Success: no issues found in 11 source files` |
+| `pytest` | `312 passed in 5.49s` |
+| Plan completeness | `segments`, `violation` (signatures unchanged) and `UNMODELLED_OPENERS: tuple[str, ...] = ("$'", "@'", '@"', "<#", "`'", '`"')` exist as written; `_prepare(command: str) -> tuple[str | None, bool]` exists as planned. No missing, deviation or unplanned public surface. |
+| `STRUCTURE.md` | in sync after the `structure-auditor` edits below |
+| `python -m <package>.<module>` | not applicable: `guard_git.py` is an executable hook (its `main()` is the entry point, no showcase) and no library module was added; `template_repo` is not installed here |
+
+`structure-auditor` findings: step 3 had already added the lexing prose (its edit 3) and a `UNMODELLED_OPENERS` row. Applied what was missing: the `violation` row's `main` refusal (1), the `segments` row's `None` cases (2), the full `UNMODELLED_OPENERS` description (4), and the `tests/test_guard_git.py` shell-lexing paragraph (5). No private names listed.
 
 ---
 

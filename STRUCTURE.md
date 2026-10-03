@@ -124,6 +124,8 @@ message; and the commands that must stay allowed — `echo git commit`, `grep pu
 One test asserts a documented miss rather than a fix: `sudo -u me git push` is allowed,
 because only options are skipped after a wrapper and never a bare word.
 
+The shell-lexing cases close the file: the reproduction for the defect `fix/guard-git-shell-lexing` fixes, a heredoc whose body carries a stray quote (`python3 - <<'EOF'` ... `EOF`), which must be allowed on `main` rather than refused as unreadable.
+
 ### `tests/test_plan_state.py`
 
 Covers `.claude/hooks/plan_state.py`. `parse` against a complete marker, a file with none,
@@ -311,12 +313,12 @@ meets an unknown branch is refused with a message saying so rather than the one 
 | Signature | Description |
 |---|---|
 | `Segment` | Frozen dataclass: `tokens` and the `separator` that preceded them — one of `SEPARATORS`, a newline, or a grouping delimiter (`""` for the first). |
-| `segments(command: str) -> list[Segment] \| None` | Split a command into invocations after comments, continuations and heredoc bodies are removed, or None if it cannot be read. |
+| `segments(command: str) -> list[Segment] \| None` | Split a command into invocations after comments, continuations and heredoc bodies are removed, or None if it cannot be read: an unbalanced quote, or a heredoc missing its delimiter word or its closing line. |
 | `git_subcommand(tokens: tuple[str, ...]) -> tuple[str, tuple[str, ...]]` | Identify the git subcommand and its arguments. |
 | `push_targets_main(args: tuple[str, ...], branch: str) -> bool` | Whether a push would update `main`. |
 | `switch_target(subcommand: str, args: tuple[str, ...]) -> str` | The branch a `checkout`/`switch` moves to, `""` when it moves none, or the sentinel `UNRESOLVED` (`"?"`) for a target only the running shell can resolve — `-` and `@{-1}`. |
-| `violation(command: str, branch: str) -> str` | The reason to refuse, or `""` to allow. |
-| `UNMODELLED_OPENERS: tuple[str, ...]` | The character pairs that open a construct the scanner does not read; a command carrying one is distrusted on `main`. |
+| `violation(command: str, branch: str) -> str` | The reason to refuse, or `""` to allow. While `main` is checked out, a command carrying any of `UNMODELLED_OPENERS` that names `commit` or `push` is refused outright. |
+| `UNMODELLED_OPENERS: tuple[str, ...]` | `("$'", "@'", '@"', "<#", "`'", '`"')`: the pairs that open syntax the pre-pass does not read — an ANSI-C string, a PowerShell here-string, a PowerShell block comment, a backtick-escaped quote. Looked for outside quotes, and `` `" `` inside double quotes too. A command carrying one is what `violation` refuses on `main` when it names `commit` or `push`. |
 | `main() -> None` | Entry point: allow or refuse the command. |
 
 ### `.claude/hooks/lint_py.py`
