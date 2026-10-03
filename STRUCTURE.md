@@ -285,6 +285,16 @@ refuse `echo git commit`, which is the failure this module treats as worse. Only
 skipped after a wrapper, never a bare word, so an option that takes a value hides what
 follows it.
 
+`shlex` is not a shell, so a private pass (`_prepare`) runs in front of it and removes what
+bash never runs: a `#` at the start of a word comments out the rest of its line, a
+backslash-newline joins two lines, and a heredoc body (`<<WORD`, `<<-WORD`, quoted or not,
+never `<<<`) is dropped up to its delimiter line, leaving the `<<` and its word so the
+invocation still reads as a redirection. A heredoc with no delimiter word or no closing line
+makes the command unreadable. The pass also reports a construct it does not read — a pair in
+`UNMODELLED_OPENERS`: `$'...'`, PowerShell here-strings, `<# #>` comments, backtick-escaped
+quotes. It does not guess: with `main` checked out, such a command that names `commit` or
+`push` is refused with its own message, and anywhere else it is judged as parsed.
+
 A push's destination is read with the same care. The arguments are walked rather than
 filtered, so an option that takes a value — `-o`, `--push-option`, `--repo`,
 `--receive-pack`, `--exec` — does not leave its value standing where the remote should be,
@@ -301,11 +311,12 @@ meets an unknown branch is refused with a message saying so rather than the one 
 | Signature | Description |
 |---|---|
 | `Segment` | Frozen dataclass: `tokens` and the `separator` that preceded them — one of `SEPARATORS`, a newline, or a grouping delimiter (`""` for the first). |
-| `segments(command: str) -> list[Segment] \| None` | Split a command into invocations, or None if it cannot be read. |
+| `segments(command: str) -> list[Segment] \| None` | Split a command into invocations after comments, continuations and heredoc bodies are removed, or None if it cannot be read. |
 | `git_subcommand(tokens: tuple[str, ...]) -> tuple[str, tuple[str, ...]]` | Identify the git subcommand and its arguments. |
 | `push_targets_main(args: tuple[str, ...], branch: str) -> bool` | Whether a push would update `main`. |
 | `switch_target(subcommand: str, args: tuple[str, ...]) -> str` | The branch a `checkout`/`switch` moves to, `""` when it moves none, or the sentinel `UNRESOLVED` (`"?"`) for a target only the running shell can resolve — `-` and `@{-1}`. |
 | `violation(command: str, branch: str) -> str` | The reason to refuse, or `""` to allow. |
+| `UNMODELLED_OPENERS: tuple[str, ...]` | The character pairs that open a construct the scanner does not read; a command carrying one is distrusted on `main`. |
 | `main() -> None` | Entry point: allow or refuse the command. |
 
 ### `.claude/hooks/lint_py.py`

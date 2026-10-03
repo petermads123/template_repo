@@ -11,6 +11,17 @@ for a separator, and emits the real separators as tokens of their own even when
 they are glued to a word. The command is then split on those separators into one
 invocation per segment.
 
+`shlex` is not a shell, so a pass in front of it (`_prepare`) removes what bash
+never runs and `shlex` cannot read: a `#` at the start of a word comments out
+the rest of its line, a backslash at the end of a line joins it to the next,
+and a heredoc body is data up to its closing delimiter line. Left in, a quote
+in a comment or a body pairs with one in the next command, and either hides a
+real `git commit` or makes a harmless command look unbalanced. Constructs it
+does not read -- `$'...'`, PowerShell here-strings, `<# #>` comments and
+backtick-escaped quotes -- are not guessed at: while `main` is checked out, a
+command carrying one that names `commit` or `push` is refused outright, and
+elsewhere it is judged as parsed, as unreadable input always was.
+
 Each segment is judged against the branch that will be checked out when it runs,
 not the one checked out now: `git checkout -b feat/x && git commit` is allowed
 from `main`, because `&&` runs its right side only if the switch succeeded. No
@@ -143,7 +154,7 @@ RISKY_PATTERN = re.compile(r"\b(?:" + "|".join(RISKY_SUBCOMMANDS) + r")\b")
 #: backtick-escaped quote. All are looked for outside quotes; `` `" `` is also
 #: looked for inside double quotes, where PowerShell uses it. A command that
 #: carries one is judged by `violation` with suspicion rather than trusted.
-UNMODELLED_OPENERS = ("$'", "@'", '@"', "<#", "`'", '`"')
+UNMODELLED_OPENERS: tuple[str, ...] = ("$'", "@'", '@"', "<#", "`'", '`"')
 
 #: Characters after which a `#` starts a word, and so a comment.
 _COMMENT_BOUNDARY = " \t\r\n;&|()<>"

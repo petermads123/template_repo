@@ -1,6 +1,6 @@
 # The git guard reads commands the way the shell does
 
-<!-- claude-plan step=3 status=active -->
+<!-- claude-plan step=4 status=active -->
 
 | Field | Value |
 |---|---|
@@ -15,7 +15,7 @@
 |---|---|---|---|---|
 | 1 | Conceptualize | `/conceptualize` | with the user | done |
 | 2 | Plan | `/plan` | with the user | done |
-| 3 | Implement | `/implement` | in `/build` | in progress |
+| 3 | Implement | `/implement` | in `/build` | done |
 | 4 | Verify | `/verify` | in `/build` | pending |
 | 5 | Test | `/test` | in `/build` | pending |
 | 6 | Concept check | `/concept-check` | in `/build` | pending |
@@ -285,6 +285,8 @@ E        +  where True = refused("python3 - <<'EOF'\nx = \'\'\'main's push\'\'\'
 ```
 
 Refused on `main` as unreadable, as the Defect block's Observed row says.
+
+Built as planned. Helpers beyond `_prepare`: `_skip_single`, `_skip_double`, `_skip_ansi`, `_heredoc_word`, `_heredoc_bodies`. A backslash-newline inside double quotes is also deleted (bash joins there too). `violation()` calls `_prepare` for the flag and `segments()` for the text. After the fix the reproduction is green and all 221 guard tests pass.
 
 ---
 
