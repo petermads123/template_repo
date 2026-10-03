@@ -91,10 +91,17 @@ from plan_state import current_branch
 
 PROTECTED = "main"
 
+#: Private marks `_prepare` writes around the commands it extracts from a
+#: command substitution, so `segments` can tell how deep an invocation sits.
+#: Neither is a character a shell command carries; `_prepare` blanks any that
+#: arrive in the input so a command cannot forge a group.
+_OPEN = "\x1d"
+_CLOSE = "\x1e"
+
 #: Characters `shlex` emits as tokens of their own rather than folding into a
 #: word. The default set plus the newline, which would otherwise be whitespace
 #: and would silently join two commands written on two lines into one.
-PUNCTUATION_CHARS = "();<>|&\n"
+PUNCTUATION_CHARS = "();<>|&\n" + _OPEN + _CLOSE
 
 #: Whitespace, minus the newline that `PUNCTUATION_CHARS` claims.
 INLINE_WHITESPACE = " \t\r"
@@ -108,7 +115,7 @@ SEPARATORS = frozenset({"&&", "||", ";", "|", "&"})
 #: The grouping delimiters are here too: they begin and end a command list, so
 #: `(git commit)` has to split rather than leave `(` sitting where the command
 #: name should be, which would hide the `git` behind it.
-SEPARATOR_CHARS = frozenset("&|;\n(){}")
+SEPARATOR_CHARS = frozenset("&|;\n(){}" + _OPEN + _CLOSE)
 
 #: The one separator whose right side runs only if its left side succeeded, so
 #: a branch switch before it can be trusted to have taken effect.
@@ -120,6 +127,11 @@ NEWLINE = "\n"
 
 #: Git options that swallow the next token, hiding the subcommand behind them.
 OPTIONS_WITH_VALUE = {"-C", "-c", "--git-dir", "--work-tree", "--exec-path"}
+
+#: The separator of an invocation whose command substitutions ran immediately
+#: before it: a substitution runs first, so what follows it is neither joined
+#: to the previous command by an operator nor the start of the command line.
+SUBSTITUTED = "$("
 
 #: Subcommands that move HEAD to a different branch.
 SWITCH_SUBCOMMANDS = {"checkout", "switch"}
@@ -191,11 +203,16 @@ class Segment:
         tokens: The invocation's tokens, with quoting already resolved.
         separator: The separator that preceded it — one of `SEPARATORS`,
             `NEWLINE`, or a grouping delimiter such as `(`. Empty for the first
-            invocation in the command.
+            invocation in the command, or `SUBSTITUTED` for one whose command
+            substitutions ran just before it.
+        depth: How many command substitutions the invocation sits inside. A
+            substitution's invocations come immediately before the invocation
+            that contains it.
     """
 
     tokens: tuple[str, ...]
     separator: str
+    depth: int = 0
 
 
 def _is_separator(token: str) -> bool:
@@ -678,6 +695,7 @@ def _prepare(command: str) -> tuple[str, bool]:
         The transformed text, and whether the command contains a construct this
         scan does not read, one of `UNMODELLED_OPENERS`.
     """
+    command = command.replace(_OPEN, " ").replace(_CLOSE, " ")
     out: list[str] = []
     queue: list[tuple[str, bool, bool]] = []
     frames: list[str] = []  # "dq", "cmd" ($( or <( ), "paren", "brace", "bt"
@@ -861,20 +879,41 @@ def segments(command: str) -> list[Segment] | None:
     current: list[str] = []
     pending: list[str] = []
     separator = ""
+    depth = 0
+    after_close = False  # a substitution closed and no operator has come since
+
+    def flush() -> None:
+        if current:
+            parsed.append(Segment(tuple(current), separator, depth))
+            current.clear()
 
     for token in tokens:
-        if _is_separator(token):
-            if current:
-                parsed.append(Segment(tokens=tuple(current), separator=separator))
-                current = []
-                pending = []
-            pending.append(_governs(token))
-            separator = _join(pending)
+        if not _is_separator(token):
+            current.append(token)
             continue
-        current.append(token)
+        for piece in re.split(f"([{_OPEN}{_CLOSE}])", token):
+            if piece == _OPEN:
+                flush()
+                depth += 1
+                if after_close:
+                    separator = SUBSTITUTED
+            elif piece == _CLOSE:
+                flush()
+                depth = max(depth - 1, 0)
+                pending = []
+                separator = SUBSTITUTED
+                after_close = True
+            elif piece:
+                if current:
+                    flush()
+                    pending = []
+                pending.append(_governs(piece))
+                separator = _join(pending)
+                after_close = False
+            # The pieces left to right: an operator glued to a mark, as in
+            # `&&\x1d` or `\x1e;`, is read in the order it was written.
 
-    if current:
-        parsed.append(Segment(tokens=tuple(current), separator=separator))
+    flush()
     return parsed
 
 
