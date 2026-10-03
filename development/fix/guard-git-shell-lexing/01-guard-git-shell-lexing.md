@@ -1,6 +1,6 @@
 # The git guard reads commands the way the shell does
 
-<!-- claude-plan step=7 status=active -->
+<!-- claude-plan step=8 status=active -->
 
 | Field | Value |
 |---|---|
@@ -19,7 +19,7 @@
 | 4 | Verify | `/verify` | in `/build` | done |
 | 5 | Test | `/test` | in `/build` | done |
 | 6 | Concept check | `/concept-check` | in `/build` | done |
-| 7 | Ship | `/ship` | in `/build` | pending |
+| 7 | Ship | `/ship` | in `/build` | done |
 | 8 | Recommend | `/recommend` | with the user | pending |
 | 9 | Pull request | `/create-pr` | with the user | pending |
 | 10 | Review | `/watch-pr` | on the pull request | pending |
@@ -384,8 +384,8 @@ Drift found, and what was done about it: none. Out of scope held (`bash -c "git 
 
 | Field | Value |
 |---|---|
-| Commits | |
-| Pushed to | |
+| Commits | `6be7fa6 Concept: the git guard reads commands the way the shell does`<br>`c193a1c Plan: the git guard reads commands the way the shell does`<br>`ff44a7e Plan: apply plan-critic findings`<br>`f7f9561 Plan accepted: open the build`<br>`daf507a WIP step 3: reproduction, red`<br>`81dfdf6 Read heredocs, comments and continuations in the git guard`<br>`d68874a Document the guard's shell-lexing pass`<br>`3e6fe08 Verify: The git guard reads commands the way the shell does`<br>`52fea83 WIP step 5: scanner tracks nesting, arithmetic shifts, CR, unterminated heredocs`<br>`58ced54 WIP step 5: shell-lexing edge-case suite`<br>`2780408 Test: The git guard reads commands the way the shell does`<br>`d161806 Halt at step 5: unquoted heredoc bodies run substitutions`<br>`ba32914 Halt at step 5: resume from step 5`<br>`a86adba Halt answered at step 5: judge substitutions in unquoted heredoc bodies`<br>`8cd15d2 WIP step 5: judge substitutions in unquoted heredoc bodies`<br>`ee64452 Test: The git guard reads commands the way the shell does`<br>`a6b8957 Concept check: The git guard reads commands the way the shell does`<br>(plus the `Ship:` commit closing the round) |
+| Pushed to | `origin/fix/guard-git-shell-lexing`; origin/main already merged in, whole tree green (ruff, format, mypy clean; 500 passed); diff review found only the four expected files, no strays or debug output; every step 1-6 left a commit |
 
 ---
 
