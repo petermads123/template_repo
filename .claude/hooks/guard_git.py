@@ -100,6 +100,23 @@ would refuse `echo git commit` — the failure this module treats as worse. Only
 options are skipped after a wrapper, never a bare word, so an option that takes
 a value hides what follows it.
 
+The reserved words that take a command next -- `if`, `then`, `else`, `elif`,
+`while`, `until`, `do`, `!` and `coproc` -- are stepped over the same way, singly
+or chained (`if !`, `! !`, `time ! git`), so a `git` behind one is judged like
+any other. `for`, `select`, `case`, `function` and `in` are followed by a name or
+a pattern and are never stepped over. Trust follows the separator, as for any
+command, with two exceptions: a switch led by `!` or `coproc` only widens the
+branches an `&&` can trust, because the `&&` after a negated command runs when it
+failed and `coproc` returns at once. Playing safe, bash's own `if`, `while` and
+`until` logic is not modelled: `then`, `do`, `else` and `elif` follow `;` or a
+newline, so every branch is in play there, and `if git checkout -b feat/x; then
+git commit -m x; fi` is refused from `main`. A loop runs its body again, so a
+branch switch anywhere in one counts for all of it: bash loops run from `for`,
+`select`, `while` or `until` to the matching `done`, PowerShell's `foreach` and
+`do { } while ()` to the end of the command, and a loop's condition counts with
+its body. Known miss: a function is judged where it is defined, not where it is
+called, so `f() { git commit; }; git checkout main; f` is not seen.
+
 A push's destination is read with the same care: the arguments are walked rather
 than filtered, so an option's value is never mistaken for the remote, and every
 ref is reduced to the branch it names. A switch whose target only the running
@@ -360,22 +377,18 @@ def _branch_name(ref: str) -> str:
     return "HEAD" if name == "@" else name
 
 
-def _command_index(tokens: tuple[str, ...]) -> int:
-    """Find where a command's name starts, after the prefix a shell skips.
-
-    A simple command is a run of variable assignments and redirections, then
-    the name. Wrapper programs are stepped over too: they are not shell syntax,
-    but they run their argument as a command, so the name behind one is the
-    name that matters.
+def _walk_prefix(tokens: tuple[str, ...]) -> tuple[int, tuple[str, ...]]:
+    """Walk the prefix a shell skips before a command's name.
 
     Args:
         tokens: The invocation's tokens.
 
     Returns:
         The index of the command name, or `len(tokens)` when the invocation is
-        prefix and nothing else.
+        prefix and nothing else, and the reserved words stepped over on the way.
     """
     index = 0
+    leaders: list[str] = []
     while index < len(tokens):
         token = tokens[index]
         if ASSIGNMENT.match(token):
@@ -400,8 +413,50 @@ def _command_index(tokens: tuple[str, ...]) -> int:
             while index < len(tokens) and tokens[index].startswith("-"):
                 index += 1
             continue
-        return index
-    return len(tokens)
+        if token in _STEPPED_LEADERS:
+            leaders.append(token)
+            index += 1  # the command it leads starts at the next word
+            continue
+        return index, tuple(leaders)
+    return len(tokens), tuple(leaders)
+
+
+def _command_index(tokens: tuple[str, ...]) -> int:
+    """Find where a command's name starts, after the prefix a shell skips.
+
+    A simple command is a run of variable assignments and redirections, then
+    the name. Wrapper programs are stepped over too: they are not shell syntax,
+    but they run their argument as a command, so the name behind one is the
+    name that matters. So are the reserved words that take a command next --
+    `if`, `then`, `while`, `!` and the rest of `_COMMAND_LEADERS` -- which a
+    shell reads as syntax and not as the command's name. `for`, `select`,
+    `case`, `function` and `in` are followed by a name or a pattern, so they
+    are never stepped over.
+
+    Args:
+        tokens: The invocation's tokens.
+
+    Returns:
+        The index of the command name, or `len(tokens)` when the invocation is
+        prefix and nothing else.
+    """
+    return _walk_prefix(tokens)[0]
+
+
+def _leads_uncertainly(tokens: tuple[str, ...]) -> bool:
+    """Report whether `!` or `coproc` leads an invocation.
+
+    `&&` after a negated command runs when the command failed, and `coproc`
+    returns at once, so a branch switch they lead cannot be trusted to have
+    happened.
+
+    Args:
+        tokens: The invocation's tokens.
+
+    Returns:
+        True if `!` or `coproc` is among the words before the command name.
+    """
+    return any(word in _UNCERTAIN_LEADERS for word in _walk_prefix(tokens)[1])
 
 
 def _redirected(tokens: tuple[str, ...]) -> bool:
@@ -745,9 +800,23 @@ _MAX_NESTING = 30
 #: could start.
 _OPENER_STARTS = frozenset(opener[0] for opener in UNMODELLED_OPENERS)
 
-#: Reserved words after which another command starts, so a `case` there still
-#: opens one.
-_COMMAND_LEADERS = frozenset({"then", "do", "else", "elif", "!", "time"})
+#: Reserved words after which another command starts: the one list `_scan` uses
+#: to place a `case` and `_command_index` uses to find the command name.
+_COMMAND_LEADERS = frozenset(
+    {"if", "then", "else", "elif", "while", "until", "do", "!", "coproc", "time"}
+)
+
+#: The leaders `_command_index` steps over. `time` is left out: it is a wrapper,
+#: and is stepped with its options.
+_STEPPED_LEADERS = _COMMAND_LEADERS - {"time"}
+
+#: Leaders after which a branch switch is not trusted to have happened before
+#: the next `&&`.
+_UNCERTAIN_LEADERS = frozenset({"!", "coproc"})
+
+#: Words that open a bash loop, and the leaders among them.
+_LOOP_COMMANDS = frozenset({"for", "select"})
+_LOOP_LEADERS = frozenset({"while", "until"})
 
 #: Characters that end a word, and those that make a word more than plain text.
 _WORD_ENDS = " \t\r\n;&|()<>{}"
@@ -1388,6 +1457,56 @@ def violation(command: str, branch: str) -> str:
         return _unreadable(command, branch)
 
 
+def _loop_ranges(parsed: list[Segment]) -> dict[int, set[str]]:
+    """Find the loops in a command and the branches switched to inside each.
+
+    A switch late in a loop body governs the next iteration, so every switch
+    inside a loop counts for the whole loop. Bash loops run from `for`,
+    `select`, `while` or `until` to the matching `done`; PowerShell loops --
+    `foreach`, or a `do` before a `{` -- run to the end of the command. A start
+    with no `done` runs to the end, and a `done` with no start is ignored.
+
+    Args:
+        parsed: The invocations of the command, in order.
+
+    Returns:
+        For the first invocation of each loop -- that of its condition's
+        substitutions, when it has any -- the branches switched to anywhere in
+        the loop.
+    """
+    last = len(parsed) - 1
+    ranges: list[tuple[int, int]] = []
+    open_loops: list[int] = []
+    for index, segment in enumerate(parsed):
+        tokens = segment.tokens
+        name = _command_index(tokens)
+        word = tokens[name] if name < len(tokens) else ""
+        leaders = _walk_prefix(tokens)[1]
+        if tokens[:1] == ("done",):
+            if open_loops:
+                ranges.append((open_loops.pop(), index))
+        elif word in _LOOP_COMMANDS or _LOOP_LEADERS.intersection(leaders):
+            open_loops.append(index)
+        elif word == "foreach" or (
+            tokens == ("do",) and index < last and parsed[index + 1].separator == "{"
+        ):
+            ranges.append((index, last))
+    ranges.extend((start, last) for start in open_loops)
+
+    widened: dict[int, set[str]] = {}
+    for start, end in ranges:
+        first = start
+        while first > 0 and parsed[first - 1].depth > parsed[start].depth:
+            first -= 1
+        targets = widened.setdefault(first, set())
+        for segment in parsed[first : end + 1]:
+            subcommand, args = git_subcommand(segment.tokens)
+            target = switch_target(subcommand, args)
+            if target and not _redirected(segment.tokens):
+                targets.add(target)
+    return widened
+
+
 def _judge(command: str, branch: str) -> str:
     """Judge a command; `violation` is this with the failures caught.
 
@@ -1421,7 +1540,11 @@ def _judge(command: str, branch: str) -> str:
     # One frame per substitution being run: the branches the containing command
     # could start on, and the branches the substitution has switched to.
     frames: list[tuple[set[str], set[str]]] = []
-    for segment in parsed:
+    loops = _loop_ranges(parsed)
+    for number, segment in enumerate(parsed):
+        if number in loops:
+            ok |= loops[number]
+            possible |= loops[number]
         popped: tuple[set[str], set[str]] | None = None
         while len(frames) > segment.depth:
             context, targets = frames.pop()
@@ -1464,7 +1587,9 @@ def _judge(command: str, branch: str) -> str:
 
         target = switch_target(subcommand, args)
         if target and not _redirected(segment.tokens):
-            ok = {target}
+            # What `!` negates and `coproc` backgrounds leaves the `&&` after it
+            # unsure whether the switch happened.
+            ok = here | {target} if _leads_uncertainly(segment.tokens) else {target}
             possible.add(target)
             for _, targets in frames:
                 targets.add(target)

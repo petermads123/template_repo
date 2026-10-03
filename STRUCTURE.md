@@ -174,6 +174,11 @@ bash with `git` shadowed:
   refused on `main` and allowed elsewhere (`violation` and `main`), and the recorded misses (a
   lone `'` inside a quoted `${ }`) are pinned so changing them is a decision; a `git checkout -` inside a substitution refuses the command as unresolvable, and a detached HEAD (`""`) still refuses a push to `main` inside a substitution while allowing a commit.
 
+Round 3 (`development/fix/guard-git-shell-lexing/03-...`) adds the reproduction for the reserved
+words: `if git commit -m x; then echo ok; fi` refused on `main` instead of allowed. The rest of its
+suite (reserved words that take a command, `!`/`coproc` trust, loops, words that are not commands)
+follows the reproduction.
+
 ### `tests/test_plan_state.py`
 
 Covers `.claude/hooks/plan_state.py`. `parse` against a complete marker, a file with none,
@@ -336,6 +341,20 @@ nobody listed is a miss, which is safe, while scanning a segment for any `git` t
 refuse `echo git commit`, which is the failure this module treats as worse. Only options are
 skipped after a wrapper, never a bare word, so an option that takes a value hides what
 follows it.
+
+The reserved words that take a command next — `if`, `then`, `else`, `elif`, `while`, `until`,
+`do`, `!` and `coproc` — are stepped over the same way, singly or chained, so a `git` behind
+one is judged like any other (`for`, `select`, `case`, `function` and `in` are followed by a
+name or pattern and never stepped over). The one list is shared with the pre-pass's `case`
+placement. Trust follows the separator, except that a switch led by `!` or `coproc` only
+widens what an `&&` can trust, because the `&&` after a negated command runs when it failed
+and `coproc` returns at once. bash's own `if`/`while`/`until` logic is not modelled:
+`then`, `do`, `else` and `elif` follow `;` or a newline, so every branch is in play, and
+`if git checkout -b feat/x; then git commit -m x; fi` is refused from `main`. A branch
+switch anywhere in a loop counts for all of it — bash loops from `for`, `select`, `while` or
+`until` to the matching `done`, PowerShell's `foreach` and `do { } while ()` to the end of
+the command, a loop's condition included. Known miss: a function is judged where it is
+defined, not where it is called.
 
 `shlex` is not a shell, so a private pass runs in front of it and removes what
 bash never runs: a `#` at the start of a word comments out the rest of its line, a

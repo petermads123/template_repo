@@ -1,6 +1,6 @@
 # The git guard steps over shell reserved words
 
-<!-- claude-plan step=3 status=active -->
+<!-- claude-plan step=4 status=active -->
 
 | Field | Value |
 |---|---|
@@ -15,7 +15,7 @@
 |---|---|---|---|---|
 | 1 | Conceptualize | `/conceptualize` | with the user | done |
 | 2 | Plan | `/plan` | with the user | done |
-| 3 | Implement | `/implement` | in `/build` | pending |
+| 3 | Implement | `/implement` | in `/build` | done |
 | 4 | Verify | `/verify` | in `/build` | pending |
 | 5 | Test | `/test` | in `/build` | pending |
 | 6 | Concept check | `/concept-check` | in `/build` | pending |
@@ -342,6 +342,10 @@ FAILED tests/test_guard_git.py::test_violation_refuses_a_commit_after_if_on_main
 ```
 
 The guard allows (returns `''`) the commit on `main`, as the Defect block's Observed row says.
+
+### Deviations
+
+Built as planned. Two implementation choices inside the plan: `_command_index` now delegates to a private `_walk_prefix` that also returns the leaders stepped over (so the `!`/`coproc` test and the loop-start test share one walk), and the shared set gained `_STEPPED_LEADERS` (the set minus `time`), `_UNCERTAIN_LEADERS`, `_LOOP_COMMANDS` and `_LOOP_LEADERS`. Public API unchanged.
 
 ---
 
