@@ -1,6 +1,6 @@
 # The git guard does not trust a switch that `||` may skip
 
-<!-- claude-plan step=4 status=active -->
+<!-- claude-plan step=5 status=active -->
 
 | Field | Value |
 |---|---|
@@ -16,7 +16,7 @@
 | 1 | Conceptualize | `/conceptualize` | with the user | done |
 | 2 | Plan | `/plan` | with the user | done |
 | 3 | Implement | `/implement` | in `/build` | done |
-| 4 | Verify | `/verify` | in `/build` | pending |
+| 4 | Verify | `/verify` | in `/build` | done |
 | 5 | Test | `/test` | in `/build` | pending |
 | 6 | Concept check | `/concept-check` | in `/build` | pending |
 | 7 | Ship | `/ship` | in `/build` | pending |
@@ -351,12 +351,25 @@ fix the reproduction is green and the suite is 1043 passed with no existing test
 
 | Check | Result |
 |---|---|
-| `ruff check .` | |
-| `ruff format --check .` | |
-| `mypy` | |
-| Plan completeness | every signature in the Public API table exists as written |
-| `STRUCTURE.md` | in sync |
-| `python -m <package>.<module>` | |
+| `ruff check .` | `All checks passed!` |
+| `ruff format --check .` | `41 files already formatted` |
+| `mypy` | `Success: no issues found in 11 source files` |
+| `pytest -q` | `1043 passed` |
+| Plan completeness | every signature in the Public API table exists as written: `violation(command: str, branch: str) -> str` unchanged; no public name added (`_walk_run`, `_OPERATORS`, `_Key`, `_segments(runs=)` are private) |
+| `STRUCTURE.md` | in sync (see auditor) |
+| `python -m <package>.<module>` | no new module; `python -m template_repo.hello_world` prints `Hello, World!` |
+
+**structure-auditor** (run before this step): one finding, the `!`/`coproc` scope prose
+(STRUCTURE.md and the module docstring) said `||` ends the scope but `_walk_run` tested `||`
+before `_LIST_ENDS` and never cleared `negating`. Classified as a code deviation from plan
+guide 6 (authoritative: a `negating` key is cleared by any `_LIST_ENDS` operator at its key,
+`||` included). Fixed in `_walk_run`: an `||` now does `negating.discard(key)` at exactly its
+key, and still opens or extends the operand. The `_walk_run` docstring says so; the module
+docstring and STRUCTURE.md already read that way and are unchanged. Checked on `main`:
+`! git diff --quiet || { git checkout -b feat/x && git commit -m x; }` allowed;
+`! git diff --quiet || git checkout -b x && git commit -m x` refused (operand rule). All
+other round 4 and round 3 tests unchanged and green. Everything else the auditor checked
+(tables, `||` trust paragraph, round 4 tests paragraph) was accurate.
 
 ---
 

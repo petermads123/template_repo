@@ -1619,8 +1619,10 @@ def _walk_run(
     """Read one run of operators for the `||` operands and `!` scopes it ends.
 
     A list ends at `&&`, `;`, `&` or a newline, and a group's close ends every
-    list opened inside it. Only the ones at the key they were opened at end: an
-    operator inside a substitution or a deeper group is another list's.
+    list opened inside it. An `||` ends a `!` or `coproc` scope too, but opens or
+    extends an `||` operand instead of closing one. Only the ones at the key they
+    were opened at end: an operator inside a substitution or a deeper group is
+    another list's.
 
     Args:
         run: The operators between two invocations, in written order.
@@ -1654,6 +1656,7 @@ def _walk_run(
         group = nest.get(level, 0)
         key = (level, group)
         if operator == "||":
+            negating.discard(key)  # the negation covers the left side only
             if operands and operands[-1][0] == key:
                 operands[-1][1].update(ok)  # chained: a || b || c
             else:
