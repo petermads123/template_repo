@@ -1,6 +1,6 @@
 # The git guard judges command substitutions inside a word
 
-<!-- claude-plan step=4 status=active -->
+<!-- claude-plan step=5 status=active -->
 
 | Field | Value |
 |---|---|
@@ -16,7 +16,7 @@
 | 1 | Conceptualize | `/conceptualize` | with the user | done |
 | 2 | Plan | `/plan` | with the user | done |
 | 3 | Implement | `/implement` | in `/build` | done |
-| 4 | Verify | `/verify` | in `/build` | pending |
+| 4 | Verify | `/verify` | in `/build` | done |
 | 5 | Test | `/test` | in `/build` | pending |
 | 6 | Concept check | `/concept-check` | in `/build` | pending |
 | 7 | Ship | `/ship` | in `/build` | pending |
@@ -532,6 +532,22 @@ The change touched one branch of `_scan` (closing quotes appended when heredoc b
 | Showcase | not applicable (hook scripts) |
 
 No deviation, no halt.
+
+### Re-verify after the step-6 halt (heredoc closing on the substitution's `)`; commits `abf8f73`, `a08c44e`)
+
+The change reworked `_heredoc_bodies` (closing-line rule inside a substitution) and `_body_substitutions`, and removed the quote-appending of `9a98609`; no public name moved.
+
+| Check | Result |
+|---|---|
+| `ruff check .` | `All checks passed!` |
+| `ruff format --check .` | `11 files already formatted` |
+| `mypy` | `Success: no issues found in 11 source files` |
+| `pytest` | `766 passed in 12.41s` |
+| Public API | re-imported and compared literally: `Segment(tokens: tuple[str, ...], separator: str, depth: int = 0)` frozen, `SUBSTITUTED = "$("`, `segments(command: str) -> list[Segment] \| None`, `violation(command: str, branch: str) -> str`, `UNMODELLED_OPENERS` the ten-element tuple; all match section 2 |
+| `STRUCTURE.md` | in sync: the guard section describes the closing-line rule as code and docstring do (last queued delimiter, a line that begins with it and holds a `)`, rest of the line read as commands, bare delimiter for a top-level subshell or backtick pair); the tests entry has the "heredoc closed by the substitution's `)`" group; no private helper name is listed |
+| Showcase | not applicable (hook scripts) |
+
+No deviation, no halt. The send-back entry above is superseded on one point: the quote-appending of `9a98609` is gone (section 3).
 
 ---|---|
 | `ruff check .` | |
