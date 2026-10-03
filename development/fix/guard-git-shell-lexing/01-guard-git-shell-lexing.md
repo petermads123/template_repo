@@ -400,7 +400,8 @@ Drift found, and what was done about it: none. Out of scope held (`bash -c "git 
 
 | # | Recommendation | Why it is critical | Effort | Decision |
 |---|---|---|---|---|
-| R1 | | | | |
+| R1 | Judge command substitutions that sit inside a word as commands of their own — `"$( )"`, an assignment's `$( )` or backticks, backticks after the command name, and `<( )`/`>( )` process substitution — reusing the extraction this round built for unquoted heredoc bodies, each emitted after a newline so it can only add refusals. | A live, silent commit-to-`main` bypass of the rule `CLAUDE.md` backs with this hook, from this round's own root cause (a construct the lexer does not model). Verified in bash on `main`: `echo "$(git commit -m x)"`, ``echo `git commit -m x` ``, `out="$(git push origin main 2>&1)"` and `diff <(git commit -m x) /dev/null` all run git and are all allowed — by the guard on `origin/main` too, so not introduced here. Section 1 never decided it; the build pinned `echo "$(git commit -m x)"` as allowed (test_guard_git.py, "recorded miss"), which should have been a halt. Also inconsistent with Halt 1: the same substitution inside an unquoted heredoc body is refused. | medium | pending |
+| R2 | Make `_command_index` step over the shell's reserved words — `if`, `then`, `else`, `elif`, `do`, `while`, `until`, `!` — as it steps over assignments and redirections. | A live commit-to-`main` bypass in ordinary shell grammar. Verified in bash on `main`: `if git commit -m x; then echo ok; fi`, `if git diff --quiet; then :; else git commit -am x; fi`, `for b in a; do git push origin main; done` and `! git commit -m x` all run git and are all allowed, before and after this round. A different cause from R1 (grammar, not lexing), and close to the bar; the reader ranks it below R1. | small | pending |
 
 Decisions: `deferred`, `rejected`, or `next round` — a new numbered file in this folder,
 taken back through steps 1 to 7 on the same branch.
