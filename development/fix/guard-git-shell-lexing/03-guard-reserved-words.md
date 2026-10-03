@@ -1,6 +1,6 @@
 # The git guard steps over shell reserved words
 
-<!-- claude-plan step=6 status=active -->
+<!-- claude-plan step=7 status=active -->
 
 | Field | Value |
 |---|---|
@@ -18,7 +18,7 @@
 | 3 | Implement | `/implement` | in `/build` | done |
 | 4 | Verify | `/verify` | in `/build` | done |
 | 5 | Test | `/test` | in `/build` | done |
-| 6 | Concept check | `/concept-check` | in `/build` | pending |
+| 6 | Concept check | `/concept-check` | in `/build` | done |
 | 7 | Ship | `/ship` | in `/build` | pending |
 | 8 | Recommend | `/recommend` | with the user | pending |
 | 9 | Pull request | `/create-pr` | with the user | pending |
@@ -444,9 +444,29 @@ Edge cases considered and deliberately skipped, with reasons:
 
 | # | Criterion | Met | Evidence |
 |---|---|---|---|
-| A1 | | | |
+| A1 | Refuses `if git commit -m x; then echo ok; fi` | yes | Red run in section 3; step 6 reproduced it: the test file as now with `guard_git.py` as at `fc21fcd` (`git checkout fc21fcd -- .claude/hooks/guard_git.py`) fails (`violation(...)` returned `''`), restored with `git checkout HEAD -- ...`, green now: `test_violation_refuses_a_commit_after_if_on_main`. Bash with `git` shadowed lands the commit on `main`, so the refusal is right, not play-safe. |
+| A2 | Sees git after every reserved word | yes | All 15 listed forms (`scratchpad/r6c/crit.py`) refused on `main` (the push form also from `feat/y`), each allowed by the baseline; bash lands on `main` for all but `if git diff --quiet; then :; else git commit -am x; fi` (the oracle's `diff` succeeds, so the `else` never runs: play-safe, as the criterion states). Tests: `..._refuses_a_commit_after_every_reserved_word_on_main` (27), `..._refuses_a_push_after_a_reserved_word_from_a_branch`. |
+| A3 | Counts a branch switch after a reserved word | yes | The three forms refused from `feat/y`, bash lands on `main` for all three, baseline allowed. Tests: `..._counts_a_switch_after_a_reserved_word` (5), `..._counts_a_hidden_switch_on_a_detached_head`. |
+| A4 | Plays safe on trust, with the stated cost | yes | `! git checkout -b feat/x && git commit -m x` and `if ! git checkout -b feat/x; then git commit -m x; fi` refused on `main`; the accepted-cost pair refused on `main` (baseline allowed); `git checkout -b feat/x && git commit -m x` allowed. Also allowed, as the plan pins: `git checkout -b feat/x && ! git diff --cached --quiet && git commit -m x`. Tests: `..._does_not_trust_a_switch_a_bang_or_coproc_leads`, `..._pins_the_accepted_cost_of_a_switch_in_a_condition`, `..._keeps_and_trust_where_no_bang_or_coproc_leads_the_switch`. |
+| A5 | Counts a switch anywhere in a loop for the whole loop | yes | Both forms refused from `feat/y` (baseline allowed). Bash lands on `main` for the `for` form; the `while` form runs one iteration and `break`s before the second commit, so the refusal is the stated play-safe widening. Tests: `..._counts_a_switch_anywhere_in_a_loop_for_the_whole_loop` (11) and the PowerShell, bounded-range, `done`-detection groups. |
+| A6 | Keeps words that are not commands as words | yes | `echo if git commit` and `for git in commit; do :; done` allowed on `main`, `git commit -m then` allowed from `feat/y`; `{ }`, `time`, `case` and both function forms refused as before (baseline too); `if true; then git -C ../o checkout main; fi; git commit -m x` allowed from `feat/y`. Tests: `..._keeps_words_that_are_not_commands_as_words`, `..._keeps_the_outcome_of_forms_that_were_already_read`, `test_git_subcommand_does_not_step_over_words_that_are_not_leaders`. |
+| A7 | Changes nothing else | yes | Existing tests unmodified (`git diff de3decd HEAD -- tests` removes no line; 1042 pass) and rounds 1 and 2 hold (below). Differential below: 0 bypass rows. |
 
-Drift found, and what was done about it:
+Regression criterion beyond the green suite, and the class: the differential against `8c5c2b9` (below); every row of the Blast radius: `_command_index` feeds `git_subcommand` and `_redirected` (a `then git -C other checkout main` still ignored: A6 row, `..._leaves_a_redirected_git_after_a_leader_to_violation`), `switch_target` is reached through `git_subcommand`, trust lives in `_judge`, `_COMMAND_LEADERS` is the one shared set (also feeds `_scan`'s `case` placement; the `case` tests are unmodified and green), and the only existing test mentioning `if` survives. Every input in the Defect block's Class (every leader, chained, after any separator, in substitutions, hidden switches, loop back-edges; `for`, `select`, `case`, `function`, `in` not stepped over) has a test, and the two out-of-class items (functions called after a switch; `command`/`exec`/`builtin`/`eval`) are untouched. Root cause re-read against the diff: both causes named are removed, at `_command_index` (via `_walk_prefix`, which also yields the leaders) and in `_judge` (`!`/`coproc` only widen `ok`; loop switches widen the loop's first segment); the symptom site was not patched.
+
+**Differential (A7, `scratchpad/r6c/diff7.py`).** Baseline `8c5c2b9` loaded beside the new guard. Corpus: 955 `(command, branch)` pairs the suite passes to `violation` (746 commands, captured with a `-p` plugin), times six variants (plain; `if true; then C\nfi`; `while true; do C\nbreak; done`; `! C`; `for i in 1; do C\ndone`; `coproc C`), branches `main` and `feat/x`: 8,804 distinct rows (variants of commands over 300 characters skipped). The two guards differ on 1,360. Of those, 41 hold PowerShell syntax and were not sent to bash by the script (28 are PowerShell-only keyword forms, bash gives a syntax error; the other 13, bash-valid, were run afterwards and all agree: the new guard refuses, bash lands on `main` or the loop widening is the stated play-safe); 1,319 went to bash with `git`, `sudo`, `doas`, `nohup`, `env` shadowed. 95 are bash syntax errors (exempt). The rest, all with a reserved word at a command position:
+
+- base allow, new refuse, bash lands on `main` (the new refusal is right): 54 plain, 150 `if`, 149 `while`, 136 `!`, 149 `for`, 127 `coproc` rows;
+- base allow, new refuse, bash does not land on `main` (the play-safe refusals the criteria accept: a switch in a condition, a loop widening, `!`/`coproc` trust, a quoted leader `"!" git commit`, `'if' git commit`, `\! git commit`): 24 plain, 49 `if`, 55 `while`, 64 `!`, 55 `for`, 62 `coproc`;
+- base refuse, new allow: 144 rows, all `main`, all of the form `<leader> ... git checkout -b X && git commit` or a `switch -c`; bash lands on a new branch (not `main`) for every one, so the baseline refused them only because it did not see the switch, and the new guard is right;
+- 2 rows timed out in the oracle (`while true; do for ...; done; done` has no exit, an artefact of the variant), both refused by the new guard and the inner loop commits after a switch to `main`;
+- **bypass rows (new allows, bash lands on `main`): 0.**
+
+A second pass over every row the new guard allows (3,938 sent to bash, 453 syntax errors) found 25 rows where bash lands on `main`: 24 are the documented round 1 and 2 misses (a lone `'` in a quoted `${ }`, a hex-escaped or split-quote subcommand, in every variant and identical in the baseline), and one is `coproc for i in 1 2; do git commit -m x; done; git checkout main` from `feat/x` (bash 2nd iteration races the foreground switch; the same with `for ... done & git checkout main`, both allowed by the baseline): an asynchronous race with a loop, not a reserved-word miss and not a change. Noted for step 8.
+
+Oracle note: round 2's `diff6.py` ran bash with `PATH` set to an empty directory, so `mktemp` and `cat` inside the shadowed `git` failed and a plain `git commit` never registered as landing on `main`; this round's script uses `PATH=/usr/bin:/bin` (with `git`, `sudo`, `doas`, `nohup`, `env` shadowed) and checks that `git commit -m x` lands, so it is a real oracle. Round 2's bypass counts for commits may have been understated; this round's pass over the whole corpus (above) and the round 2 scripts re-run below (`r6/a.py`, 49 of 49; `r6/a2am.py`; `r6/r1.py`, which use the push forms) find nothing.
+
+Drift found, and what was done about it: none in the code. Out of scope kept out (functions, `command`/`exec`/`builtin`/`eval`, round 1 and 2 leftovers: untouched). No public API added or removed (`git diff de3decd HEAD` shows only private names). `STRUCTURE.md`: the structure-auditor found no signature drift and five prose slips in the tests entry and the guard section, each checked against the code and applied (`ForEach-Object` pipelines; a switch target that is a variable; the push bullet; "follow, ahead of the round 2 and round 3 sections"; the loops and `git_subcommand` bullets, including the `fi`/`done`/`esac` closers test). Recorded for step 8, none in this class: the four items from section 5, and the async-with-a-loop race above.
 
 ### Earlier rounds still hold
 
@@ -457,6 +477,21 @@ Drift found, and what was done about it:
 
 | Round | # | Criterion | Still met | Evidence |
 |---|---|---|---|---|
+| 1 | A1 | The reported `python3 - <<'EOF'` with a stray quote is allowed on `main` | yes | `r6/r1.py` 0 fails; `test_violation_allows_a_heredoc_with_a_stray_quote_on_main` green. |
+| 1 | A2 | Heredoc bodies read as bash reads them; body substitutions judged; `commit -F -` | yes | `r6/r1.py`; heredoc test groups unmodified and green. |
+| 1 | A3 | `#` read as bash reads it | yes | `r6/r1.py` A3 rows; tests unmodified. |
+| 1 | A4 | Backslash-newline joins | yes | `r6/r1.py` A4 rows. |
+| 1 | A5 | Unmodelled forms play safe on `main` only | yes | `r6/r1.py` A5 rows; `test_unmodelled_openers_is_the_documented_set` unmodified (the constant is untouched this round). |
+| 1 | A6 | Changes nothing else; accepted `&&` plus `$'...'` cost | yes | `r6/r1.py` "A6 cost &&+$'" refused; 1042 pass. |
+| 2 | A1 | `echo "$(git commit -m x)"` refused on `main` | yes | `r6/a.py` 49 of 49, 0 fail. |
+| 2 | A2 | `$( )` in every position; heredoc closed by the substitution's `)` | yes | `r6/a.py`, `r6/a2am.py` 0 fail (all forms, incl. the amended `EOF)` ones, refused on `main` and from a branch). |
+| 2 | A3 | Backticks in every position | yes | `r6/a.py`. |
+| 2 | A4 | Process substitution | yes | `r6/a.py`. |
+| 2 | A5 | A substitution runs before its command; `&&` trust carries in | yes | `r6/a.py`; the round 3 `_judge` change leaves `here` as it was. |
+| 2 | A6 | `main` as any branch it could land on | yes | `r6/a.py`; round 3's differential agrees with bash on those forms. |
+| 2 | A7 | Funsub plays safe | yes | `r6/a.py`. |
+| 2 | A8 | Harmless substitutions allowed; the pipeline's commit form | yes | `r6/a.py` A8 rows, including `git checkout -b x && git commit -m "$(cat <<'EOF' ...)"` allowed on `main`. |
+| 2 | A9 | Changes nothing else | yes | The six round 2 test edits are untouched this round; no existing test line removed; differential in this section. |
 
 ---
 

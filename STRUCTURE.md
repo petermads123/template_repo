@@ -124,7 +124,7 @@ message; and the commands that must stay allowed — `echo git commit`, `grep pu
 One test asserts a documented miss rather than a fix: `sudo -u me git push` is allowed,
 because only options are skipped after a wrapper and never a bare word.
 
-The shell-lexing cases close the file. The reproduction for the defect `fix/guard-git-shell-lexing` fixes comes first: a heredoc whose body carries a stray quote (`python3 - <<'EOF'` ... `EOF`), allowed on `main` rather than refused as unreadable. Then, each checked against real bash with `git` shadowed by an echo function:
+The shell-lexing cases follow, ahead of the round 2 and round 3 sections. The reproduction for the defect `fix/guard-git-shell-lexing` fixes comes first: a heredoc whose body carries a stray quote (`python3 - <<'EOF'` ... `EOF`), allowed on `main` rather than refused as unreadable. Then, each checked against real bash with `git` shadowed by an echo function:
 
 - **Heredocs** — a body with no substitution in it is data in every delimiter form (`<<`, `<<'`, `<<"`, `<<\`, `<<-` with tabs); a command after it, on its opener line, after two heredocs on one line or after a comment on the opener is still judged; `git commit -F - <<'EOF'` is refused as a commit and the pipeline's `"$(cat <<'EOF' ...)"` form keeps its outcome; an unquoted delimiter lets a backslash-newline join the closing line and a quoted one does not; a CRLF script closes on `EOF` plus the return; an unterminated heredoc takes the rest as body while an earlier push is still refused; `<<<` is a here-string; a shift in `$((1<<2))`, `(( x <<= 1 ))` and `let` is arithmetic, and `((echo a); ...)` stays two subshells.
 - **Substitutions in an unquoted heredoc body** — the halt-table commands refused (`$(git commit)` on `main`, the backtick push also from a branch), each form bash runs (quoted inside the body, a stray apostrophe, continuation, nested parentheses, `${x:-$(...)}`, inside arithmetic, an escaped backslash before the `$(`) refused, and text bash does not run (`\$(`, `$((1<<2))`, `${x}`, an unclosed substitution) allowed; every quoted-delimiter form left as data; harmless substitutions such as `$(date)` allowed on `main`; a stray quote in a substitution not breaking the pairing for a later commit; the second of two heredocs; a body substitution of a double-quoted `$( )` whose heredoc closes on the `)` (nested double-quote frames, a backtick holder, single quotes around and inside, a double quote opened after the heredoc operator, two heredocs with the last one closing, a PowerShell backtick before the substitution; the harmless and quoted-delimiter counterparts allowed, an unbalanced quote with no heredoc left unreadable, and an unterminated heredoc in a substitution — a bash syntax error — read as unreadable); `segments` token expectations for the extracted commands.
@@ -182,8 +182,8 @@ bash with `git` shadowed where bash can run it:
 - **Reserved words at a command position** — twenty-seven commands refused on `main` (every leader,
   chains such as `if !`, `! !` and `time !`, after `&&`, `||`, `|`, `&`, `;` and a newline, inside
   `$( )`, backticks, `<( )`, a subshell, a group and an unquoted heredoc body, after an assignment
-  or a redirection); a quoted heredoc body left as data; a push refused from a branch with `HEAD`
-  resolved against the branch it is on.
+  or a redirection); a quoted heredoc body left as data; a push to `main` after a leader refused from a branch too, and a push of `HEAD` after a leader
+  resolved against the branch it is on (refused on `main`, allowed elsewhere).
 - **Hidden switches** — a switch after a leader counted for a later commit from a branch and from a
   detached HEAD; a switch to another branch, a `-C` switch and `-m then` allowed.
 - **Trust** — a switch led by `!` or `coproc` (also after `time`, chained, a push, a switch to
@@ -198,12 +198,13 @@ bash with `git` shadowed where bash can run it:
   `Then` allowed; `{ }`, `time`, `case`, both function forms unchanged; a leader with nothing behind it.
 - **Loops** — a switch anywhere in a bash, nested, substituted, unclosed or PowerShell loop counted
   for the whole loop; PowerShell keywords in any case; the range bounded (a switch after `done`, a
-  loop-free commit, a `-C` switch, `do { }` in a bash loop); a `done` that is a case pattern or
+  loop-free commit, a switch to another branch, a `-C` switch, `do { }` in a bash loop); a `done` that is a case pattern or
   quoted not closing the loop, and the places a real one does; a stray `done`; a loop in a
-  subshell pinned as running on.
+  subshell pinned as running on; a repeated call giving the same answer.
 - **`git_subcommand`** — every leader, chained leaders and wrappers, the arguments returned, the
-  name-taking words, case and the glued `!git` not stepped, leaders alone, a leader after the
-  command read as an argument.
+  name-taking words, the closers `fi`, `done` and `esac`, case and the glued `!git` not stepped,
+  leaders alone, a leader after the command read as an argument, and a `-C` git after a leader
+  returned as is for `violation` to judge.
 
 ### `tests/test_plan_state.py`
 
@@ -386,8 +387,8 @@ loop only where bash reads one — not after `|`, not ahead of a case pattern's 
 when the command writes a quoted `done` — and a `do {` inside a bash loop is bash's. Known
 over-refusals: a quoted or misplaced leader is stepped over, a compound command ends an `&&`
 chain's trust, a loop in a subshell runs on. Known misses: a function is judged where it is
-defined, not where it is called; a loop-variable switch target; a redirection on a compound
-command, which bash runs before its body; PowerShell's glued braces and `ForEach-Object`.
+defined, not where it is called; a switch target that is a variable; a redirection on a compound
+command, which bash runs before its body; PowerShell's glued braces and `ForEach-Object` pipelines.
 
 `shlex` is not a shell, so a private pass runs in front of it and removes what
 bash never runs: a `#` at the start of a word comments out the rest of its line, a
