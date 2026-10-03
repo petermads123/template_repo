@@ -1,6 +1,6 @@
 # The git guard judges command substitutions inside a word
 
-<!-- claude-plan step=4 status=active -->
+<!-- claude-plan step=5 status=active -->
 
 | Field | Value |
 |---|---|
@@ -16,7 +16,7 @@
 | 1 | Conceptualize | `/conceptualize` | with the user | done |
 | 2 | Plan | `/plan` | with the user | done |
 | 3 | Implement | `/implement` | in `/build` | done |
-| 4 | Verify | `/verify` | in `/build` | pending |
+| 4 | Verify | `/verify` | in `/build` | done |
 | 5 | Test | `/test` | in `/build` | pending |
 | 6 | Concept check | `/concept-check` | in `/build` | pending |
 | 7 | Ship | `/ship` | in `/build` | pending |
@@ -485,6 +485,22 @@ Step 3 deviations (section 3), classified:
 | Refusal order main, push, unresolved | Deviation, recorded; as guide step 7 |
 
 None amends section 1.
+
+### Re-verify after send-back (step 6, A2/A9; commit `9a98609`)
+
+The change touched one branch of `_scan` (closing quotes appended when heredoc bodies reach the end of the input) and added tests; no reader report was run.
+
+| Check | Result |
+|---|---|
+| `ruff check .` | `All checks passed!` |
+| `ruff format --check .` | `11 files already formatted` |
+| `mypy` | `Success: no issues found in 11 source files` |
+| `pytest` | `702 passed in 12.61s` |
+| Public API | re-imported and compared literally: `Segment(tokens: tuple[str, ...], separator: str, depth: int = 0)` frozen, `SUBSTITUTED = "$("`, `segments(command: str) -> list[Segment] \| None`, `violation(command: str, branch: str) -> str`, `UNMODELLED_OPENERS` the ten-element tuple; all unchanged, no mismatch |
+| `STRUCTURE.md` | in sync for this change: the diff touched only private `_scan` (not listed) and the `tests/test_guard_git.py` entry, which the commit already extended (unterminated body inside a double-quoted `$( )`); no edit needed |
+| Showcase | not applicable (hook scripts) |
+
+No deviation, no halt.
 
 ---|---|
 | `ruff check .` | |
