@@ -3796,3 +3796,78 @@ def test_violation_pins_a_group_after_a_negation_ended_by_a_newline_as_refused()
     command = "! true\n{ git checkout -b x && git commit -m x; }"
 
     assert violation(command, PROTECTED).startswith(COMMIT_REASON)
+
+
+# --- round 4: the runs `_segments` hands to `_judge` --------------------------
+
+RUN_PINS = [
+    ("true || { git a; }", [(), ((0, "||"), (0, "{"))]),
+    ("a; } && b", [(), ((0, ";"), (0, "}"), (0, "&&"))]),
+    ("(a)&&b", [((0, "("),), ((0, ")"), (0, "&&"))]),
+    ("a ||(b)", [(), ((0, "||"), (0, "("))]),
+    ("a);b", [(), ((0, ")"), (0, ";"))]),
+    ("a ; ( ) b", [(), ((0, ";"), (0, "("), (0, ")"))]),
+    ("a ||\n b", [(), ((0, "||"), (0, "\n"))]),
+    ("a |\n b", [(), ((0, "|"), (0, "\n"))]),
+    ("a\n\n b", [(), ((0, "\n"), (0, "\n"))]),
+    (
+        "case x in a) b ;; c) d ;; esac",
+        [(), ((0, ")"),), ((0, ";;"),), ((0, ")"),), ((0, ";;"),)],
+    ),
+    # An empty group runs nothing, and leaves the run it would have followed.
+    ("()", []),
+    (
+        'true || git checkout -b x "$(\n)" && git commit -m x',
+        [(), ((0, "||"),), ((0, "&&"),)],
+    ),
+    # A substitution's first segment inherits the run at the outer depth and
+    # carries what is written inside before its command at the inner one; the
+    # close is marked at the front of what follows.
+    (
+        'true || git checkout -b x "$( (true) )" && git commit -m x',
+        [(), ((0, "||"), (1, "(")), ((1, "$)"),), ((0, "&&"),)],
+    ),
+    ('a || echo "$(b && c)" d', [(), ((0, "||"),), ((1, "&&"),), ((1, "$)"),)]),
+    ('echo "$(a)" && b', [(), ((1, "$)"),), ((0, "&&"),)]),
+    # Operators written before a close are dropped; sibling substitutions each
+    # get the close marker of the one before.
+    ('echo "$(a; )" b', [(), ((1, "$)"),)]),
+    ('echo "$(a)" "$(b)"', [(), ((1, "$)"),), ((1, "$)"),)]),
+    ('echo "$( (a) )"', [((1, "("),), ((1, "$)"),)]),
+]
+
+
+@pytest.mark.parametrize(("command", "expected"), RUN_PINS)
+def test_segments_hands_out_each_run_as_written(
+    command: str, expected: list[tuple[tuple[int, str], ...]]
+) -> None:
+    runs: list[tuple[tuple[int, str], ...]] = []
+
+    guard_git._segments(command, runs=runs)
+
+    assert runs == expected
+
+
+@pytest.mark.parametrize(
+    "command",
+    [
+        "",
+        "||",
+        "git status",
+        "git status || git checkout -b x && git commit -m x",
+        "true || (git checkout -b x)&&git commit -m x",
+        'true || git checkout -b x "$( (true) )" && git commit -m x',
+        'echo "$(a)" "$(b)"',
+        "cat <<EOF && a\n$(b)\nEOF",
+        "true || `(a)` && b",
+        "a\n\n b",
+        "echo 'unbalanced",
+    ],
+)
+def test_segments_gives_the_same_segments_with_and_without_runs(command: str) -> None:
+    runs: list[tuple[tuple[int, str], ...]] = []
+
+    with_runs = guard_git._segments(command, runs=runs)
+
+    assert with_runs == guard_git._segments(command)
+    assert with_runs is None or len(runs) == len(with_runs)

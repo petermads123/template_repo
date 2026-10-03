@@ -1,6 +1,6 @@
 # The git guard does not trust a switch that `||` may skip
 
-<!-- claude-plan step=5 status=active -->
+<!-- claude-plan step=6 status=active -->
 
 | Field | Value |
 |---|---|
@@ -17,7 +17,7 @@
 | 2 | Plan | `/plan` | with the user | done |
 | 3 | Implement | `/implement` | in `/build` | done |
 | 4 | Verify | `/verify` | in `/build` | done |
-| 5 | Test | `/test` | in `/build` | pending |
+| 5 | Test | `/test` | in `/build` | done |
 | 6 | Concept check | `/concept-check` | in `/build` | pending |
 | 7 | Ship | `/ship` | in `/build` | pending |
 | 8 | Recommend | `/recommend` | with the user | pending |
@@ -54,10 +54,10 @@ extraction.
 | Observed | `violation("git status \|\| git checkout -b x && git commit -m x", "main")` returns `""` (allowed). In bash with `git` shadowed by a function keeping HEAD in a file, the command prints `COMMIT on main`. |
 | Expected | Refused with the commit reason. `violation`'s docstring and STRUCTURE.md say a switch replaces the set of branches only across `&&`, and a commit is refused when `main` is any branch it could land on (round 2, A-criteria on the set-of-branches rule). |
 | Reproduction | `violation("git status \|\| git checkout -b x && git commit -m x", "main")` → `""`; bash → `COMMIT on main`. Also, all allowed and all commit or push on `main` in bash: `git rev-parse --verify feat/x \|\| git checkout -b feat/x && git commit -m x` (feat/x exists); `git checkout main \|\| git checkout -b x && git commit -m x` from `feat/y`; `true \|\| git checkout -b x && git push origin HEAD`; `true \|\| echo a \| git checkout -b x && git commit -m x`; `true \|\| git checkout -b x "$(echo)" && git commit -m x`; `false \|\| true \|\| git checkout -b x && git commit -m x`; `true \|\|` newline `git checkout -b x && git commit -m x`; `if true \|\| git checkout -b x && git commit -m x; then :; fi`; the same inside `echo "$(...)"`. |
-| Root cause | `.claude/hooks/guard_git.py:1672`, `ok = here \| {target} if unsure else {target}`: `ok` is the set of branches HEAD could be on if every command of the current `&&` chain succeeded, but a switch replaces it with `{target}` even when its pipeline is the right operand of `\|\|`. bash reads `a \|\| b && c` as `(a \|\| b) && c`, so `c` runs when `a` succeeded and the switch never ran. Line 1638 only reads the wrong value (the site). Sibling: `guard_git.py:1622` clears round 3's `!`/`coproc` `negating` state on a list end at any depth, so a `;`, `&&` or `\|\|` inside a substitution in the switch command ends the negation of the outer pipeline. |
+| Root cause | `.claude/hooks/guard_git.py:1672` at 43eeea3 (`_judge`, now line 1800 and unchanged), `ok = here \| {target} if unsure else {target}`: `ok` is the set of branches HEAD could be on if every command of the current `&&` chain succeeded, but a switch replaces it with `{target}` even when its pipeline is the right operand of `\|\|`. bash reads `a \|\| b && c` as `(a \|\| b) && c`, so `c` runs when `a` succeeded and the switch never ran. Line 1638 at 43eeea3 (now 1766) only reads the wrong value (the site). Sibling: `guard_git.py:1623` at 43eeea3 (now `_walk_run`, line 1631, and the cleanup at 1754) clears round 3's `!`/`coproc` `negating` state on a list end at any depth, so a `;`, `&&` or `\|\|` inside a substitution in the switch command ends the negation of the outer pipeline. |
 | Introduced by | Older than this branch: `main`'s guard has the same flaw in its earlier form (`effective = target` after any switch, reset only on a non-`&&` separator). The set-of-branches form came in round 2 (3df5e1e), the `negating` state in round 3 (6994e72). |
 | Class | (1) A switch in an `\|\|` operand followed by `&&`, in every form: through later pipeline stages (`\|`, `\|&`); after wrappers, assignments, redirections and reserved words; with substitutions in the switch command; chained `\|\|`; an `\|\|` after an `&&` chain; `coproc true \|\|`; a heredoc on the switch; an `&&` ending a line; the commit later in the chain after more `&&` segments; the commit inside a substitution; the whole inside `{ }`, `$( )` or an `if` condition; a named switch without `-b` (`git checkout main \|\| git checkout feat/x && git commit -m x` from `feat/y`); a push of `HEAD`. (2) The `negating` depth leak: `! true \| git checkout -b feat/x "$(true && true)" && git commit -m x` on `main` is allowed and bash commits on `main` (also `"$(true; true)"` and backticks); a new `\|\|` state built the same way would inherit it (`true \|\| git checkout -b x "$(true && true)" && git commit -m x`). Already refused, by `_join` reading `; } &&` and `) &&` as `;`: a group, subshell or compound command in the `\|\|` operand; `true \|\| ! git checkout -b x && ...` by the `unsure` branch. Checked and clean: `&`, non-last pipeline stages, `case`, `if`, loops, functions, groups. |
-| Blast radius | Only `_judge`, behind `violation`; the caller is `guard_git.main`, the hook. No test pins `\|\| <switch> && <commit>`. The comment at `guard_git.py:1603–1605`, the module docstring and STRUCTURE.md's guard paragraph state the invariant the code breaks and are updated with the fix. Nothing depends on the wrong answer. |
+| Blast radius | Only `_judge`, behind `violation`; the caller is `guard_git.main`, the hook. No test pins `\|\| <switch> && <commit>`. The comment above `ok` in `_judge` (1603–1605 at 43eeea3, now 1725–1730), the module docstring and STRUCTURE.md's guard paragraph state the invariant the code breaks and are updated with the fix. Nothing depends on the wrong answer. |
 | Scope | `the class`, plus the `negating` depth leak — the user's choice: the same mistake with the same fix shape, and a `\|\|` fix written like the `!` rule would inherit the leak. |
 
 Critique — the `diagnosis-critic`'s findings and what was done with each (verdict: cause confirmed, class incomplete):
@@ -289,6 +289,12 @@ The differential runs at step 6:
   the re-keyed `negating` cannot close, halt.
 - **Over-widening.** Union only ever adds branches, so an error in the key errs toward
   refusing. Any new refusal of an A4 form is a bug to fix, not a cost to pin.
+  *Corrected in step 5:* the union applies only when an operator reaches the operand's own
+  key, so a key that is wrong can also miss it. Three such errors turned up: a group opened
+  inside a substitution raised the outer count, state at a depth outlived its substitution
+  into a sibling, and `;;` ended no list. The first is fixed (section 3); the last two were
+  over-refusals and are fixed. The one left, a word that only looks like an operator, is
+  listed in section 5 and the module docstring as a known miss.
 
 ### Coverage
 
@@ -343,6 +349,31 @@ helper that reads one segment's run (guides 3, 4 and 6), and `_OPERATORS` and th
 sit beside `_LIST_ENDS`. A list end or close matches keys exactly, as the plan says. After the
 fix the reproduction is green and the suite is 1043 passed with no existing test touched.
 
+**Step 5 production changes** (all in `.claude/hooks/guard_git.py`; the three below were found
+by the step 5 readers, checked against bash and against 43eeea3, and each had a red test first):
+
+- **A run carries the depth each operator was written at** (a deviation from guides 2-3).
+  `runs` is now `list[tuple[tuple[int, str], ...]]` (`_Run`): `(depth, operator)` pairs instead
+  of bare operators, and `_walk_run` takes each pair's own level instead of
+  `min(depth, previous depth)`. Reason: a substitution's first segment inherits the outer run
+  and then collects what is written inside the substitution, and one level for both let a
+  `$( (true) )` raise the outer group count, after which the `&&` missed its `||` operand
+  (`true || git checkout -b x "$( (true) )" && git commit -m x` allowed; bash commits on `main`).
+  Also removed: the `previous_depth` bookkeeping in `_judge`.
+- **A substitution's close is a marker.** `_segments` leaves `(depth, "$)")` (`_CLOSED`) at the
+  front of the run of whatever follows a closed substitution; `_walk_run` ends every `||` operand,
+  `!`/`coproc` scope and group count at that depth or deeper. Reason: state at a depth ended only
+  when the depth fell, so two sibling substitutions shared it (`echo "$(true || git checkout -b
+  y)" "$(git checkout -b x && git commit -m x)"` refused; bash commits on `x`; the `$(! true)`
+  form was refused at 43eeea3 too, an older over-refusal now fixed).
+- **`;;`, `;&` and `;;&` are in `_LIST_ENDS`.** A `case` clause's terminator ends the clause's last
+  list, so `case $v in a) true || git checkout -b y ;; b) git checkout -b x && git commit -m x ;;
+  esac` is allowed (the step 4 code refused it, both the `||` and the `!` form; 43eeea3 allowed the `!` form).
+- **Docs**: the `_walk_run` newline rule, the `_LIST_ENDS` comment, the `_segments` docstring on
+  a substitution's first run, the `_judge` comment, the module docstring and STRUCTURE.md (the
+  `&&`-replaces sentence now names the `||` exception; the `!` scope names the `case`
+  terminators; both list the new known miss) and the Defect row's line numbers.
+
 ---
 
 ## 4. Verification log
@@ -377,10 +408,90 @@ other round 4 and round 3 tests unchanged and green. Everything else the auditor
 
 > Written in step 5: the dynamic half.
 
+Two test-designers (`input-space`, `contract`) read the code and the plan; their cases were merged,
+each bash claim run through an oracle (`git` shadowed by a function keeping HEAD in a file,
+`PATH=/usr/bin:/bin`, stdin closed, a timeout), and every refused form was shown landing on `main`
+and every allowed one not. The oracle first showed a plain `git commit -m x` printing
+`COMMIT on main`. 118 tests added (1043 to 1161 passed); the existing tests are unchanged.
+
 | Intent | Test names | Result |
 |---|---|---|
+| T1 | `test_violation_refuses_a_commit_after_an_or_switch_on_main` (step 3, unchanged: red then green) | pass |
+| T2 | `test_violation_refuses_a_commit_after_every_or_operand_form` (27 forms), `..._a_push_of_head_after_an_or_switch_on_main`, `..._a_named_or_switch_that_may_not_have_run_from_a_branch`, `..._an_or_switch_after_a_switch_to_main_from_a_branch` (2), `..._a_push_of_head_after_a_switch_to_main_from_a_branch`, `..._an_or_switch_across_line_forms` (4), `..._an_or_whose_left_switch_may_have_failed` (2), `..._refuses_an_or_switch_in_a_deep_chain_quickly` | pass |
+| T3 | `test_violation_keeps_a_negation_through_the_substitutions_inside_it` (9: `&&`, `;`, backticks, `coproc`, `\|\|`, nested `!`, an `\|\|` inside, a newline), `test_violation_ends_a_negation_at_an_or_of_its_own` | pass |
+| T4 | `test_violation_still_allows_a_switch_that_certainly_ran` (8), `test_violation_unions_both_sides_of_an_or_for_the_and_after_it` (5), `..._closes_an_or_operand_when_its_substitution_ends`, `..._at_a_list_end` (2), `..._when_its_group_closes`, `..._keeps_an_or_operand_in_a_heredoc_body_as_data`, `..._ends_a_negation_at_a_list_end_of_its_own` (2), `..._leaves_the_or_rule_alone_off_main` (2), `..._allows_a_dangling_or` (3), `..._refuses_a_leading_or_that_names_a_commit` | pass |
+| T5 | `test_segments_hands_out_each_run_as_written` (18), `test_segments_gives_the_same_segments_with_and_without_runs` (11) | pass |
+| Fixed in step 5 (a) | `test_violation_reads_a_group_opened_inside_a_substitution_as_its_own` (5) | red on step 4's code (4 of 5), green after |
+| Fixed in step 5 (b) | `test_violation_does_not_carry_state_into_a_sibling_substitution` (2) | red on step 4's code, green after |
+| Fixed in step 5 (c) | `test_violation_ends_a_scope_at_a_case_clause_terminator` (6: `\|\|` and `!` times `;;`, `;&`, `;;&`) | red on step 4's code, green after |
+| Pinned | `test_violation_pins_a_group_after_a_negation_ended_by_a_newline_as_refused` | pass (refused, as at 43eeea3) |
+| T6 | step 6 | |
+
+Red run of the three groups on step 4's code (commit c37bb2e): `12 failed, 1029 passed`.
+After the fixes: `1161 passed`. Against 43eeea3 over every allowed and refused form above, the only
+differences are the intended ones: the `||` and `!` leak forms newly refused, the `$(! true)`
+sibling and (unchanged) the `!`/`;;` forms allowed; no row where the guard allows what bash lands
+on `main`, except the ones under the next heading.
+
+Reader cases applied or rebutted:
+
+| Reader case | What was done |
+|---|---|
+| input-space 1, 2 (quoted separator word, literal brace/paren word) | Rebutted as this round's fault, not a defect of its code: a different root cause, pre-existing since round 1, listed below. No test asserts the current allow. |
+| input-space 3 (substitution opening with a group) | Confirmed in bash; fixed (production change 1); test written red first. |
+| input-space 4, contract 4 (union of both sides) | `test_violation_unions_both_sides_of_an_or_for_the_and_after_it` and `..._an_or_whose_left_switch_may_have_failed`; the refused cases use `feat/x`, which exists, so bash reaches the right side. |
+| input-space 5, contract 9 (line forms) | Written (4 forms); the `\r\n` form was dropped: bash reads `\r` as a word, the switch runs and no commit reaches `main`, so the refusal is a harmless over-refusal not worth pinning. |
+| input-space 6, contract 12 (substitution/group ending) | Written. |
+| input-space 7 (heredoc body substitution) | Written in `OR_OPERAND_FORMS`; verified in bash. |
+| input-space 8 | Checked against 43eeea3: refused there too, bash commits on `x`. Pinned as an accepted over-refusal. |
+| input-space 9 (degenerate `\|\|`) | Written; `\|\| git commit -m x` is a bash syntax error and is refused as it was, pinned as such. |
+| input-space 10 (deep chains) | Written, limit 5 s (measured 0.2 s). |
+| input-space 11, contract 8, 10, 11 | Written (`OR_OPERAND_FORMS`, branch-origin tests, the heredoc data case). |
+| input-space 12 | Written (`leaves_the_or_rule_alone_off_main`); the detached `""` case included. |
+| input-space `_segments` 1-3 | Written (T5). `_segments` 4 (quoted separator word run) not written: it would document the wrong reading. |
+| contract 1 | Same as input-space 1, 2: different root cause. |
+| contract 2 (`;;` etc.) | Confirmed; fixed (production change 3). The step 4 code refused the `!` form too, a regression against 43eeea3 that is now closed. |
+| contract 3 (sibling state) | Confirmed; fixed (production change 2). The `!` form was refused at 43eeea3: an older over-refusal, now fixed. |
+| contract 5, 6, 7 | Written. |
+| Contradictions 1-3 (Risks claim, `_segments` docstring, `_judge` comment) | Docstrings and comments corrected; the Risks line is corrected in section 2 (the key can err toward allowing; three such errors fixed, one left). |
+| Contradictions 4, 5 (`_walk_run` newline, `_LIST_ENDS`) | Docstring and comment rewritten. |
+| Contradiction 5/contract (STRUCTURE.md line 354) | Sentence now names the `||` exception. |
+| Contradiction 6/contract (stale line numbers) | Updated in the Defect row, with the 43eeea3 lines noted. |
+| Contradiction 7 | STRUCTURE.md's round 4 tests paragraph extended. |
+
+### Different root cause — for the user
+
+Not fixed and not tested: `shlex` removes quoting, so the tokenizer takes a quoted separator word
+and a literal brace or paren word for a real operator. This is older than round 4 (`segments('echo
+";" x')` splits into two segments since round 1, and 43eeea3 allows every row below), and it moves
+the key `_walk_run` reads, so an `||` operand or a `!` scope ends or opens a group early. Each row
+below prints `COMMIT on main` in bash (the oracle as above) and the guard allows it, at 43eeea3 and
+now:
+
+| Form | Bash |
+|---|---|
+| `true \|\| echo ";" \| git checkout -b x && git commit -m x` | `COMMIT on main` |
+| `true \|\| echo "&&" \| git checkout -b x && git commit -m x` | `COMMIT on main` |
+| `true \|\| echo '&' \| git checkout -b x && git commit -m x` | `COMMIT on main` |
+| `true \|\| find . -maxdepth 0 -exec true \; \| git checkout -b x && git commit -m x` | `COMMIT on main` |
+| `true \|\| echo { \| git checkout -b x && git commit -m x` | `COMMIT on main` |
+| `true \|\| echo '(' \| git checkout -b x && git commit -m x` | `COMMIT on main` |
+| `{ true \|\| echo } \| git checkout -b x && git commit -m x; }` | `COMMIT on main` |
+| `{ true \|\| echo ')' \| git checkout -b x && git commit -m x; }` | `COMMIT on main` |
+| `! true \| echo ";" \| git checkout -b feat/x && git commit -m x` | `COMMIT on main` |
+
+A fix reads the token stream with quoting kept (or marks each token as quoted) so a quoted word is
+never an operator; it touches `_lex`, `_is_separator` and every consumer of `segments`, which is a
+round of its own. The module docstring and STRUCTURE.md now list it as a known miss.
 
 Edge cases considered and deliberately skipped, with reasons:
+
+- A `\r` after the `||` (bash reads it as a word; harmless over-refusal).
+- PowerShell `-or` and `&&`/`||`: the same strings, and `-or` is an expression operator.
+- Purity and idempotency: `violation` takes strings and keeps no state; the existing tests cover it.
+- A `_segments` pin for a quoted separator word: it would document the wrong reading above.
+- Nesting past the guard's limit with `||`: round 2's limit tests cover the pre-pass, which the
+  runs sit behind.
 
 ---
 

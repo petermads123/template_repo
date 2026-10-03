@@ -208,7 +208,37 @@ bash with `git` shadowed where bash can run it:
 
 Round 4 (`development/fix/guard-git-shell-lexing/04-...`) adds the reproduction for the trust after
 `||`, under its own heading at the end of the file: `git status || git checkout -b x && git commit -m x`
-refused on `main` instead of allowed.
+refused on `main` instead of allowed. The rest of the round's suite follows it, each form checked
+against bash 5.2 with `git` shadowed by a function keeping HEAD in a file:
+
+- **Every `||` operand form** — twenty-seven forms refused on `main` (a later pipeline stage via `|`
+  and `|&`; `time`, `sudo`, `nohup`, an assignment or a redirection before the switch; a substitution
+  on the switch; chained `||`; `||` after an `&&` chain; `coproc true ||`; a heredoc on the switch;
+  an `&&` ending a line; more `&&` segments; the commit inside `"$( )"` or `$( )`; the whole inside
+  `{ }`, `$( )` or an `if` condition; a group glued either side; a trailing space before the
+  newline; a heredoc body substitution), the push of `HEAD`, the named switch from a branch, a
+  switch to `main` before the `||`, a left side that may have failed, and the line forms (blank
+  lines, a comment, a continuation, `||` then `|` then a newline).
+- **Union and closing** — both sides of an `||` unioned for the `&&` after it (five allowed);
+  an operand closed by a substitution ending, by `;` or a newline, by its group closing, and left
+  alone inside a quoted heredoc body; the rule leaving a branch or a detached HEAD alone; a
+  dangling `||` allowed and a leading one that names a commit refused; a 5,000-link chain and
+  2,000 open groups finishing quickly.
+- **The `!`/`coproc` scope** — nine forms of a negation or `coproc` with a `;`, `&&`, `||` or a nested
+  `!` inside a substitution, refused; a scope ended by `;` or by an `||` at its own level.
+- **What stays allowed** — create-or-switch, `git fetch || true && ...`, `true || false && ...`, an
+  `||` operand wholly in a group, the staged-commit chain and two ended substitutions leaving no state.
+- **A substitution opening with a group, siblings and `case`** (found by the step 5 readers) — a
+  `$( (true) )`, `$( { true; } )` or backtick group in an `||` switch's substitution no longer
+  leaves the outer group count raised; state at a substitution's depth ends when it closes, so a
+  sibling substitution after `$(true || ...)` or `$(! true)` is judged on its own; `;;`, `;&` and
+  `;;&` end a `case` clause's list, so a later clause is not charged with an earlier `||` or `!`.
+  `! true` + newline + `{ git checkout -b x && git commit -m x; }` is pinned as refused, as at 43eeea3.
+- **The runs `_segments` hands to `_judge`** — eighteen pinned runs (`||` before a group, `; } &&`,
+  `)&&`, `||(`, `);`, an empty group, a newline run, `case` terminators, a substitution's inherited
+  run followed by what is written inside it, the close marker before siblings and before the command
+  around a substitution, operators dropped before a close), and the segments identical with and
+  without the `runs` argument.
 
 ### `tests/test_plan_state.py`
 
@@ -352,7 +382,8 @@ where its name should be.
 
 Each segment is judged against the set of branches that may be checked out when it runs.
 Only `&&` guarantees its left side succeeded, so a branch switch replaces the set across a
-run of separators that is `&&` and newlines, and only widens it across anything else:
+run of separators that is `&&` and newlines (bar the right side of an `||`, below), and only
+widens it across anything else:
 `git checkout -b feat/x && git commit` is allowed from `main`, and so is the same pair with
 the `&&` ending the line, while after `;`, `|`, `||`, `&`, a bare newline or a mixed run
 such as `; &&` HEAD may be on the branch it started on or on any branch switched to since,
@@ -384,7 +415,7 @@ one is judged like any other (`for`, `select`, `case`, `function` and `in` are f
 name or pattern and never stepped over). The one list is shared with the pre-pass's `case`
 placement, and a leader opens a command only where a command could start (`echo if case` reads
 `case` as an argument). Trust follows the separator, except that a switch led by `!` or `coproc`
-— or inside the pipeline or group such a word leads, until a `;`, newline, `&`, `&&` or `||` ends
+— or inside the pipeline or group such a word leads, until a `;`, newline, `&`, `&&`, `||` or a `case` clause's `;;`, `;&` or `;;&` ends
 the list at its own substitution depth and group level (one inside a `$( )` or a deeper group does not) — only widens what an `&&` can trust, because the `&&` after a negated
 command runs when it failed and `coproc` returns at once. bash's own `if`/`while`/`until` logic is not modelled:
 `then`, `do`, `else` and `elif` follow `;` or a newline, so every branch is in play, and
@@ -397,7 +428,9 @@ when the command writes a quoted `done` — and a `do {` inside a bash loop is b
 over-refusals: a quoted or misplaced leader is stepped over, a compound command ends an `&&`
 chain's trust, a loop in a subshell runs on. Known misses: a function is judged where it is
 defined, not where it is called; a switch target that is a variable; a redirection on a compound
-command, which bash runs before its body; PowerShell's glued braces and `ForEach-Object` pipelines.
+command, which bash runs before its body; PowerShell's glued braces and `ForEach-Object` pipelines;
+a word that only looks like an operator (a quoted `;`, `&&` or `&`, a literal `{`, `}`, `(` or `)`
+argument), read as the operator, so it can end an `||` operand or a `!` scope early.
 
 `shlex` is not a shell, so a private pass runs in front of it and removes what
 bash never runs: a `#` at the start of a word comments out the rest of its line, a

@@ -116,8 +116,9 @@ command, with one exception: a switch led by `!` or `coproc` only widens the
 branches an `&&` can trust, because the `&&` after a negated command runs when it
 failed and `coproc` returns at once. That holds for everything the word leads --
 a pipeline (`! a | git checkout ...`) or a group (`! (git checkout ...)`) -- until
-a `;`, a newline, `&`, `&&` or `||` ends the list at its own substitution depth and
-group level -- one inside a `$( )` or a deeper group does not. A leader opens a
+a `;`, a newline, `&`, `&&`, `||` or a `case` clause's `;;`, `;&` or `;;&` ends the
+list at its own substitution depth and group level -- one inside a `$( )` or a
+deeper group does not. A leader opens a
 command only where a command could start, so `echo if case` reads `case` as an
 argument. Playing safe, bash's own `if`, `while` and
 `until` logic is not modelled: `then`, `do`, `else` and `elif` follow `;` or a
@@ -134,7 +135,11 @@ over-refusals, kept: a quoted or misplaced leader (`'if' git commit`, `x=1 if
 git commit`) is stepped over, a compound command ends an `&&` chain's trust, and
 a loop in a subshell, `(for ...; done); cmd`, runs on. Known misses: a switch
 target that is a variable, a redirection on a compound command, which bash runs
-before its body, and PowerShell's glued braces and `ForEach-Object` pipelines.
+before its body, and PowerShell's glued braces and `ForEach-Object` pipelines;
+a word that only looks like an operator -- a quoted `;`, `&&` or `&`, a literal
+`{`, `}`, `(` or `)` argument -- which the tokenizer reads as the operator, so it
+can end an `||` operand or a `!` scope early (`true || echo ";" | git checkout -b
+x && git commit -m x`).
 Known miss: a function is judged where it is defined, not where it is
 called, so `f() { git commit; }; git checkout main; f` is not seen.
 
@@ -835,8 +840,10 @@ _STEPPED_LEADERS = _COMMAND_LEADERS - {"time"}
 #: the next `&&`.
 _UNCERTAIN_LEADERS = frozenset({"!", "coproc"})
 
-#: Separators that end the list a `!` or `coproc` leads, outside any group.
-_LIST_ENDS = frozenset({";", "\n", "&", "&&", "||"})
+#: Operators that end the list a `!` or `coproc` leads or an `||` operand sits in,
+#: at the level and group they stand in: `;`, a newline, `&`, `&&`, `||`, and the
+#: three terminators of a `case` clause, which end the clause's last list.
+_LIST_ENDS = frozenset({";", "\n", "&", "&&", "||", ";;", ";&", ";;&"})
 
 #: The operators a separator token is built from, in the order a shell reads
 #: them: `)&&` is `)` then `&&`.
@@ -845,6 +852,14 @@ _OPERATORS = re.compile(r"\|\||&&|\|&|;;&?|;&|[;&|(){}\n]")
 #: Where a list is: the depth of the substitution it sits in, and how many
 #: `(` and `{` are open there.
 _Key = tuple[int, int]
+
+#: One operator of a run with the substitution depth it was written at, as
+#: `(depth, operator)`; the run behind each invocation.
+_Run = tuple[tuple[int, str], ...]
+
+#: Stands in a run, at the depth of a substitution that has just closed, for the
+#: end of that substitution: whatever was open at that depth or deeper is over.
+_CLOSED = "$)"
 
 #: Words that open a bash loop, and the leaders among them.
 _LOOP_COMMANDS = frozenset({"for", "select"})
@@ -1266,18 +1281,22 @@ def segments(command: str) -> list[Segment] | None:
     ]
 
 
-def _segments(
-    command: str, *, runs: list[tuple[str, ...]] | None = None
-) -> list[Segment] | None:
+def _segments(command: str, *, runs: list[_Run] | None = None) -> list[Segment] | None:
     """Split a command as `segments` does, leaving the placeholder as it is.
 
     Args:
         command: The full command line.
         runs: When given, receives one entry per returned segment: the operators
-            written between it and the previous invocation, in order, one
-            element each (`)&&` is `)` and `&&`). A substitution's first
-            segment carries the run it inherits its separator from, and a
-            segment whose separator is `SUBSTITUTED` an empty one.
+            written between it and the previous invocation, in order, each as
+            `(depth, operator)` with the substitution depth it was written at
+            (`)&&` is `)` and `&&`). A substitution's first segment carries the
+            run it inherits its separator from, at the outer depth, followed by
+            whatever was written inside the substitution before its first
+            command, at the inner one. A substitution that has just closed
+            leaves `(depth, _CLOSED)` at the front of the run of whatever
+            follows it, and operators written before the close are dropped, so
+            a segment whose separator is `SUBSTITUTED` has a run holding at most
+            that.
 
     Returns:
         What `segments` returns, with `_PLACEHOLDER` standing in each word where
@@ -1290,12 +1309,12 @@ def _segments(
     parsed: list[Segment] = []
     current: list[str] = []
     pending: list[str] = []
-    raw: list[str] = []  # the operators behind `pending`, as written
+    raw: list[tuple[int, str]] = []  # the operators behind `pending`, as written
     separator = ""
     depth = 0
     after_close = False  # a substitution closed and no operator has come since
     # State at each group's mark.
-    opened: list[tuple[int, str, list[str], list[str], bool]] = []
+    opened: list[tuple[int, str, list[str], list[tuple[int, str]], bool]] = []
 
     def flush() -> None:
         if current:
@@ -1321,6 +1340,7 @@ def _segments(
                     separator = SUBSTITUTED
             elif piece == _CLOSE:
                 flush()
+                closed = depth
                 depth = max(depth - 1, 0)
                 if opened:
                     count, was_separator, was_pending, was_raw, was_after = opened.pop()
@@ -1335,7 +1355,7 @@ def _segments(
                         )
                         continue
                 pending = []
-                raw = []
+                raw = [(closed, _CLOSED)]
                 separator = SUBSTITUTED
                 after_close = True
             elif piece:
@@ -1344,7 +1364,7 @@ def _segments(
                     pending = []
                     raw = []
                 pending.append(_governs(piece))
-                raw.extend(_OPERATORS.findall(piece))
+                raw.extend((depth, op) for op in _OPERATORS.findall(piece))
                 separator = _join(pending)
                 after_close = False
             # The pieces left to right: an operator glued to a mark, as in
@@ -1609,8 +1629,7 @@ def _loop_ranges(
 
 
 def _walk_run(
-    run: tuple[str, ...],
-    level: int,
+    run: _Run,
     ok: set[str],
     nest: dict[int, int],
     operands: list[tuple[_Key, set[str]]],
@@ -1618,15 +1637,18 @@ def _walk_run(
 ) -> set[str]:
     """Read one run of operators for the `||` operands and `!` scopes it ends.
 
-    A list ends at `&&`, `;`, `&` or a newline, and a group's close ends every
-    list opened inside it. An `||` ends a `!` or `coproc` scope too, but opens or
-    extends an `||` operand instead of closing one. Only the ones at the key they
-    were opened at end: an operator inside a substitution or a deeper group is
-    another list's.
+    A list ends at `&&`, `;`, `&`, a `case` clause's terminator or a newline, and
+    a group's close ends every list opened inside it. An `||` ends a `!` or
+    `coproc` scope too, but opens or extends an `||` operand instead of closing
+    one. Only the ones at the key they were opened at end: an operator inside a
+    substitution or a deeper group is another list's. A newline counts only in a
+    run that holds nothing else -- an `||`, `|` or `&&` before a newline
+    continues the list. The end of a substitution ends everything open inside it,
+    at its depth or deeper.
 
     Args:
-        run: The operators between two invocations, in written order.
-        level: The substitution depth the run belongs to.
+        run: The operators between two invocations, in written order, each with
+            the substitution depth it was written at.
         ok: The branches HEAD could be on if every command of the current `&&`
             chain succeeded.
         nest: How many groups are open at each level; updated.
@@ -1639,7 +1661,7 @@ def _walk_run(
         caller to add to `ok`.
     """
     widened: set[str] = set()
-    only_newlines = all(operator == "\n" for operator in run)
+    only_newlines = all(op == "\n" for _, op in run if op != _CLOSED)
 
     def close(at: int, group: int, *, below: bool) -> None:
         # Ends what was opened at `group` -- or, for a close, in any group
@@ -1652,10 +1674,17 @@ def _walk_run(
             widened.update(entry[1])
         negating.difference_update([k for k in negating if ended(k)])
 
-    for operator in run:
+    for level, operator in run:
         group = nest.get(level, 0)
         key = (level, group)
-        if operator == "||":
+        if operator == _CLOSED:
+            for entry in [e for e in operands if e[0][0] >= level]:
+                operands.remove(entry)
+                widened.update(entry[1])
+            negating.difference_update([k for k in negating if k[0] >= level])
+            for deeper in [n for n in nest if n >= level]:
+                del nest[deeper]
+        elif operator == "||":
             negating.discard(key)  # the negation covers the left side only
             if operands and operands[-1][0] == key:
                 operands[-1][1].update(ok)  # chained: a || b || c
@@ -1693,7 +1722,7 @@ def _judge(command: str, branch: str) -> str:
             "    git checkout -b <type>/<kebab-case-topic>"
         )
 
-    runs: list[tuple[str, ...]] = []
+    runs: list[_Run] = []
     parsed = _segments(command, runs=runs)
     if parsed is None:
         return _unreadable(command, branch)
@@ -1713,11 +1742,12 @@ def _judge(command: str, branch: str) -> str:
     # Open `||` operands, each with what its left side trusted, and the lists a
     # `!` or `coproc` leads, both keyed by where the list sits: its substitution
     # depth and how many groups are open there. Only an operator at that key ends
-    # one, or the group or substitution it sits in closing.
+    # one, or the group or substitution it sits in closing. The key is read from
+    # the operators the tokenizer found, so a word that only looks like one -- a
+    # quoted `;` or `&&`, a literal `{` -- moves it; that is a known miss.
     nest: dict[int, int] = {}
     operands: list[tuple[_Key, set[str]]] = []
     negating: set[_Key] = set()
-    previous_depth = 0
     for number, segment in enumerate(parsed):
         for level in [level for level in nest if level > segment.depth]:
             del nest[level]
@@ -1725,10 +1755,7 @@ def _judge(command: str, branch: str) -> str:
         while operands and operands[-1][0][0] > segment.depth:
             ok |= operands.pop()[1]  # a substitution that has ended
         run = runs[number] if number < len(runs) else ()
-        ok |= _walk_run(
-            run, min(segment.depth, previous_depth), ok, nest, operands, negating
-        )
-        previous_depth = segment.depth
+        ok |= _walk_run(run, ok, nest, operands, negating)
         if number in loops:
             ok |= loops[number]
             possible |= loops[number]
