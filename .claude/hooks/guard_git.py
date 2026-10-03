@@ -1012,6 +1012,11 @@ def _scan(
                 queue, queue_slots = [], []
                 for body, owner in zip(bodies, owners, strict=True):
                     from_text(body, owner)
+                if index >= length:
+                    # A body that ran to the end of the input took any closing
+                    # quote with it; bash runs the command, so close them here
+                    # for `shlex` to read what the substitutions left behind.
+                    out.append('"' * frames.count("dq"))
             fresh()
         elif char == "(":
             arith = _arith_end(command, index, budget) if pair == "((" else None

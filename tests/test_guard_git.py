@@ -1766,6 +1766,29 @@ def test_violation_refuses_a_push_to_main_inside_a_substitution_from_a_branch(
     assert violation(command, OTHER).startswith(PUSH_REASON)
 
 
+@pytest.mark.parametrize(
+    "command",
+    [
+        'echo "$(cat <<EOF > f\n$(git push origin main)\nEOF)"',
+        'echo "$(cat <<EOF > f\n`git push origin main`\nEOF)"',
+        'x="$(cat <<EOF\n$(git push origin main)\nEOF)"',
+        "x=$(cat <<EOF\n$(git push origin main)\nEOF)",
+    ],
+)
+def test_violation_judges_a_body_substitution_of_an_unclosed_quoted_substitution(
+    command: str,
+) -> None:
+    # The delimiter glued to the `)` is no closing line, so the heredoc runs to
+    # the end of the input, closing quote included, and bash still runs the body.
+    assert violation(command, OTHER).startswith(PUSH_REASON)
+    assert violation(command, PROTECTED).startswith(PUSH_REASON)
+
+
+def test_violation_still_treats_a_quoted_delimiter_body_as_data_in_a_quote() -> None:
+    command = "echo \"$(cat <<'EOF' > f\n$(git push origin main)\nEOF)\""
+    assert violation(command, OTHER) == ""
+
+
 def test_violation_allows_a_commit_in_a_substitution_off_main() -> None:
     assert violation('echo "$(git commit -m x)"', OTHER) == ""
     assert violation("echo `git commit -m x`", OTHER) == ""

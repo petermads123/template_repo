@@ -1,6 +1,6 @@
 # The git guard judges command substitutions inside a word
 
-<!-- claude-plan step=3 status=active -->
+<!-- claude-plan step=4 status=active -->
 
 | Field | Value |
 |---|---|
@@ -15,7 +15,7 @@
 |---|---|---|---|---|
 | 1 | Conceptualize | `/conceptualize` | with the user | done |
 | 2 | Plan | `/plan` | with the user | done |
-| 3 | Implement | `/implement` | in `/build` | in progress |
+| 3 | Implement | `/implement` | in `/build` | done |
 | 4 | Verify | `/verify` | in `/build` | pending |
 | 5 | Test | `/test` | in `/build` | pending |
 | 6 | Concept check | `/concept-check` | in `/build` | pending |
@@ -444,6 +444,8 @@ The command is allowed (empty reason) while bash runs git: the shape the Defect 
 - **An empty `$( )` or a pair of double backticks lost `&&` trust** (A8, A5). `segments` now leaves the separator exactly as it was when a group ran no invocation.
 - **A switch target a substitution made** was read as a branch called `_` (the Class row's "target only the shell can resolve", A6). The placeholder is now `\x1f` inside the module and `segments` shows it as `_`, so `switch_target` can return `UNRESOLVED` for `git checkout "$(echo main)"`, `-B`/`-C` with a substituted name, and a name with a substitution in it; `-b`/`-c` still read as a switch away.
 - Docstrings corrected: `_strip_substitution`, `_branch_name`, `Segment.separator`, `segments`, `switch_target`, and the module's "known misses" sentence.
+
+**Send-back from step 6 (A2/A9), fixed.** `echo "$(cat <<EOF > f\n$(git push origin main)\nEOF)"` and its backtick-body twin were allowed from a branch while bash pushes `main`. Cause: the body substitution was extracted correctly, but the heredoc body ran to the end of the input and swallowed the closing `"`, so the prepared text had an unbalanced quote, `_lex` returned None and `violation` treated the command as unreadable (refused only on `main`). The unquoted form has no quote to lose, which is why only the double-quote path missed. Red run before the fix (`test_violation_judges_a_body_substitution_of_an_unclosed_quoted_substitution`, 3 of 4 parametrized cases failed: `violation(..., 'feat/topic') == ''`). Fix in `_scan`'s newline branch: when heredoc bodies reach the end of the input, one closing `"` is appended per open `dq` frame so `shlex` reads what is left; the extracted group was already in the slot. Verified in bash with `git` shadowed that the push runs. Suite: 702 passed (697 plus 4 new cases and 1 new data-form test).
 
 ---
 
