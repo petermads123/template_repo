@@ -119,41 +119,129 @@ None.
 
 ### Approach
 
-One paragraph on the chosen approach, and one on what was rejected and why.
+**Chosen — a pre-lexing pass in front of `shlex`.** A new private scanner, `_prepare`, walks
+the command once, character by character, tracking quote state the way bash does (single
+quotes literal, double quotes honouring `\"` and `\\`, a backslash outside quotes escaping
+the next character). Outside quotes it removes what bash never executes and `shlex` cannot
+read: a `#` that starts a word comments out the rest of its line (the newline stays); a
+backslash-newline is deleted, joining the lines; and the body of each heredoc opened on a
+line (`<<WORD`, `<<-WORD`, `<<'WORD'`, `<<"WORD"`, but not the `<<<` here-string) is dropped
+from the next newline up to and including its delimiter line, while the `<<` operator and
+its delimiter word stay so the invocation still reads as a redirection. The scanner also
+reports whether it met a construct it does not model — `$'` outside quotes, `@'` or `@"`,
+`<#`, or a backtick directly before a quote. `segments()` lexes the scanner's output with
+`shlex` exactly as today, so a command with none of these constructs produces identical
+tokens. `violation()` uses the flag to distrust an allow, not to stop reading: with `main`
+checked out, a command carrying an unmodelled construct that names commit or push is
+refused; otherwise the normal judgment runs on the parsed segments. This keeps every
+refusal that holds today — including a push to `main` from another branch — and closes the
+bypasses.
+
+**Rejected.** *Make an unmodelled construct "unreadable"* (return `None` from `segments`):
+simpler, but unreadable input is allowed off `main`, so `echo $'x'; git push origin main`
+from `feat/x` — refused today — would become allowed; a new hole to close an old one, and an
+A6 failure. *Replace `shlex` with a full hand-written bash lexer*: the cleanest long-term
+shape, but it re-derives everything the 220 existing tests pin down, puts A6 at real risk,
+and still could not model PowerShell. *Only distrust, never transform* (Option 3): fails A1,
+and the user chose against it.
 
 ### Modules
 
 | Path | New or changed | Purpose |
 |---|---|---|
+| `.claude/hooks/guard_git.py` | changed | Private `_prepare` scanner; `segments()` lexes its output; `violation()` refuses on `main` when an unmodelled construct names commit/push; new constant `UNMODELLED_OPENERS`; module docstring describes the three rules and the distrust |
+| `tests/test_guard_git.py` | changed | New tests for A1–A5 appended; existing tests untouched |
+| `STRUCTURE.md` | changed | The `guard_git.py` section describes the scanner's rules and the distrust; the `test_guard_git.py` section names the new cases |
 
 ### Public API
 
-> Every public class and function, with its full signature as it will be written.
-> `Covers` links back to the acceptance criteria above.
+No public signature changes. Two public functions change behaviour, and one public constant
+is added:
 
 | Signature | Module | Purpose | Covers |
 |---|---|---|---|
+| `segments(command: str) -> list[Segment] \| None` | `guard_git.py` | Unchanged signature. Now lexes the command after heredoc bodies, word-start comments and backslash-newlines have been removed; `None` also for a heredoc whose delimiter never arrives. | A1, A2, A3, A4, A6 |
+| `violation(command: str, branch: str) -> str` | `guard_git.py` | Unchanged signature. Refuses on `main` when the command carries an unmodelled construct and names commit or push, with a reason naming the construct kinds; otherwise judges as before. | A1–A6 |
+| `UNMODELLED_OPENERS: tuple[str, ...] = ("$'", "@'", '@"', "<#", "`'", '`"')` | `guard_git.py` | The character pairs, outside quotes, that open a construct the scanner does not read. | A5 |
+
+Private, for the build to write but not to list in `STRUCTURE.md`: `_prepare(command: str) ->
+tuple[str | None, bool]` — the transformed text (or `None` for an unterminated heredoc) and
+whether an unmodelled opener was seen.
 
 ### Implementation guide
 
-Ordered. Each entry small enough to finish and check.
-
-1.
-2.
+1. **Reproduction first (fix round).** Add `test_violation_allows_a_heredoc_with_a_stray_quote_on_main`
+   with the reported shape — `python3 - <<'EOF'`, body `x = '''main's push'''`, then `EOF` —
+   asserting it is not refused on `main`. Run it and paste the red run into section 3. If it
+   is already green, halt.
+2. **Scanner skeleton.** Add `_prepare` that copies the command through unchanged while
+   tracking quote state: outside, single, double; backslash escapes outside quotes and inside
+   double quotes; nothing escapes inside single quotes. Return `(command, False)` for now.
+   Wire `segments()` to lex `_prepare(command)[0]`, returning `None` when it is `None`.
+   Existing suite must still be 220 green — this proves the pass is an identity.
+3. **Backslash-newline.** Outside single quotes, delete `\` followed by `\n`. (A `\` inside a
+   comment is already gone with the comment, so `echo ok # path\` + newline + `git commit`
+   keeps its two lines.)
+4. **Comments.** Outside quotes, a `#` at the start of the string or after whitespace or one
+   of `;&|()<>` and the newline starts a comment: skip to the next newline and keep that
+   newline. `#` anywhere else (`ok#1`, `${#x}`, `$#`, `--grep=#12`) is an ordinary character;
+   keep `lexer.commenters = ""`.
+5. **Heredocs.** Outside quotes, `<<` not followed by a third `<` opens a heredoc: read an
+   optional `-`, optional blanks, then the delimiter word with any quotes removed (bash's
+   rule: the delimiter is the word with quote characters stripped). Emit the operator and the
+   word as written. Queue the heredoc. At the next unquoted newline, for each queued heredoc
+   in order, consume lines until one equals the delimiter (for `<<-`, after stripping leading
+   tabs); drop them, keep one newline. If the input ends first, return `(None, flag)`.
+6. **Unmodelled openers.** Outside quotes (and outside comments and heredoc bodies, which are
+   skipped), set the flag on any pair in `UNMODELLED_OPENERS`. For `$'`, also consume the
+   ANSI-C string honouring `\'` so quote tracking stays correct after it.
+7. **Distrust in `violation()`.** Before the existing logic: if `branch == PROTECTED`, the
+   flag is set and `RISKY_PATTERN` matches the raw command, return a refusal: "Refused: this
+   command uses syntax this guard does not read — `$'...'`, a PowerShell here-string, block
+   comment or backtick-escaped quote — and it names `commit` or `push` while `main` is
+   checked out." plus the existing advice to branch first. Otherwise unchanged; the unreadable
+   fallback keeps searching the raw command.
+8. **Docs.** Rewrite the module docstring's lexing paragraph and the `STRUCTURE.md` guard
+   section for the three rules and the distrust, and add the new tests to the
+   `test_guard_git.py` section.
 
 ### Test intents
 
-> High-level: what a test must prove, not how it is written. Step 5 turns each of these
-> into concrete cases, including the edge cases.
-
 | # | Must prove | Covers |
 |---|---|---|
-| T1 | | |
+| T1 | The reported heredoc command is allowed on `main` (red before the fix, green after) | A1 |
+| T2 | A heredoc body is data in every delimiter form, including `<<-` with tab-indented close and a git-looking body line; a command after the heredoc is still judged; `git commit -F - <<'EOF'` with an apostrophe in the body is refused as a commit to `main` and allowed on `feat/x`; `<<<` is not a heredoc; an unterminated heredoc makes `segments` return `None` | A2 |
+| T3 | `#` at word start comments to end of line, so quotes in comments no longer pair across lines (the bypass is refused); `echo ok # git commit -m x` is allowed; `#` inside a word, `${#x}` and `--grep=#12` are untouched; a `#` inside quotes is untouched | A3 |
+| T4 | Backslash-newline joins lines, so `git \`↵`commit` and `git \`↵`push origin main` are refused; a backslash-newline inside single quotes is kept | A4 |
+| T5 | Each bypass from the reproduction that rests on an unmodelled construct is refused on `main` with the new reason; the same forms without commit/push are allowed on `main`; all of them are allowed on `feat/x`; a push to `main` with an unmodelled construct is still refused from `feat/x` when the push itself parses | A5 |
+| T6 | Every existing test passes unmodified, and a differential over every command string in the existing tests plus generated variations agrees with the guard on `origin/main` except for the A1–A5 inputs — run in step 6 as evidence from a scratch script, not added to the suite, since after merge the comparison would be against itself | A6 |
 
 ### Risks
 
-What could make this harder than it looks, and what the build should do if it does —
-including whether it should halt.
+- **The pass is not an identity on plain commands.** Any change to tokens for a command with
+  no `#`-at-word-start, backslash-newline or `<<` is a bug in the scanner. Step 2 of the guide
+  checks it with the existing suite; the build fixes it without asking.
+- **Arithmetic `<<`** (`$(( 1 << 2 ))`) is read as a heredoc whose delimiter never arrives, so
+  `segments` returns `None`: refused on `main` only if the command names commit/push, allowed
+  elsewhere. Accepted — the safe direction, and rare. Not a halt.
+- **A push to `main` from another branch that is itself hidden by an unmodelled construct**
+  (`echo $'it\'s'; git push origin main # '` from `feat/x`) stays allowed: the concept limits
+  the distrust to `main` checked out, and the remote's protection still refuses the push. A
+  step 8 item, not a halt.
+- **PowerShell forms cannot run in a real `pwsh` here.** Evidence for them is
+  `violation()`'s verdict only. Not a halt.
+- **The cause is elsewhere.** If the build finds a bypass in A1–A5 that this pass cannot
+  close because the cause is not in what reaches `shlex`, halt — that changes the Root cause
+  row.
+- **A criterion turns out wrong**, e.g. a listed bypass that bash does not actually execute:
+  halt rather than drop it.
+
+### Coverage
+
+- Every criterion has a Public API entry: A1–A4 and A6 via `segments`/`violation`, A5 via
+  `violation` and `UNMODELLED_OPENERS`.
+- Every criterion has a test intent: A1→T1, A2→T2, A3→T3, A4→T4, A5→T5, A6→T6.
+- Nothing in the Public API lacks a criterion: `UNMODELLED_OPENERS` exists only for A5.
 
 ---
 
