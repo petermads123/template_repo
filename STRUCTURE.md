@@ -126,10 +126,11 @@ because only options are skipped after a wrapper and never a bare word.
 
 The shell-lexing cases close the file. The reproduction for the defect `fix/guard-git-shell-lexing` fixes comes first: a heredoc whose body carries a stray quote (`python3 - <<'EOF'` ... `EOF`), allowed on `main` rather than refused as unreadable. Then, each checked against real bash with `git` shadowed by an echo function:
 
-- **Heredocs** — a body is data in every delimiter form (`<<`, `<<'`, `<<"`, `<<\`, `<<-` with tabs); a command after it, on its opener line, after two heredocs on one line or after a comment on the opener is still judged; `git commit -F - <<'EOF'` is refused as a commit and the pipeline's `"$(cat <<'EOF' ...)"` form keeps its outcome; an unquoted delimiter lets a backslash-newline join the closing line and a quoted one does not; a CRLF script closes on `EOF` plus the return; an unterminated heredoc takes the rest as body while an earlier push is still refused; `<<<` is a here-string; a shift in `$((1<<2))`, `(( x <<= 1 ))` and `let` is arithmetic, and `((echo a); ...)` stays two subshells.
+- **Heredocs** — a body with no substitution in it is data in every delimiter form (`<<`, `<<'`, `<<"`, `<<\`, `<<-` with tabs); a command after it, on its opener line, after two heredocs on one line or after a comment on the opener is still judged; `git commit -F - <<'EOF'` is refused as a commit and the pipeline's `"$(cat <<'EOF' ...)"` form keeps its outcome; an unquoted delimiter lets a backslash-newline join the closing line and a quoted one does not; a CRLF script closes on `EOF` plus the return; an unterminated heredoc takes the rest as body while an earlier push is still refused; `<<<` is a here-string; a shift in `$((1<<2))`, `(( x <<= 1 ))` and `let` is arithmetic, and `((echo a); ...)` stays two subshells.
+- **Substitutions in an unquoted heredoc body** — the halt-table commands refused (`$(git commit)` on `main`, the backtick push also from a branch), each form bash runs (quoted inside the body, a stray apostrophe, continuation, nested parentheses, `${x:-$(...)}`, inside arithmetic, an escaped backslash before the `$(`) refused, and text bash does not run (`\$(`, `$((1<<2))`, `${x}`, an unclosed substitution) allowed; every quoted-delimiter form left as data; harmless substitutions such as `$(date)` allowed on `main`; a stray quote in a substitution not breaking the pairing for a later commit; the second of two heredocs; an unterminated body; `segments` token expectations for the extracted commands.
 - **Comments** — a word-start `#` comments out the line after each blank and operator, so quotes in comments no longer pair across lines; a `#` is kept as text after a `$( )`, inside `${ }`, after a carriage return, a quote or an escaped blank, in `$#` and `${#x}`; a comment inside backticks ends at the backtick; a `#` after a subshell's `)` or a redirect is a comment; a switch whose `&&` is only in a comment is distrusted.
 - **Continuations** — a backslash-newline joins `git` and `commit` or `push` in either branch, inside double quotes and across an `&&`, but not in single quotes, not after an escaped backslash and not inside a comment.
-- **Unmodelled syntax** — the exact `UNMODELLED_OPENERS` set; each reproduction bypass refused on `main` with its own reason and allowed on a branch, in a detached HEAD and on `Main`; forms that name neither commit nor push, or hide the opener in quotes, a comment or a body, allowed; the accepted `&&` plus `$'...'` cost pinned; and four recorded misses (a hex-escaped or split-quote subcommand, a substitution in an unquoted heredoc body, a risky word in a comment still refusing) so changing them is a decision.
+- **Unmodelled syntax** — the exact `UNMODELLED_OPENERS` set; each reproduction bypass refused on `main` with its own reason and allowed on a branch, in a detached HEAD and on `Main`; forms that name neither commit nor push, or hide the opener in quotes, a comment or a body, allowed; the accepted `&&` plus `$'...'` cost pinned; and recorded misses (a hex-escaped or split-quote subcommand, a risky word in a comment still refusing) so changing them is a decision.
 
 ### `tests/test_plan_state.py`
 
@@ -297,12 +298,16 @@ bash never runs: a `#` at the start of a word comments out the rest of its line,
 backslash-newline joins two lines, and a heredoc body (`<<WORD`, `<<-WORD`, quoted or not,
 never `<<<`) is dropped up to its delimiter line, leaving the `<<` and its word so the
 invocation still reads as a redirection. A heredoc whose delimiter never arrives takes the rest of
-the input as its body, as bash does. The pass tracks what it is inside — `$( )`, `${ }`,
+the input as its body, as bash does. A body after a quoted delimiter is pure data; one after an
+unquoted delimiter is expanded by bash, so its `$( )` and backtick substitutions are kept, each as
+a command on a line of its own, and the rest of the text is dropped — an escaped `$(` is text,
+`$(( ))` is arithmetic and `${ }` a parameter (a substitution inside either still runs), and a
+substitution that never closes runs nothing. The pass tracks what it is inside — `$( )`, `${ }`,
 backticks, double quotes, `$(( ))` and `(( ))` — because the rules change there: a `#` after a
 `$( )` or inside `${ }` is part of a word, `<<` in arithmetic is a shift, and quotes nest in
-`"$( )"`. Known misses, kept deliberately: a substitution in an unquoted heredoc body, and a
-subcommand spelled with hex escapes or split quotes, which the raw-text search does not read
-as `commit`. The pass also reports a construct it does not read — a pair in
+`"$( )"`. Known misses, kept deliberately: a subcommand spelled with hex escapes or split
+quotes, which the raw-text search does not read as `commit`, and a substitution nested in quotes
+or backticks, which the guard does not read in a plain command either. The pass also reports a construct it does not read — a pair in
 `UNMODELLED_OPENERS`: `$'...'`, PowerShell here-strings, `<# #>` comments, backtick-escaped
 quotes. It does not guess: with `main` checked out, such a command that names `commit` or
 `push` is refused with its own message, and anywhere else it is judged as parsed.
@@ -323,7 +328,7 @@ meets an unknown branch is refused with a message saying so rather than the one 
 | Signature | Description |
 |---|---|
 | `Segment` | Frozen dataclass: `tokens` and the `separator` that preceded them — one of `SEPARATORS`, a newline, or a grouping delimiter (`""` for the first). |
-| `segments(command: str) -> list[Segment] \| None` | Split a command into invocations after comments, continuations and heredoc bodies are removed, or None if it cannot be read: an unbalanced quote or a trailing backslash. A heredoc whose delimiter never arrives takes the rest of the input as its body. |
+| `segments(command: str) -> list[Segment] \| None` | Split a command into invocations after comments, continuations and heredoc bodies are removed, or None if it cannot be read: an unbalanced quote or a trailing backslash. A heredoc whose delimiter never arrives takes the rest of the input as its body. The substitutions of an unquoted body stay, each as an invocation of its own after the opening line. |
 | `git_subcommand(tokens: tuple[str, ...]) -> tuple[str, tuple[str, ...]]` | Identify the git subcommand and its arguments. |
 | `push_targets_main(args: tuple[str, ...], branch: str) -> bool` | Whether a push would update `main`. |
 | `switch_target(subcommand: str, args: tuple[str, ...]) -> str` | The branch a `checkout`/`switch` moves to, `""` when it moves none, or the sentinel `UNRESOLVED` (`"?"`) for a target only the running shell can resolve — `-` and `@{-1}`. |

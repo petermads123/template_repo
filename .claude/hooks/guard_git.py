@@ -26,10 +26,17 @@ the closing line. Constructs it does not read -- `$'...'`, PowerShell
 here-strings, `<# #>` comments and backtick-escaped quotes -- are not guessed
 at: while `main` is checked out, a command carrying one that names `commit` or
 `push` anywhere, comments and bodies included, is refused outright, and
-elsewhere it is judged as parsed, as unreadable input always was. Known misses,
-all deliberate: a substitution in an unquoted heredoc body (`$(git commit)`)
-is data here though bash runs it, and a subcommand spelled with hex escapes or
-split quotes (`git co""mmit`) does not name `commit` to the raw-text search.
+elsewhere it is judged as parsed, as unreadable input always was. A heredoc
+body is data only when any part of its delimiter is quoted (`<<'EOF'`,
+`<<"EOF"`, a backslash before a letter). After an unquoted one bash expands the body and runs its `$( )` and
+backtick substitutions, so those are kept, each as a command on a line of its
+own, and the rest of the body is dropped: an escaped `$(` is text, `$(( ))` is
+arithmetic and `${ }` is a parameter, none of them a command, while a
+substitution inside either of the last two still runs. Known misses, all
+deliberate: a subcommand spelled with hex escapes or split quotes
+(`git co""mmit`) does not name `commit` to the raw-text search, and a
+substitution nested in quotes or backticks inside a substitution is no more
+read than one in a plain `echo "$(git commit)"`.
 
 Each segment is judged against the branch that will be checked out when it runs,
 not the one checked out now: `git checkout -b feat/x && git commit` is allowed
@@ -843,6 +850,8 @@ def segments(command: str) -> list[Segment] | None:
         be read at all — an unbalanced quote or a trailing backslash. Heredoc
         bodies, comments and continuations are removed first, and a heredoc
         whose delimiter never arrives takes the rest of the input as its body.
+        The command substitutions of an unquoted body stay, each as an
+        invocation of its own after the line that opened the heredoc.
     """
     tokens = _lex(_prepare(command)[0])
     if tokens is None:
