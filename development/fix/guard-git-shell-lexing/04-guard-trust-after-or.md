@@ -1,6 +1,6 @@
 # The git guard does not trust a switch that `||` may skip
 
-<!-- claude-plan step=6 status=active -->
+<!-- claude-plan step=7 status=active -->
 
 | Field | Value |
 |---|---|
@@ -18,7 +18,7 @@
 | 3 | Implement | `/implement` | in `/build` | done |
 | 4 | Verify | `/verify` | in `/build` | done |
 | 5 | Test | `/test` | in `/build` | done |
-| 6 | Concept check | `/concept-check` | in `/build` | pending |
+| 6 | Concept check | `/concept-check` | in `/build` | done |
 | 7 | Ship | `/ship` | in `/build` | pending |
 | 8 | Recommend | `/recommend` | with the user | pending |
 | 9 | Pull request | `/create-pr` | with the user | pending |
@@ -425,7 +425,7 @@ and every allowed one not. The oracle first showed a plain `git commit -m x` pri
 | Fixed in step 5 (b) | `test_violation_does_not_carry_state_into_a_sibling_substitution` (2) | red on step 4's code, green after |
 | Fixed in step 5 (c) | `test_violation_ends_a_scope_at_a_case_clause_terminator` (6: `\|\|` and `!` times `;;`, `;&`, `;;&`) | red on step 4's code, green after |
 | Pinned | `test_violation_pins_a_group_after_a_negation_ended_by_a_newline_as_refused` | pass (refused, as at 43eeea3) |
-| T6 | step 6 | |
+| T6 | the differential and the allowed-rows run, both in section 6 | pass (step 6) |
 
 Red run of the three groups on step 4's code (commit c37bb2e): `12 failed, 1029 passed`.
 After the fixes: `1161 passed`. Against 43eeea3 over every allowed and refused form above, the only
@@ -502,9 +502,46 @@ Edge cases considered and deliberately skipped, with reasons:
 
 | # | Criterion | Met | Evidence |
 |---|---|---|---|
-| A1 | | | |
+| A1 | `git status \|\| git checkout -b x && git commit -m x` on `main` is refused with the commit reason | met | Red: section 3's run of `test_violation_refuses_a_commit_after_an_or_switch_on_main` against the step 2 code, `assert False ... where '' = violation('git status \|\| git checkout -b x && git commit -m x', 'main')`, 1 failed. Green: the same test in the 1161-passed run now, and `violation(...)` returns the commit reason (`r4c/crit.py`); the module at 43eeea3 returns `""` for it. In bash with `git` shadowed the command prints a commit on `main`. |
+| A2 | Every other `\|\|`-operand form in the Class row refused on `main` (the named switch from `feat/y`) | met | `r4c/crit.py` runs 30 forms from A1-A3 (later stage `\|` and `\|&`; `time`, `sudo`, `x=1`, a redirection before the switch; a substitution on the switch; chained `\|\|`; `\|\|` after an `&&` chain; `coproc true \|\|`; a heredoc; `&&` ending a line; further `&&` segments; the commit inside `$( )`; the whole inside `{ }`, `$( )` and `if`; a push of `HEAD`; glued subshells; a trailing-space newline; the named switch from `feat/y`): 30 of 30 refused; 28 of them were allowed by the 43eeea3 module (the other two, `true \|\| if git checkout -b x; then :; fi && git commit -m x` and `true \|\|(git checkout -b x) && git commit -m x`, were already refused by `_join`, as the Class row says). Tests `test_violation_refuses_a_commit_after_every_or_operand_form` (27 forms) and the A2 tests listed in section 5. |
+| A3 | The `negating` depth leak closed: `! true \| git checkout -b feat/x "$(true && true)" && git commit -m x`, its `"$(true; true)"` and backtick forms, and `true \|\| git checkout -b x "$(true && true)" && git commit -m x` refused on `main` | met | `r4c/crit.py`: the four named forms refused, all allowed at 43eeea3. `test_violation_keeps_a_negation_through_the_substitutions_inside_it` (9 forms). The oracle (shadow below) shows the `!` form landing on `main` when the switch fails. |
+| A4 | The five named forms stay allowed on `main` | met | `r4c/crit.py`: 5 of 5 allowed. `test_violation_still_allows_a_switch_that_certainly_ran` (8) and `test_violation_unions_both_sides_of_an_or_for_the_and_after_it` (5). Any new refusal of an A4 form would be a bug: none found in the differential's 683 + 255 new refusals (every one carries an `\|\|`, `!` or `coproc`). |
+| A5 | Nothing else changed: the existing tests pass unmodified; rounds 1-3 still hold; differential against 43eeea3 with zero rows where the guard allows what bash lands on `main` | met | `git diff 43eeea3 -- tests/` removes no line (393 added, 118 tests; 1043 to 1161 passed). Differential below: 0 bypass rows. Rounds 1-3 below. |
+
+**T6 differential** (`r4c/diff.py`, `r4c/allowed.py`; module at 43eeea3 as `base`, loaded from the scratchpad with `.claude/hooks` on `sys.path` and registered in `sys.modules`).
+
+- **Oracle, shown live first.** `git commit -m x` alone with `START=main` returns `(True, 'ok')`: the shadow prints `COMMIT@main`. Bash 5.2, `PATH=/usr/bin:/bin`, `sudo`/`doas`/`nohup`/`env` shadowed, stdin `/dev/null`, 10 s timeout, a new session per run (no `pkill -f`), no deeply nested input. One correction to the step 5 shadow: it left HEAD alone when a `git checkout`/`switch` argument was an empty string (a `"$(true && true)"` expands to one), so a plain `git checkout -b feat/x "$(true && true)" && git commit` landed on `main` in it for the wrong reason. Real git fails on an empty argument, so the shadow now returns 1 for one (`r4c/diff.py` line 10). With it, the plain form no longer lands and the `!` form does (the checkout failed, the negation made that a success).
+- **Corpus.** Every `(command, branch)` the suite passes to `violation`, captured with a scratch `-p` plugin: 1,048 pairs, 835 distinct commands. Thirteen variants (plain; `if`, `while`, `for` wrappers; `!`, `coproc`, `true \|\| `, `false \|\| `, `git status \|\| `, `! true \| ` prefixes; the ` "$(true && true)"` suffix on the first switch alone and after `true \|\| ` and `! true \| `), branches `main` and `feat/x`: **18,260 rows**.
+- **Differing: 1,003.** Oracle-run: 977 (plus 2 `do {` rows run by hand, below). Skipped: 22 for length or nesting (a 300-character cap and counts of `$(`, `(` and backticks, against fork-bombs) and 2 more that are a nest of braces; no PowerShell-only row remained once the filter stopped reading `` `true `` as a PowerShell escape (the 4 rows it first caught are the nests above and the two `for`/`while ... do { true \|\| ... }` loops, which are bash and were run: bash lands on `main`, the new guard refuses).
+- **Result of the 977.**
+
+| Direction | Bash lands on `main` | Bash does not | Syntax error in bash |
+|---|---|---|---|
+| New refuses, 43eeea3 allowed | 683 | 255 (play-safe: a switch that may have run, but did not here, or a left side that succeeded) | 28 (`! true \| ! cmd`, `coproc ! ...`, a line starting `&&`; harmless over-refusal) |
+| New allows, 43eeea3 refused | 0 | 11 | 0 |
+
+- **Every difference involves `||`, `!` or `coproc`** (the check script flags any other; none flagged). The 11 rows the new guard allows and 43eeea3 refused, all of which bash does not land on `main`: nine are the `$(! true)` sibling step 5 recorded (`echo "$(! true)" "$(git checkout -b x && git commit -m x)"` and its `if`, `while`, `for`, `!`, `coproc`, `true \|\|`, `false \|\|` and `git status \|\|` wrappers) and two are `! ( true \|\| git checkout -b y ); git checkout -b x && git commit -m x` and its `coproc ( ... )` twin, where the `;` after the group now ends the negation (the same scope rule: bash commits on `x`). No `case` terminator row appears: the corpus holds none that differ.
+- **Bypass rows: 0.** No row in which the new guard allows a commit or push that bash lands on `main` and 43eeea3 refused.
+- **Tokenizer-attributed rows: 0 in the corpus; the 9 recorded ones re-run.** The nine forms of section 5's "Different root cause" table: all nine are allowed by the new guard and by 43eeea3, and bash lands on `main` for eight of them, each carrying a quoted separator word (`";"`, `"&&"`, `'&'`, `\;`, `'('`, `')'`) or a literal `{` or `}` word, which `shlex` hands over as an operator. The ninth, `! true \| echo ";" \| git checkout -b feat/x && git commit -m x`, does not land under this oracle: the negated pipeline succeeds, so the `&&` skips the commit; it would land with a failing checkout. Section 5's table row for it overstates that case; the guard's allow is the same either way. No change.
+- **The allowed-rows run.** Every row the new guard allows, from the 18,260: 8,355, of which 8,046 went to bash (309 skipped as hostile or PowerShell). 7,178 do not land on `main`, 827 are syntax errors in bash, 5 time out (`while true; do true ||\nbreak; done`, a loop in my wrapper that never breaks, with no git in it), and **36 land on `main`**. Each of the 36 is allowed by 43eeea3 too and none is a round 4 bypass:
+
+| Rows | Form | Attribution |
+|---|---|---|
+| 16 | `echo "${x:-'$(git commit -m x)'}"`, `echo "${x:-'}" "$(git commit -m x)" "'}"` | recorded miss: a single quote inside a quoted `${ }` (round 2, module docstring) |
+| 18 | `echo $'it\'s'; git co""mmit -m x # '` and `git $'\x63ommit' -m x` | recorded misses: split quotes and a hex escape in the subcommand (round 1, module docstring) |
+| 1 | `coproc for i in 1 2; do git commit -m x; done; git checkout main` from `feat/x` | out of scope in section 1: a `coproc` loop racing a foreground switch |
+| 1 | `git checkout -b feat/y "$(true && true)"&&\r\ngit commit -m "$(date)"\r\n` | not recorded as a miss: a carriage return after `&&` is read as whitespace, so the guard joins the lines, while bash reads `\r` as a word and the next line runs on its own. The switch fails in the shadow (empty argument), so the commit lands on `main`. Neither `\|\|` nor `!`; the same lexing family as the tokenizer flaw (a literal read as syntax). Listed for round 5. |
+
+(16 + 18 + 1 + 1 = 36: the same few base forms repeated across the wrapper and prefix variants.)
+
+**Plan and Class row read against the diff.** The Root cause row names `ok = here | {target} if unsure else {target}` in `_judge` and the any-depth clear of `negating`. The diff leaves line 1672's replacement in place for commands inside an operand and takes what leaves the operand as the union (`_walk_run` returning `widened`, added to `ok` before an `&&` reads it), and re-keys `negating` by `(depth, group)`: the cause, not the site. The Class row's two parts each have tests; "Already refused, by `_join`" forms are pinned as still refused. Scope `the class`, plus the negating leak: three extra defects found at step 5 (a group inside a substitution, a sibling substitution, `case` terminators) were inside the same mechanism (`_walk_run`'s keys), each with a red test first; they fix the new code's own over- and under-reach, and none widened the promise.
 
 Drift found, and what was done about it:
+
+- **None to the criteria.** No criterion is unmet and none is wrong; no halt.
+- **Structure auditor** (six prose items, each checked against `_walk_run` and `_LIST_ENDS`): applied in `STRUCTURE.md` and the module docstring: the operand's extent (adds `&`, `case` terminators, the newline rule, the closing group or substitution; module docstring too), the `!`/`coproc` scope sentence (closing group or substitution; module docstring too), the round 4 tests entry (private names removed, the `!`/`coproc` bullet, the union-and-closing bullet) and the shell-lexing intro (round 4 named).
+- **The tokenizer flaw** is out of scope by the user's decision: **round 5 after this round.** It is recorded in section 5 under "Different root cause — for the user", in the module docstring and in STRUCTURE.md. The carriage-return row above belongs in round 5's list.
+- **Oracle correction** (empty argument) recorded above; it changes no verdict, only the reason a few forms land.
 
 ### Earlier rounds still hold
 
@@ -513,8 +550,32 @@ Drift found, and what was done about it:
 > not sufficient — a criterion can be satisfied by tests that no longer describe what the
 > feature does.
 
+Re-run directly against the code as it stands: round 1's `r6/r1.py` (0 fails), round 2's `r6/a.py` (49 of 49) and `r6/a2am.py` (0 fails), the round 3 rows in `r4c/r3.py` (28 of 28; the five compound-command forms of its A6 all still refused on `main`, as at 43eeea3), and the 1161 tests.
+
 | Round | # | Criterion | Still met | Evidence |
 |---|---|---|---|---|
+| 1 | A1 | The reported `python3 - <<'EOF'` with a stray quote is allowed on `main` | yes | `r6/r1.py`, 0 fails |
+| 1 | A2 | Heredoc bodies read as bash reads them; body substitutions judged; `commit -F -` | yes | `r6/r1.py`; heredoc tests unmodified |
+| 1 | A3 | `#` read as bash reads it | yes | `r6/r1.py` A3 rows |
+| 1 | A4 | Backslash-newline joins | yes | `r6/r1.py` A4 rows |
+| 1 | A5 | Unmodelled forms play safe on `main` only | yes | `r6/r1.py`; `UNMODELLED_OPENERS` untouched |
+| 1 | A6 | Changes nothing else; accepted `&&` plus `$'...'` cost | yes | `r6/r1.py` "A6 cost &&+$'" refused; no test line removed since 43eeea3 |
+| 2 | A1 | `echo "$(git commit -m x)"` refused on `main` | yes | `r6/a.py`, 49 of 49 |
+| 2 | A2 | `$( )` in every position; heredoc closed by the substitution's `)` | yes | `r6/a.py`, `r6/a2am.py`, 0 fails |
+| 2 | A3 | Backticks in every position | yes | `r6/a.py` |
+| 2 | A4 | Process substitution | yes | `r6/a.py` |
+| 2 | A5 | A substitution runs before its command; `&&` trust carries in | yes | `r6/a.py`; the sibling and group-in-substitution fixes touch only the `\|\|`/`!` state |
+| 2 | A6 | `main` as any branch it could land on | yes | `r6/a.py`; the differential's 18,260 rows agree with bash |
+| 2 | A7 | Funsub plays safe | yes | `r6/a.py` |
+| 2 | A8 | Harmless substitutions allowed; the pipeline's commit form | yes | `r6/a.py` A8 rows; the pipeline form with a switch before it is allowed on `main` in the allowed-rows run |
+| 2 | A9 | Changes nothing else | yes | its six test edits untouched; no line removed |
+| 3 | A1 | `if git commit -m x; then echo ok; fi` refused | yes | `r4c/r3.py` |
+| 3 | A2 | Git seen after every reserved word | yes | `r4c/r3.py`, 12 forms plus the push from a branch |
+| 3 | A3 | A switch after a reserved word counted | yes | `r4c/r3.py`, 3 forms |
+| 3 | A4 | Play safe on trust; `&&` chain stays allowed | yes | `r4c/r3.py`, 4 refused and `git checkout -b feat/x && git commit -m x` allowed; `! git diff ... \|\| { ... }` allowed |
+| 3 | A5 | A switch anywhere in a loop counts for the whole loop | yes | `r4c/r3.py`; the loop variants in the differential |
+| 3 | A6 | Words that are not commands stay words; compound commands keep their outcome | yes | `r4c/r3.py`: `echo if git commit` and `for git in ...` allowed on `main`, `git commit -m then` and the `-C` switch allowed from a branch; the five compound forms refused as before |
+| 3 | A7 | Changes nothing else; differential matches bash | yes | the 13-variant differential here includes the reserved-word prefixes: 0 bypass rows |
 
 ---
 

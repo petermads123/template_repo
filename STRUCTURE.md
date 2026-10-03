@@ -124,7 +124,7 @@ message; and the commands that must stay allowed — `echo git commit`, `grep pu
 One test asserts a documented miss rather than a fix: `sudo -u me git push` is allowed,
 because only options are skipped after a wrapper and never a bare word.
 
-The shell-lexing cases follow, ahead of the round 2 and round 3 sections. The reproduction for the defect `fix/guard-git-shell-lexing` fixes comes first: a heredoc whose body carries a stray quote (`python3 - <<'EOF'` ... `EOF`), allowed on `main` rather than refused as unreadable. Then, each checked against real bash with `git` shadowed by an echo function:
+The shell-lexing cases follow, ahead of the round 2, round 3 and round 4 sections. The reproduction for the defect `fix/guard-git-shell-lexing` fixes comes first: a heredoc whose body carries a stray quote (`python3 - <<'EOF'` ... `EOF`), allowed on `main` rather than refused as unreadable. Then, each checked against real bash with `git` shadowed by an echo function:
 
 - **Heredocs** — a body with no substitution in it is data in every delimiter form (`<<`, `<<'`, `<<"`, `<<\`, `<<-` with tabs); a command after it, on its opener line, after two heredocs on one line or after a comment on the opener is still judged; `git commit -F - <<'EOF'` is refused as a commit and the pipeline's `"$(cat <<'EOF' ...)"` form keeps its outcome; an unquoted delimiter lets a backslash-newline join the closing line and a quoted one does not; a CRLF script closes on `EOF` plus the return; an unterminated heredoc takes the rest as body while an earlier push is still refused; `<<<` is a here-string; a shift in `$((1<<2))`, `(( x <<= 1 ))` and `let` is arithmetic, and `((echo a); ...)` stays two subshells.
 - **Substitutions in an unquoted heredoc body** — the halt-table commands refused (`$(git commit)` on `main`, the backtick push also from a branch), each form bash runs (quoted inside the body, a stray apostrophe, continuation, nested parentheses, `${x:-$(...)}`, inside arithmetic, an escaped backslash before the `$(`) refused, and text bash does not run (`\$(`, `$((1<<2))`, `${x}`, an unclosed substitution) allowed; every quoted-delimiter form left as data; harmless substitutions such as `$(date)` allowed on `main`; a stray quote in a substitution not breaking the pairing for a later commit; the second of two heredocs; a body substitution of a double-quoted `$( )` whose heredoc closes on the `)` (nested double-quote frames, a backtick holder, single quotes around and inside, a double quote opened after the heredoc operator, two heredocs with the last one closing, a PowerShell backtick before the substitution; the harmless and quoted-delimiter counterparts allowed, an unbalanced quote with no heredoc left unreadable, and an unterminated heredoc in a substitution — a bash syntax error — read as unreadable); `segments` token expectations for the extracted commands.
@@ -220,12 +220,14 @@ against bash 5.2 with `git` shadowed by a function keeping HEAD in a file:
   switch to `main` before the `||`, a left side that may have failed, and the line forms (blank
   lines, a comment, a continuation, `||` then `|` then a newline).
 - **Union and closing** — both sides of an `||` unioned for the `&&` after it (five allowed);
-  an operand closed by a substitution ending, by `;` or a newline, by its group closing, and left
-  alone inside a quoted heredoc body; the rule leaving a branch or a detached HEAD alone; a
+  an operand closed by a substitution ending, by `;` or a newline, and by its group closing; an `||`
+  written inside a quoted heredoc body read as data; the rule leaving a branch or a detached HEAD alone; a
   dangling `||` allowed and a leading one that names a commit refused; a 5,000-link chain and
   2,000 open groups finishing quickly.
-- **The `!`/`coproc` scope** — nine forms of a negation or `coproc` with a `;`, `&&`, `||` or a nested
-  `!` inside a substitution, refused; a scope ended by `;` or by an `||` at its own level.
+- **The `!`/`coproc` scope** — nine forms refused on `main`: a negation or `coproc` whose switch carries a
+  `$( )` or backtick holding `&&`, `;`, `||` or a nested `!`, the same leak on an `||` operand's switch, and
+  `! true | ` with a trailing space before the newline; a scope ended by `;` or by an `||` at its own level
+  (`! git diff --quiet || { ... }` allowed, the same `||` with an unbraced switch refused by the operand rule).
 - **What stays allowed** — create-or-switch, `git fetch || true && ...`, `true || false && ...`, an
   `||` operand wholly in a group, the staged-commit chain and two ended substitutions leaving no state.
 - **A substitution opening with a group, siblings and `case`** (found by the step 5 readers) — a
@@ -234,11 +236,11 @@ against bash 5.2 with `git` shadowed by a function keeping HEAD in a file:
   sibling substitution after `$(true || ...)` or `$(! true)` is judged on its own; `;;`, `;&` and
   `;;&` end a `case` clause's list, so a later clause is not charged with an earlier `||` or `!`.
   `! true` + newline + `{ git checkout -b x && git commit -m x; }` is pinned as refused, as at 43eeea3.
-- **The runs `_segments` hands to `_judge`** — eighteen pinned runs (`||` before a group, `; } &&`,
+- **The separator runs behind each segment** (read through the private splitter behind `segments`) — eighteen pinned runs (`||` before a group, `; } &&`,
   `)&&`, `||(`, `);`, an empty group, a newline run, `case` terminators, a substitution's inherited
   run followed by what is written inside it, the close marker before siblings and before the command
-  around a substitution, operators dropped before a close), and the segments identical with and
-  without the `runs` argument.
+  around a substitution, operators dropped before a close), and the segments identical whether or not
+  the runs are collected.
 
 ### `tests/test_plan_state.py`
 
@@ -394,8 +396,9 @@ global `-C`, `--git-dir` or `--work-tree` changes nothing here. A switch on the 
 runs only when its left side failed, so the `&&` after that operand trusts what the left side
 trusted as well as the switch (`a || git checkout -b x && git commit` is refused from `main`,
 `git checkout -b feat/x || git checkout feat/x && git commit` allowed): the operand runs from
-the `||` to the next `&&`, `;`, newline or `&` at its own substitution depth and group level,
-and only inside it is the switch trusted. What still cannot be read is refused when it names `commit` or
+the `||` to the next `&&`, `;`, `&`, newline or `case` clause terminator (`;;`, `;&`, `;;&`) at its own
+substitution depth and group level — a newline only where no `||`, `|` or `&&` runs into it — or until
+the group or substitution it sits in closes, and only inside it is the switch trusted. What still cannot be read is refused when it names `commit` or
 `push` — matched on word boundaries, so `committee` is not a commit — while `main` is
 checked out, and allowed anywhere else.
 
@@ -416,7 +419,7 @@ name or pattern and never stepped over). The one list is shared with the pre-pas
 placement, and a leader opens a command only where a command could start (`echo if case` reads
 `case` as an argument). Trust follows the separator, except that a switch led by `!` or `coproc`
 — or inside the pipeline or group such a word leads, until a `;`, newline, `&`, `&&`, `||` or a `case` clause's `;;`, `;&` or `;;&` ends
-the list at its own substitution depth and group level (one inside a `$( )` or a deeper group does not) — only widens what an `&&` can trust, because the `&&` after a negated
+the list at its own substitution depth and group level (one inside a `$( )` or a deeper group does not), or the group or substitution it sits in closes — only widens what an `&&` can trust, because the `&&` after a negated
 command runs when it failed and `coproc` returns at once. bash's own `if`/`while`/`until` logic is not modelled:
 `then`, `do`, `else` and `elif` follow `;` or a newline, so every branch is in play, and
 `if git checkout -b feat/x; then git commit -m x; fi` is refused from `main`. A branch

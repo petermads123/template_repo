@@ -83,8 +83,10 @@ or push is refused if `main` is one of them. Nor does a switch on the right of
 commit` commits on the starting branch when `a` succeeded. The `&&` after such an
 operand trusts what the left side trusted as well as the switch, so
 `git checkout -b feat/x || git checkout feat/x && git commit` is still allowed;
-the operand runs from the `||` to the next `&&`, `;`, newline or `&` at its own
-substitution depth and group level, and only inside it is the switch trusted. A
+the operand runs from the `||` to the next `&&`, `;`, `&`, newline or `case` clause
+terminator (`;;`, `;&`, `;;&`) at its own substitution depth and group level -- a
+newline only where no `||`, `|` or `&&` runs into it -- or until the group or
+substitution it sits in closes, and only inside it is the switch trusted. A
 substitution runs on the
 branches in effect for the command that contains it, and a switch inside it
 counts for that command and for what follows. A switch whose target a
@@ -118,7 +120,7 @@ failed and `coproc` returns at once. That holds for everything the word leads --
 a pipeline (`! a | git checkout ...`) or a group (`! (git checkout ...)`) -- until
 a `;`, a newline, `&`, `&&`, `||` or a `case` clause's `;;`, `;&` or `;;&` ends the
 list at its own substitution depth and group level -- one inside a `$( )` or a
-deeper group does not. A leader opens a
+deeper group does not -- or the group or substitution it sits in closes. A leader opens a
 command only where a command could start, so `echo if case` reads `case` as an
 argument. Playing safe, bash's own `if`, `while` and
 `until` logic is not modelled: `then`, `do`, `else` and `elif` follow `;` or a
