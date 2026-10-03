@@ -1,6 +1,6 @@
 # The git guard judges command substitutions inside a word
 
-<!-- claude-plan step=6 status=active -->
+<!-- claude-plan step=3 status=active -->
 
 | Field | Value |
 |---|---|
@@ -111,7 +111,7 @@ All judged with `main` checked out unless stated; "a branch" is `feat/x`.
 | # | The finished feature... |
 |---|---|
 | A1 | Refuses `echo "$(git commit -m x)"` on `main`, which today it allows. |
-| A2 | Judges `$( )` inside double quotes in every position: `out="$(git push origin main 2>&1)"` is refused on `main` and from a branch; `echo "${x:-$(git commit -m x)}"`, `[[ -n "$(git commit -m x)" ]]`, `declare x="$(git commit -m x)"`, `cat <<<"$(git commit -m x)"`, `echo > "$(git commit -m x)"`, `echo $(echo "$(git commit -m x)")`, `echo "$(cd /tmp; git commit -m x)"`, `echo "$(sudo git commit -m x)"` and `echo "$( (git commit -m x) )"` are refused on `main`. |
+| A2 | Judges `$( )` inside double quotes in every position: `out="$(git push origin main 2>&1)"` is refused on `main` and from a branch; `echo "${x:-$(git commit -m x)}"`, `[[ -n "$(git commit -m x)" ]]`, `declare x="$(git commit -m x)"`, `cat <<<"$(git commit -m x)"`, `echo > "$(git commit -m x)"`, `echo $(echo "$(git commit -m x)")`, `echo "$(cd /tmp; git commit -m x)"`, `echo "$(sudo git commit -m x)"` and `echo "$( (git commit -m x) )"` are refused on `main`. A heredoc inside a command substitution ends where bash ends it, including on a closing line that carries the substitution's `)` or closing backtick (`EOF)`): its body's substitutions are judged, and whatever follows the substitution is judged as commands — `echo "$(cat <<EOF\nhi\nEOF)" ; git push origin main` and `x=$(cat <<EOF\nhi\nEOF); git push origin main` are refused on `main` and from a branch, and `echo "$(echo '"' "$(cat <<EOF\n$(git push origin main)\nEOF)")"` is refused from a branch. *(Amended at the step 6 halt on the user's answer.)* |
 | A3 | Judges backticks in every position: ``echo `git commit -m x` ``, ``x=`git commit -m x` ``, ``echo ${x:-`git commit -m x`}`` and ``echo 2>`git commit -m x` `` are refused on `main`; ``echo `git push origin main` `` is refused from a branch. |
 | A4 | Judges process substitution: `diff <(git commit -m x) /dev/null` and `tee >(git commit -m x) </dev/null` are refused on `main`; `diff <(git push origin main) f` is refused from a branch. |
 | A5 | Judges a substitution as running before its enclosing command: `git commit -m "$(git checkout -q main)x"`, `git commit -m $(git checkout -q main)x` and `git commit -F - <<EOF\n$(git checkout -q main)\nEOF` are refused from a branch; a `&&` switch before the enclosing command carries into its substitutions, so `git checkout -b feat/y && out="$(git commit -m y)"` is allowed on `main`. |
@@ -718,3 +718,5 @@ taken back through steps 1 to 7 on the same branch.
 3. Amend A2/A9 to say which of these shapes are out of scope, with a recorded miss.
 
 **State:** tree clean at `77cbebc` plus this section 6; no production change in this check; marker left at step 6.
+
+**Answer (2026-10-03):** option 1 — teach the guard bash's rule: a heredoc inside a `$( )`, backtick or `<( )`/`>( )` may close on a line that carries the substitution's closing `)` or backtick, quoted or not, which also closes the pre-existing unquoted miss (c). A2 is amended in section 1 to say so. The build resumes at step 3, which implements the rule (reaching round 1's heredoc handling, re-tested by round 1's suite) and re-runs steps 4 to 7. The earlier send-back fix (appending `"` when a body reaches the end of the input) is to be revisited by step 3 in that light.
