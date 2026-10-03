@@ -61,7 +61,7 @@ set-of-branches rule and substitution extraction.
 | Introduced by | Older than every round: the original guard (`41b4f32`) read `tokens[0]`; `5b01090` (2026-09-21) kept the miss. |
 | Class | Reserved words that take a command next — `if`, `then`, `else`, `elif`, `while`, `until`, `do`, `!`, `coproc` (`time` is already a wrapper, `{` already a separator) — chained (`if !`, `! !`, `time !`), after any separator, inside substitutions; hidden branch switches as well as hidden commits and pushes; loop back-edges, where a switch late in a loop body governs the next iteration. Not to be stepped over: `for`, `select`, `case`, `function`, `in` (the next word is a name). Same shape, different cause: a function body judged where it is defined, not where it is called; `command`/`exec`/`builtin`/`eval` before git (the deliberately incomplete `WRAPPERS`). |
 | Blast radius | `_command_index` feeds `git_subcommand` and `_redirected` (:420 — a `then git -C other checkout main` must stay ignored); `switch_target` is reached through `git_subcommand`; trust lives in `_judge`; `_COMMAND_LEADERS` becomes the one shared set. Tests: only `tests/test_guard_git.py:2681` mentions `if`, expects a refusal and survives. Decided here: the three forms allowed today only by accident become refusals on `main` (A4's accepted cost). |
-| Scope | `the class` — the user's decision — with the trust model played safe (every reserved-word join uncertain, `!` breaking trust: the user's choice over modelling bash exactly), and loops widened so any switch inside a loop counts for the whole loop (the user's choice). Functions called after a switch stay out (the user's choice), recorded only in this file — the user asked that nothing beyond its introduction be kept in `DEVELOPMENT.md`, this being a template repository. |
+| Scope | `the class` — the user's decision — with the trust model played safe (`!` and `coproc` breaking `&&` trust, everything else following its separator — the user's choice over modelling bash exactly, narrowed at step 2 from "every reserved-word join uncertain"), and loops widened so any switch inside a loop counts for the whole loop (the user's choice). Functions called after a switch stay out (the user's choice), recorded only in this file — the user asked that nothing beyond its introduction be kept in `DEVELOPMENT.md`, this being a template repository. |
 
 Critique — the `diagnosis-critic`'s findings (verdict: cause confirmed, class incomplete) and what was done with each:
 
@@ -77,9 +77,9 @@ Critique — the `diagnosis-critic`'s findings (verdict: cause confirmed, class 
 The guard learns where a command starts in shell grammar. It steps over the reserved words that
 take a command next — `if`, `then`, `else`, `elif`, `while`, `until`, `do`, `!`, `coproc`, chained
 — from one shared list that replaces round 2's separate one, so a git commit, push or branch
-switch after any of them is judged like any other command. It plays safe on trust: a join made by
-a reserved word counts as uncertain, so the branches in play are every branch possible at that
-point, and `!` breaks the `&&` trust of what it negates. A branch switch anywhere inside a loop
+switch after any of them is judged like any other command. It plays safe on trust: `!` and `coproc` break the `&&` trust of what they lead, and
+everything else follows its separator — `then`, `do`, `else` and `elif` come after `;` or a
+newline, so every possible branch is in play there (narrowed at step 2 at the user's choice). A branch switch anywhere inside a loop
 body counts for the whole loop. The two causes removed are at `_command_index` (:363) and at the
 trust decision in `_judge` (:1428).
 
@@ -132,61 +132,73 @@ None.
 
 ### Approach
 
-**Chosen: one shared set of command-position words, read in two places.** Round 2's private
-`_COMMAND_LEADERS` becomes the single list of reserved words that take a command next: `if`,
-`then`, `else`, `elif`, `while`, `until`, `do`, `!`, `coproc`, plus the `time` it already
-holds. It is read in two places.
+**Chosen: one shared set of command-position words, plus three targeted trust rules and a
+loop pass.**
 
-1. **`_command_index` steps over the words.** It steps over any run of them at the start of
-   an invocation, before the assignments, redirections and wrappers it already skips. That
-   way `git_subcommand`, `switch_target` and `_redirected` all see the git that follows.
-2. **`_judge` treats a led invocation as uncertain.** The judge asks a new private helper
-   which of the words led the invocation. It then plays safe:
-   - An invocation led by any of the words runs on every branch possible at that point,
-     even after an `&&`.
-   - An invocation led by `!` does not let its own switch replace `ok`. The switch only
-     widens it, because the `&&` after a negated command runs exactly when that command
-     failed.
-   - An invocation led by a closing word (`fi`, `done`, `esac`) also counts as uncertain.
+Round 2's private `_COMMAND_LEADERS` becomes the single list of reserved words that take a
+command next: `if`, `then`, `else`, `elif`, `while`, `until`, `do`, `!`, `coproc`. It also keeps
+`time`, but only for `_scan`'s `case` placement. `time` stays a wrapper everywhere else.
 
-**Loops.** Before judging, a pre-pass over the segments finds each loop. A loop runs from an
-invocation whose command word is `for`, `while`, `until` or `select` to its matching `done`,
-with `do` and `done` counted at invocation starts. Every branch switch inside the loop is
-added to `possible` at the loop's start, so it counts for the whole loop, back-edge included.
+`_command_index` steps over a run of these words at the start of an invocation, so
+`git_subcommand`, `switch_target` and `_redirected` see the git that follows. When it meets a
+wrapper (`time`, `sudo` and the rest), it skips that wrapper's options as it does today, and
+then keeps stepping over words. This makes `time ! git …` and `time -p git …` both work.
 
-**What this removes.** Both causes in the Root cause row: the reserved word read as the
-command name, and trust decided from the separator alone.
+Trust follows the separator, as before, with three exceptions narrowed at the user's choice:
+1. **A `!` among an invocation's leading words.** Its switch does not replace `ok`. It only
+   widens it: `ok = here | {target}`. That is because the `&&` after a negated command runs
+   exactly when the command failed.
+2. **A `coproc` among its leading words.** It is treated the same way. `coproc` returns at
+   once and runs the command in the background, as `&` does.
+3. **Everything else follows the separator.** `then`, `do`, `else`, `elif` and the closing
+   words come after `;` or a newline in practice, so they already get every possible branch.
+   A word-led invocation after `&&` keeps `&&` trust. That keeps
+   `git checkout -b feat/x && ! git diff --cached --quiet && git commit -m x` allowed on
+   `main`.
+
+**Loops.** A pre-pass over the segments finds each loop:
+- **Bash loops** run from an invocation whose command word (after leaders and wrappers) is
+  `for`, `while`, `until` or `select`, to its matching `done`.
+- **PowerShell loops** start at a `foreach`, or at a lone `do` invocation followed by a `{`
+  separator (`do { … } while (…)`, where the condition comes after the body). They run to the
+  end of the command.
+
+Every branch switch inside a loop is added to `possible` and `ok` before the loop's first
+segment is judged. "First segment" includes any substitutions round 2 placed in front of the
+loop-start invocation, so a condition such as `while [ -n "$(git commit …)" ]` is judged
+widened too.
+
+This removes both causes in the Root cause row: the reserved word read as the command name,
+and trust that ignored what `!` and `coproc` do to it.
 
 **Rejected:**
-- **Model bash's `if`/`else`/`while`/`until`/`!` logic exactly.** The user chose to play safe.
-- **Have `segments()` split on reserved words as it does on `{`.** It would leave `if` as an
-  empty segment rather than a leader. The `!` and trust information would then have to travel
-  through the separator, which is a public `Segment` field. It also changes `segments`'
+- **Modelling bash's exact `if`/`else`/`while`/`until` logic.** The user chose to play safe.
+- **Treating every word-led invocation as uncertain.** The user narrowed this. It closed no
+  criterion and refused natural `&&` chains.
+- **Having `segments()` split on reserved words.** It would change the public `Segment`
   output for every test that pins tokens.
-- **A loop rule that unrolls the body twice.** It is exact for one back-edge, but fragile with
-  nesting and substitutions. Widening at the loop start is simpler and safe.
+- **Unrolling loop bodies.** Fragile with nesting and substitutions.
 
 ### Modules
 
 | Path | New or changed | Purpose |
 |---|---|---|
-| `.claude/hooks/guard_git.py` | changed | `_COMMAND_LEADERS` widened and shared; `_command_index` steps over it; new private leader and loop helpers; `_judge` plays safe on leaders, `!` and loops; module docstring |
+| `.claude/hooks/guard_git.py` | changed | `_COMMAND_LEADERS` widened and shared; `_command_index` steps over leaders, interleaved with wrappers; private leader and loop helpers; `_judge` handles `!`, `coproc` and loops; module docstring |
 | `tests/test_guard_git.py` | changed | New tests for A1–A6; existing tests untouched |
 | `STRUCTURE.md` | changed | Guard section prose (reserved words, trust, loops) and the tests entry |
 
 ### Public API
 
-No public signature or public constant changes. `segments`, `git_subcommand`,
-`switch_target`, `push_targets_main` and `violation` keep their signatures. Their behaviour
-changes as section 1 says.
+No public signature or constant changes. `segments`, `git_subcommand`, `switch_target`,
+`push_targets_main` and `violation` keep their signatures. Their behaviour changes as section
+1 says.
 
 | Signature | Module | Purpose | Covers |
 |---|---|---|---|
-| `git_subcommand(tokens: tuple[str, ...]) -> tuple[str, tuple[str, ...]]` | `guard_git.py` | Unchanged signature. Finds git after a run of leading reserved words. | A1–A3, A6 |
-| `violation(command: str, branch: str) -> str` | `guard_git.py` | Unchanged signature. Judges invocations led by reserved words as uncertain, a `!`-negated switch as not trusted, and a switch inside a loop as possible across the whole loop. | A1–A7 |
+| `git_subcommand(tokens: tuple[str, ...]) -> tuple[str, tuple[str, ...]]` | `guard_git.py` | Unchanged signature. Finds git after a run of leading reserved words, interleaved with wrappers. | A1–A3, A6 |
+| `violation(command: str, branch: str) -> str` | `guard_git.py` | Unchanged signature. Does not let a `!`- or `coproc`-led switch replace trusted branches, and counts a switch anywhere in a loop for the whole loop. | A1–A7 |
 
-Private and not listed: `_COMMAND_LEADERS` (widened), a helper that reports which leaders an
-invocation starts with, and the loop pre-pass.
+Private and not listed: `_COMMAND_LEADERS` (widened), the leader helper, the loop pre-pass.
 
 ### Implementation guide
 
@@ -195,68 +207,118 @@ invocation starts with, and the loop pre-pass.
    `if git commit -m x; then echo ok; fi` is refused on `main` with the commit reason. Run it
    red, paste the run into section 3, and commit before any production change. If it is
    already green, halt.
-2. **One list.** Widen `_COMMAND_LEADERS` to `if then else elif while until do ! coproc time`
-   and check that `_scan` still places `case` correctly; the existing `case` tests must stay
-   green. Add private `_CLOSERS = frozenset({"fi", "done", "esac"})`.
-3. **`_command_index`.** At the top of its loop, step over a token that is exactly one of
-   `_COMMAND_LEADERS`. Chains such as `if ! git`, `! ! git` and `time ! git` work because the
-   loop continues. `for`, `select`, `case`, `function` and `in` are not stepped over.
-4. **Leader helper.** Add a private helper that returns, for an invocation's tokens, whether
-   a leader or a closer started it and whether a `!` was among the leaders.
+2. **One list.** Widen `_COMMAND_LEADERS` to `if then else elif while until do ! coproc time`.
+   The existing `case` tests must stay green.
+3. **`_command_index`.** Each pass of the loop checks the following, in this order:
+   - an assignment;
+   - a redirection;
+   - a file descriptor;
+   - a wrapper: step it and its `-` options, as today;
+   - a leader other than `time`: step that one token.
+
+   Whatever is not one of these is the command name. `for`, `select`, `case`, `function`
+   and `in` are never stepped over.
+4. **Leader helper.** Add a private helper that walks the same prefix and returns whether a
+   `!` or a `coproc` was among the leading words. A `!` that comes after a wrapper counts too,
+   as in `time ! git checkout …`.
 5. **`_judge` trust.**
-   - For an invocation a leader or closer started, `here` is `possible`, whatever the
-     separator, except that the `SUBSTITUTED` and frame rules from round 2 still apply.
-   - For a switch in an invocation that a `!` led, set `ok = here | {target}`, not `{target}`,
-     and still add the target to `possible` and to every open frame.
-6. **Loop pre-pass.**
-   - Before the main walk, scan the segments and pair loop starts with their `done`. A loop
-     start is an invocation whose first token after any leaders is `for`, `while`, `until`
-     or `select`. `while` and `until` are also leaders, so check them before stepping.
-     Nested loops are paired with a stack.
-   - For each loop, collect the switch targets of the invocations inside it, nested loops
-     and substitution depths included, ignoring redirected switches.
-   - In the main walk, when the walk reaches a loop's first invocation, add those targets to
-     `possible` and to `ok` before judging it.
-   - An unmatched loop start runs to the end of the command. A stray `done` is ignored.
-7. **Docs.** Update the module docstring (reserved words, trust, loops; functions as a known
-   miss) and `STRUCTURE.md`'s guard section and tests entry.
+   - `here` is computed exactly as today: the separator, `SUBSTITUTED` and frame rules are
+     unchanged.
+   - After the checks, for a switch in an invocation the helper marks as `!`- or
+     `coproc`-led, set `ok = here | {target}` rather than `{target}`. Still add the target to
+     `possible` and to every open frame.
+6. **Loop pre-pass.** Before the main walk, find loops:
+   - **Bash loop starts.** An invocation whose command word, after leaders and wrappers, is
+     `for`, `while`, `until` or `select`. For `while` and `until`, which are leaders, check
+     the first leader before stepping over it.
+   - **Bash loop ends.** An invocation whose first token is `done`. A stack pairs nested
+     loops.
+   - **PowerShell loop starts.** An invocation whose command word is `foreach`, or a
+     one-token `do` invocation whose following separator is `{`. These run to the end of the
+     command.
+   - **Unmatched starts and stray ends.** A start with no `done` runs to the end; a `done`
+     with no start is ignored. `do` contributes nothing else.
+   - **The first segment of each loop.** Take the loop-start segment and walk back while the
+     segment before it has a greater depth, which covers the substitutions round 2 placed in
+     front of it.
+   - **Targets.** Collect the switch targets of every segment from that first segment to the
+     loop's end, across depths, ignoring redirected switches.
+   - **Widening.** In the main walk, just before judging a loop's first segment, add its
+     targets to `possible` and to `ok`.
+7. **Docs.** Update the module docstring: reserved words; `!` and `coproc` trust; loops,
+   including PowerShell; and functions as a known miss. Update `STRUCTURE.md`'s guard section
+   and tests entry.
 
 ### Test intents
 
 | # | Must prove | Covers |
 |---|---|---|
 | T1 | `if git commit -m x; then echo ok; fi` is refused on `main`: red before, green after | A1 |
-| T2 | Every A2 form is refused on `main` with the commit reason. The push form is refused from a branch with the push reason. Chained leaders (`if !`, `! !`, `time !`) and a leader after `&&`, `\|\|`, `\|`, `;` and a newline are covered, and so are leaders inside a substitution. | A2 |
-| T3 | The three A3 hidden switches are refused from a branch. `then git checkout feat/z; fi; git commit` from a branch is allowed. | A3 |
-| T4 | The two `!` forms are refused on `main`. The accepted-cost pair is refused on `main` and pinned as deliberate. `git checkout -b feat/x && git commit -m x` is still allowed on `main`. | A4 |
-| T5 | Both A5 loops are refused from a branch. A loop that switches to another branch only, with a commit, is allowed from a branch. Nested loops, a loop inside a substitution and an unmatched `do` are handled without error. | A5 |
-| T6 | Every A6 form keeps its stated outcome. `for`/`select`/`case`/`function`/`in` are not stepped over (`for git in commit` is allowed). The redirected switch after `then` is ignored. | A6 |
-| T7 | The existing suite passes unmodified, and rounds 1 and 2's criteria are re-checked. The differential runs in step 6: baseline `git show 8c5c2b9:.claude/hooks/guard_git.py`, loaded from the scratchpad with `.claude/hooks` on `sys.path` and registered in `sys.modules`. The corpus is every `(command, branch)` the suite passes to `violation`, captured by a scratch plugin with `-p`. Variants prefix each command with `if true; then `, `while true; do `, `! `, `for i in 1; do ` (closing with `; fi`/`; break; done`/`; done` as needed) and `coproc `. Branches are `main` and `feat/x`. The oracle is bash with a `git()` that keeps HEAD in a file, with stdin closed and a timeout, and no hostile nesting sent to bash. Every difference must hold a reserved word at a command position and match the oracle or be the play-safe refusal. | A7 |
+| T2 | Every A2 form is refused on `main` with the commit reason. The push form is refused from a branch. Chained leaders (`if !`, `! !`, `time ! git commit`) and leaders after `&&`, `\|\|`, `\|`, `;` and a newline are covered, as are leaders inside a substitution. `time -p git commit -m x` is refused on `main`. | A2 |
+| T3 | The three A3 hidden switches are refused from a branch. `if true; then git checkout feat/z; fi; git commit -m x` from a branch is allowed. | A3 |
+| T4 | Both `!` forms are refused on `main`. `coproc git checkout -b feat/x && git commit -m x` is refused on `main`. The accepted-cost pair is refused on `main` and pinned. These stay allowed on `main`: `git checkout -b feat/x && git commit -m x`, `git checkout -b feat/x && ! git diff --cached --quiet && git commit -m x`, and `git checkout -b feat/x && time git commit -m x`. | A4 |
+| T5 | Both A5 loops are refused from a branch. So are `while [ -n "$(git commit -m x)" ]; do git checkout main; done` (condition substitution), `foreach ($b in 1,2) { git commit -m x; git checkout main }` and `do { git commit -m x; git checkout main } while ($x)`. A loop that only switches to another branch is allowed. An unmatched loop start widens to the end; a stray `done` is ignored. A loop inside `$( )` whose switch reaches the containing command is refused. | A5 |
+| T6 | Every A6 form keeps its stated outcome. `for`, `select`, `case`, `function` and `in` are not stepped over (`for git in commit` is allowed). The redirected switch after `then` is ignored. | A6 |
+| T7 | See below. | A7 |
+
+T7 in full. The existing suite passes unmodified, and rounds 1 and 2's criteria are
+re-checked. The differential runs at step 6:
+- **Baseline.** `git show 8c5c2b9:.claude/hooks/guard_git.py`, loaded from the scratchpad with
+  `.claude/hooks` on `sys.path` and registered in `sys.modules`.
+- **Corpus.** Every `(command, branch)` the suite passes to `violation`, captured with a
+  scratch `-p` plugin.
+- **Variants.** Prefixes `if true; then `, `while true; do `, `! `, `for i in 1; do ` and
+  `coproc `, closed with `; fi`, `; break; done` or `; done` as needed.
+- **Branches.** `main` and `feat/x`.
+- **What goes to bash.** Only the inputs where the two guards differ. Bash runs with `git()`
+  keeping HEAD in a file, `sudo`, `doas`, `nohup` and `env` shadowed, stdin closed, a timeout,
+  and no hostile nesting. Inputs with PowerShell-only syntax are skipped and listed as not
+  checked by the oracle.
+- **Pass condition.** Every difference holds a reserved word at a command position, and the
+  oracle agrees or the new refusal is play-safe.
 
 ### Risks
 
-- **A word that only looks like a leader.** `then` or `do` appearing as a command name only
-  happens in shell grammar, and the guard steps over them only at an invocation's start, so
-  `echo if git commit` is unaffected. If any existing test changes outcome, halt: A7 says it
-  must not.
-- **PowerShell.** `if ($?) { … }`, `while (…) { … }` and `do { … } while (…)` put `(` or `{`
-  right after the word, and both are separators. The word becomes a one-token invocation and
-  the command after `{` is a fresh segment, as today. The existing PowerShell tests must stay
-  green; if not, halt.
-- **Loops inside substitutions,** or a substitution inside a loop: the pre-pass works on the
-  flat segment list across depths, which may widen more than needed. That direction is safe.
-- **Over-refusal beyond A4's named cost.** For example, `git checkout -b feat/x && if true;
-  then git commit -m x; fi` on `main` is refused. That is the play-safe model the user chose.
-  Record it in section 5 and pin one example. Not a halt.
-- **The cause is elsewhere.** If the build finds an A1–A5 form that stepping over leaders and
-  the trust and loop rules cannot close, halt.
+- **A word that only looks like a leader.** Leaders are stepped over only at an invocation's
+  start, so `echo if git commit` is unaffected. If any existing test changes outcome, halt.
+- **PowerShell.** `if ($?) { … }` and `while (…) { … }` put `(` or `{` after the word, and both
+  are separators. The PowerShell tests must stay green; if not, halt.
+- **Over-widening.** The loop pass works across substitution depths on the flat list, so it may
+  widen more than needed. That direction is safe.
+- **The cause is elsewhere.** If the build finds an A1–A5 form that the leader stepping, the
+  `!`/`coproc` rule and the loop pass cannot close, halt.
 
 ### Coverage
 
-- Every criterion has a Public API entry: A1–A3 and A6 through `git_subcommand`, and all of
-  them through `violation`.
-- Every criterion has a test intent: A1→T1 through A7→T7.
-- Nothing in the Public API lacks a criterion. No new public surface is added.
+- **Every criterion has a Public API entry.** A1–A3 and A6 go through `git_subcommand`, and
+  A1–A7 through `violation`.
+- **Every criterion has a test intent:** A1→T1 through A7→T7.
+- **Nothing in the Public API lacks a criterion.** No new public surface.
+
+### Critique
+
+`plan-critic` verdict: accept with changes. Every finding applied:
+
+1. **`time` stepped as a leader opened `time -p git commit`.** Applied: wrappers are checked
+   before leaders, `time` keeps its option skip, and `time` triggers no trust rule (guide 3,
+   T2, T4).
+2. **A `coproc`-led switch replaced `ok` though it runs in the background.** Applied: treated
+   like `!` (approach, guide 5, T4).
+3. **Loop widening started after a condition's substitutions.** Applied: the first segment
+   walks back over the deeper segments in front of the loop start (guide 6, T5).
+4. **The leader rule was inconsistent with round 2's frames.** Applied by removing the rule
+   that caused it. `here` is unchanged from round 2; only the `ok` update for `!`/`coproc`
+   changes (guide 5).
+5. **The broad leader rule closed nothing and poisoned `&&` chains.** Put to the user, who
+   chose to narrow it. Section 1's Scope and What-this-is wording is updated to match (T4
+   pins the staged-commit chain as allowed).
+6. **PowerShell loops were missed.** Applied: `foreach` and `do { … } while` are loop starts
+   running to the end (guide 6, T5).
+7. **T5 tested an unmatched `do` the pass never reads.** Applied: replaced with an unmatched
+   start, a stray `done`, a condition substitution and a loop inside `$( )`; guide 6 says `do`
+   contributes nothing else.
+8. **T7 did not say what goes to bash.** Applied: only differences, with wrappers shadowed
+   and PowerShell-only inputs listed as not checked.
 
 ---
 
