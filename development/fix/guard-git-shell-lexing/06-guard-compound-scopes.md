@@ -314,6 +314,20 @@ T3 and T4 gained rows, all still covered.
 > planned" is a complete and good entry. On a fix round, also the reproduction test's red
 > run, pasted here before the fix was written — step 6 cites it.
 
+Reproduction, red before the fix (`.venv/bin/pytest tests/test_guard_git.py -k test_violation_refuses_an_or_switch_after_an_if_compound -q`):
+
+```
+>       assert reason.startswith(COMMIT_REASON)
+E       AssertionError: assert False
+E        +  where False = <built-in method startswith of str object at 0xa314a0>('Refused: this would commit to `main`')
+E        +    where <built-in method startswith of str object at 0xa314a0> = ''.startswith
+tests/test_guard_git.py:4798: AssertionError
+FAILED tests/test_guard_git.py::test_violation_refuses_an_or_switch_after_an_if_compound
+1 failed, 1522 deselected in 0.66s
+```
+
+`violation` returned `""` (allowed), the shape the Defect block's Observed row describes.
+
 ---
 
 ## 4. Verification log

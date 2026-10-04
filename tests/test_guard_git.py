@@ -4785,3 +4785,14 @@ def test_violation_keeps_the_answers_of_rounds_1_to_4(
     command: str, branch: str, kind: str
 ) -> None:
     assert_judged(command, branch, kind)
+
+
+# --- round 6: compounds keep an `||` or `!` scope ------------------------------
+
+
+def test_violation_refuses_an_or_switch_after_an_if_compound() -> None:
+    command = "true || if true; then echo; fi | git checkout -b x && git commit -m x"
+
+    reason = violation(command, PROTECTED)
+
+    assert reason.startswith(COMMIT_REASON)
