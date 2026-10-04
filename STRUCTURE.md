@@ -295,7 +295,10 @@ guard is asserted to play safe there:
 
 Round 6 (`development/fix/guard-git-shell-lexing/06-...`) adds the reproduction for compounds, under its
 own heading at the end of the file: `true || if true; then echo; fi | git checkout -b x && git commit -m x`
-refused on `main` instead of allowed. Step 5 extends it.
+refused on `main` instead of allowed. Step 4 adds the reproduction for a closer written with an escape or a
+quote (`true || while false; do :; \done; :; done | git checkout -b x && git commit -m x`, also `d\one`,
+`do''ne`, `f\i`, `es\ac` and `[[ x == \]] && b ]]`, after `true ||` and `!`): sixty rows, each checked in bash
+to land the commit on `main`. Step 5 extends it.
 
 ### `tests/test_plan_state.py`
 
@@ -456,8 +459,19 @@ substitution depth and group level — a newline only where no `||`, `|` or `&&`
 the group or substitution it sits in closes, and only inside it is the switch trusted. A reserved-word compound
 (`if` to `fi`, `case` to `esac`, `while`, `until`, `for` or `select` to `done`, `[[` to `]]`) is a group of its own
 in that key, as `{ }` and `( )` are, so a terminator inside one does not end an operand or `!` scope opened outside
-it, and a `case` pattern's parentheses are the pattern's rather than a group's; an opener with no closer or a closer
-that matches no opener is left out, as bash rejects it. What still cannot be read is refused when it names `commit` or
+it, and a `case` pattern's parentheses (the optional `(` and the first `)` after `in` or after a `;;`, `;&` or `;;&`)
+are the pattern's rather than a group's. `if`, `while` and `until` open one as leaders, chained or not, and `case`,
+`for`, `select` and `[[` as the command word; a `[[` whose `]]` is in the same invocation opens nothing. `fi`, `esac`
+and `done` close one only as the first word of an invocation that follows `;`, a newline, `&` or a `case` clause
+terminator and is not itself a case pattern, and a `]]` token closes an open `[[`. Each substitution depth pairs its
+own, and a substitution's end drops what was open inside it. An opener with no closer, or a closer that does not
+match the innermost open compound, is left out, as bash rejects it; a reserved word written with a quote or a
+backslash anywhere in it (`\done`, `d\one`, `do''ne`, `"done"`) is an ordinary word in bash and neither opens nor
+closes one. A `!` or `coproc` scope is keyed between the compounds its invocation opens: outside an `if`, `while` or
+`until` written before the `!`, and inside one written after it or opened by the command word. So
+`! if true; then echo; fi | git checkout -b feat/x && git commit -m x` keeps the scope past the `fi` and is refused,
+while in `if ! git diff --quiet; then git checkout -b feat/x && git commit -m x; fi` the `;` before `then` ends it
+and the commit is allowed. What still cannot be read is refused when it names `commit` or
 `push` — matched on word boundaries, so `committee` is not a commit — while `main` is
 checked out, and allowed anywhere else.
 
@@ -491,17 +505,19 @@ over-refusals: a misplaced or backslash-escaped leader (`x=1 if`, `\!`) is stepp
 chain's trust, a loop in a subshell runs on; a backslash-escaped operator or bare brace argument that
 PowerShell reads as an operator is refused although bash lands nothing (`echo \; git commit -m x`,
 `git checkout -b x \; && git commit -m x`, `&& echo { &&`), `'!' git checkout -b x && git commit -m x` is
-refused because a command named `!` failing is not modelled, and `coproc NAME {` is read as a group even
-where bash reads `{` as an argument. Known misses: a function is judged where it is
+refused because a command named `!` failing is not modelled, `coproc NAME {` is read as a group even
+where bash reads `{` as an argument, and a `coproc` leading a compound piped into a switch
+(`coproc if true; then :; fi | git checkout -b x && git commit -m x`) is refused although bash commits on `x`. Known misses: a function is judged where it is
 defined, not where it is called; a switch target that is a variable; a redirection on a compound
 command, which bash runs before its body; PowerShell's glued braces and `ForEach-Object` pipelines.
 
 A quoted word is never an operator. The pre-pass writes what `shlex` would throw away into the
 text: inside quotes, and inside an unquoted `${ }`, each of `; & | ( ) { } < >` and the newline
 becomes a private stand-in that stays in its word and is mapped back by `segments`, so `echo ";" x`
-is one invocation and no quoted text reaches an `||` operand or a `!` scope. A word that starts
-with a quote carries a private mark, so `'if'`, `"!"`, `"X=1"` and `'>'` are words and not a
-reserved word, an assignment or a redirection (`'!' git commit -m x` is allowed on `main`), while
+is one invocation and no quoted text reaches an `||` operand or a `!` scope. A word that holds a quote or a
+backslash escape anywhere in it carries a private mark in front of the first one, so `'if'`, `"!"`, `"X=1"`,
+`'>'`, `d\one` and `do''ne` are words and not a reserved word, a compound's closer, an assignment or a
+redirection (`\!` is the one exception, left unmarked because round 3 records it as an over-refusal) (`'!' git commit -m x` is allowed on `main`), while
 `"git" commit` is still git: every comparison of a token's text strips the mark. Three tokens differ
 between bash and PowerShell, so the pre-pass writes the text twice and `violation` judges both
 readings, returning a refusal from either (bash's first). A backslash before an operator character is

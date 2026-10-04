@@ -91,9 +91,23 @@ substitution it sits in closes, and only inside it is the switch trusted. A
 reserved-word compound -- `if` to `fi`, `case` to `esac`, `while`, `until`, `for` or
 `select` to `done`, and a `[[` to its `]]` -- is a group of its own in that key, as
 `{ }` and `( )` are, so a `;` or `&&` written inside one does not end an operand or
-a `!` scope opened outside it; the parentheses of a `case` pattern are the
-pattern's, not a group's. An opener with no closer, and a closer that matches no
-opener, are a syntax error to bash and are left out. A substitution runs on the
+a `!` scope opened outside it; the parentheses of a `case` pattern (the optional
+`(` and the first `)` after `in` or after a `;;`, `;&` or `;;&`) are the pattern's,
+not a group's. `if`, `while` and `until` open one as leaders, chained or not, and
+`case`, `for`, `select` and `[[` as the command word; a `[[` whose `]]` is in the
+same invocation opens nothing. `fi`, `esac` and `done` close one only as the first
+word of an invocation that follows `;`, a newline, `&` or a `case` clause terminator
+and is not itself a case pattern, and a `]]` token closes an open `[[`. Each
+substitution depth pairs its own, and a substitution's end drops what was open
+inside it. An opener with no closer, and a closer that matches no opener, are a
+syntax error to bash and are left out, and so is a reserved word written with a
+quote or a backslash anywhere in it (`\done`, `d\one`, `do''ne`), which bash reads as
+an ordinary word. A `!` or `coproc` scope is keyed between the compounds its
+invocation opens: outside an `if`, `while` or `until` written before the `!`, and
+inside one written after it or opened by the command word, so `! if true; then
+echo; fi | git checkout -b feat/x && git commit -m x` keeps the scope past the `fi`
+and is refused, while in `if ! git diff --quiet; then git checkout -b feat/x && git
+commit -m x; fi` the `;` before `then` ends it. A substitution runs on the
 branches in effect for the command that contains it, and a switch inside it
 counts for that command and for what follows. A switch whose target a
 substitution made (`git checkout "$(echo main)"`) is one only the shell can
@@ -111,10 +125,11 @@ so the pass writes it into the text first: inside quotes, and inside an unquoted
 `${ }`, each of `; & | ( ) { } < >` and the newline becomes a private stand-in
 that `shlex` keeps in its word and `segments` turns back, so `echo ";" x` is one
 invocation and no quoted text reaches an `||` operand or a `!` scope. A word
-that starts with a quote carries a private mark in front, so `'if'`, `"!"`,
-`"X=1"` and `'>'` are words, not a reserved word, an assignment or a
-redirection (`'!' git commit -m x` is allowed on `main`), while `"git" commit`
-is still git: every comparison of a token's text strips the mark. Three tokens
+that holds a quote or a backslash escape anywhere in it carries a private mark in
+front of the first one, so `'if'`, `"!"`, `"X=1"`, `'>'`, `d\one` and `do''ne` are
+words, not a reserved word, a compound's closer, an assignment or a redirection
+(`'!' git commit -m x` is allowed on `main`; `\!` alone is left unmarked, a round 3
+over-refusal), while `"git" commit` is still git: every comparison of a token's text strips the mark. Three tokens
 mean different things to the two shells this hook serves, so the command is read
 twice, once as each, and refused if either reading refuses it (bash's first). A
 backslash before an operator character is part of a word in bash (`\;` is the
@@ -169,8 +184,10 @@ git commit`, `\!`) is stepped over, a compound command ends an `&&` chain's trus
 a loop in a subshell, `(for ...; done); cmd`, runs on, a backslash-escaped operator or bare
 brace argument that PowerShell reads as an operator is refused although bash lands nothing
 (`echo \; git commit -m x`, `git checkout -b x \; && git commit -m x`), `'!' git checkout -b x &&
-git commit -m x` is refused because a command named `!` failing is not modelled, and
-`coproc NAME {` is read as a group even where bash reads `{` as an argument. Known misses: a switch
+git commit -m x` is refused because a command named `!` failing is not modelled,
+`coproc NAME {` is read as a group even where bash reads `{` as an argument, and a
+`coproc` leading a compound piped into a switch (`coproc if true; then :; fi | git
+checkout -b x && git commit -m x`) is refused although bash commits on `x`. Known misses: a switch
 target that is a variable, a redirection on a compound command, which bash runs
 before its body, and PowerShell's glued braces and `ForEach-Object` pipelines.
 Known miss: a function is judged where it is defined, not where it is
@@ -1088,6 +1105,7 @@ def _scan(
     boundary = True  # whether a `#` here would start a word
     word = ""  # the plain text of the word being read
     plain = True  # whether the word is plain text, with no quote or expansion
+    marked = False  # whether the word being read carries the quote mark already
     command_position = True  # whether a word here would be a command's name
     index = start
     length = len(command)
@@ -1135,7 +1153,7 @@ def _scan(
 
     def finish_word() -> None:
         """End the word being read, opening or closing a `case` if it is one."""
-        nonlocal word, plain, command_position
+        nonlocal word, plain, marked, command_position
         if plain and command_position and word == "case":
             cases.append(len(frames))
         elif (
@@ -1150,7 +1168,20 @@ def _scan(
             # A leader opens a command only where a command could start: in
             # `echo if case` the `if` is an argument and `case` is one too.
             command_position = plain and command_position and word in _COMMAND_LEADERS
-        word, plain = "", True
+        word, plain, marked = "", True, False
+
+    def mark() -> None:
+        r"""Flag the word being read as written with a quote or an escape.
+
+        Bash reads a reserved word, an assignment or a redirection only when it
+        is written plain: `\done`, `d\one`, `do''ne` and `"done"` are ordinary
+        words. The mark goes in front of the first quote or escape in the word,
+        wherever that is, and every comparison of a token's text strips it.
+        """
+        nonlocal marked
+        if not marked:
+            out.append(_QUOTE_MARK)
+            marked = True
 
     while index < length:
         _spend(budget)
@@ -1158,8 +1189,6 @@ def _scan(
         pair = command[index : index + 2]
         top = frames[-1] if frames else ""
         in_double = top == "dq"
-        # A quote here opens a word: no text has been read in the current one.
-        starts_word = word == "" and plain and not in_double and top != "brace"
 
         if not in_double and top != "brace":
             if char in _WORD_ENDS or (powershell and char == "\r"):
@@ -1199,9 +1228,15 @@ def _scan(
                 out.append("\\\\")
                 index += 1
             elif not in_double and pair[1:] and pair[1] in _ESCAPED_OPERATORS:
+                mark()
                 out.append(_QUOTED[pair[1]])  # bash: the character is text
                 index += 2
             else:
+                # `\!` stays unmarked: bash runs a command named `!`, but round 3
+                # records stepping over it as an over-refusal, and a leader read
+                # as a leader only ever refuses more.
+                if not in_double and top != "brace" and pair[1:] != "!":
+                    mark()
                 out.append(pair)
                 index += 2
             boundary = False
@@ -1214,8 +1249,8 @@ def _scan(
             if in_double:
                 frames.pop()
             else:
-                if starts_word:
-                    out.append(_QUOTE_MARK)
+                if top != "brace":
+                    mark()
                 frames.append("dq")
             out.append(char)
             index, boundary = index + 1, False
@@ -1301,8 +1336,8 @@ def _scan(
             index, boundary = end, False
         elif char == "'":
             end = _skip_single(command, index)
-            if starts_word:
-                out.append(_QUOTE_MARK)
+            if top != "brace":
+                mark()
             out.append(command[index:end].translate(_QUOTE_TABLE))
             index, boundary = end, False
         elif top == "brace" and char in _QUOTED and char != "}":
