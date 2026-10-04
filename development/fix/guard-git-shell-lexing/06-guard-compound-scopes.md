@@ -48,14 +48,6 @@ What is already on the branch that this round must not break: every acceptance c
 rounds 1 to 5 (step 6 re-checks them), the 1613 guard tests, and in particular the `||` operand
 union, the `!` scope, loop widening, both readings and quoted words.
 
----|---|---|
-
-This round came from recommendation `<R#>` of round `<N>`, which read:
-
-> <the recommendation, quoted from that round's section 8>
-
-What is already on the branch that this round must not break:
-
 ---
 
 ## 1. Concept
