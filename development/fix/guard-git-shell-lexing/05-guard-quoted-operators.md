@@ -1,6 +1,6 @@
 # The git guard never takes a quoted word for an operator
 
-<!-- claude-plan step=5 status=active -->
+<!-- claude-plan step=6 status=active -->
 
 | Field | Value |
 |---|---|
@@ -17,7 +17,7 @@
 | 2 | Plan | `/plan` | with the user | done |
 | 3 | Implement | `/implement` | in `/build` | done |
 | 4 | Verify | `/verify` | in `/build` | done |
-| 5 | Test | `/test` | in `/build` | pending |
+| 5 | Test | `/test` | in `/build` | done |
 | 6 | Concept check | `/concept-check` | in `/build` | pending |
 | 7 | Ship | `/ship` | in `/build` | pending |
 | 8 | Recommend | `/recommend` | with the user | pending |
@@ -555,10 +555,76 @@ No criterion invalidated; no halt. No test changed outcome in the redo beyond th
 
 > Written in step 5: the dynamic half.
 
+Run on the two-readings build (3a1ea9b, verified at 7ed30e4): `.venv/bin/pytest -q` 1613 passed
+(1162 before this step, plus 451 new cases in 62 test functions and parametrizations); `ruff check .`,
+`ruff format --check .` and `mypy` clean. No production change: the tests found no bug in the class.
+Every expectation that failed on first run was a wrong expectation of mine, fixed in the test and
+noted below. Run against 8972524's guard (scratchpad `r5t/basecheck`), 165 of the new tests fail
+and the existing suite passes, so the new tests do exercise the fix.
+
 | Intent | Test names | Result |
 |---|---|---|
+| T1 (A1) | `test_violation_refuses_an_or_switch_after_a_quoted_separator_word` (step 3, unchanged) | red at 0db4f6e, green |
+| T2 (A2) | `test_segments_keeps_a_quoted_operator_word_in_one_invocation` (21), `test_segments_keeps_an_operator_inside_an_unquoted_parameter_in_its_word` (10, incl. `${x:-)}`, `${x:-(}`, `${x:-a\nb}`), `test_segments_still_splits_on_a_real_operator_next_to_a_quoted_one`, `..._labels_the_real_separator_...`, `..._keeps_the_quote_state_through_a_substitution`, `..._still_splits_inside_a_double_quoted_substitution`, `..._reads_a_quoted_heredoc_delimiter_as_one_word`, `..._is_none_for_an_unbalanced_quote_around_an_operator`, `test_violation_refuses_an_or_switch_after_any_quoted_operator_word` (26), `..._a_negated_switch_after_any_quoted_operator_word` (26), `..._allows_the_same_forms_when_main_is_not_checked_out` (26), `..._refuses_the_group_form_of_the_reproduction`, `test_violation_still_ends_an_or_operand_at_a_real_operator` (5), `test_violation_tracks_quoting_around_an_operator` (49) | green; each bash-run |
+| T3 (A3) | `test_segments_returns_the_bash_reading_of_the_shell_dependent_tokens` (15), `test_segments_reads_a_brace_as_a_group_only_where_bash_does` (11), `test_violation_distrusts_a_switch_after_a_shell_dependent_token` (12), `..._refuses_an_or_switch_after_a_shell_dependent_token` (12), `test_violation_refuses_what_a_shell_dependent_token_could_hide` (25), `test_violation_pins_the_both_shell_over_refusals` (13), `test_violation_refuses_a_git_command_inside_a_powershell_scriptblock` (6), `test_violation_counts_a_switch_inside_a_powershell_block` (4) | green; PowerShell rows have no oracle |
+| T4 (A4) | `test_violation_refuses_a_commit_after_an_and_and_carriage_return` (step 3), `test_violation_does_not_trust_an_and_and_before_a_carriage_return` (10), `test_violation_allows_a_quoted_carriage_return_and_one_after_the_last_command` (4), `test_violation_refuses_a_commit_or_push_ended_by_a_carriage_return` (12), `test_violation_refuses_a_commit_after_a_carriage_return_inside_a_word`, `test_segments_reads_a_carriage_return_as_a_word_character` (6) | green |
+| T5 (A5) | `test_violation_allows_a_quoted_leader_on_main` (step 3), `test_violation_allows_a_quoted_word_at_command_position` (8), `test_violation_still_reads_a_quoted_name_as_the_name_it_spells` (27), `test_violation_trusts_a_switch_written_with_quoted_words` (4), `test_git_subcommand_finds_no_git_behind_a_quoted_word_in_command_position` (7), `test_git_subcommand_returns_the_text_without_the_quote_mark` (19), `test_git_subcommand_does_not_change_its_tokens`, `test_git_subcommand_reads_the_quoted_leader_through_segments_as_plain_text`, `test_segments_never_shows_a_stand_in_or_a_quote_mark` (14), `test_segments_blanks_a_forged_private_character` (11), `test_violation_sees_through_a_forged_private_character` (11) | green |
+| A6 / regressions | `test_violation_keeps_the_answers_of_rounds_1_to_4` (19), `test_violation_is_idempotent_for_the_round_5_forms` (5), `test_violation_reads_a_long_run_of_quoted_operators_quickly`, `..._escaped_operators_quickly`, `..._a_long_or_chain_of_quoted_operators_quickly`, `test_violation_plays_safe_when_a_command_is_too_tangled_to_read`; the existing 1162 unmodified apart from the two step 3 rewrites. The T6 differential is step 6's. | green |
+
+### The designers' reports, merged (scratchpad `r5_designer_reports.md`)
+
+Both readers ran against the soft-separator build; their cases are behavioural and were rebuilt
+as tests against the two-readings build, each run in bash. Cases that described the soft
+separator's `segments` output (contract S4, input-space S3 and S9) are superseded: the bash
+reading is pinned instead (`test_segments_returns_the_bash_reading_...`, `..._reads_a_carriage_return_as_a_word_character`, `do { a }` giving `do` then `a }` in `..._reads_a_brace_as_a_group_only_where_bash_does`).
+
+| Case | Applied as |
+|---|---|
+| contract V1, V3; input-space V3 | `test_violation_distrusts_a_switch_after_a_shell_dependent_token`, `HIDDEN_SWITCH_FORMS` (`echo a\;git ...`, `-exec true \;`, `echo x\r git ...`) |
+| contract V2 | same, `echo { git ...` and `echo } git ...` (the `{`/`}` tokens) |
+| contract V4 (A1/A2) | `QUOTED_OPERATOR_SOURCES`, 26 words (the designer's 13 plus `<`, `>`, `${x:-&}`, `${x:-\|}`, `${x:-)}`, `${x:-(}`, `${x:-a\nb}`, `${x:-<}`, `${x:->}`, `${x:-{}`, `"a b;c"`, `'a&&b'`, `""";"`) |
+| contract V5, V6 | `HIDDEN_SWITCH_FORMS` (`{ true \|\| echo \; } \| ...`, `true \|\| echo \; { \| ...`, `{ true \|\| echo ${x:-)} \| ...; }`, `${x:-a\nb}`) |
+| contract V7 | `test_violation_refuses_a_negated_switch_after_any_quoted_operator_word` |
+| contract V8 | `CARRIAGE_RETURN_FORMS`; `git checkout -b x \; && git commit -m x` pinned as a both-shell over-refusal (bash trusts the `&&`) |
+| contract V9, V10; input-space V6, V7 | `QUOTED_WORD_AT_COMMAND_POSITION`, `QUOTED_NAMES_THAT_STILL_COUNT`, `test_violation_trusts_a_switch_written_with_quoted_words` |
+| contract V11, V12; input-space V6 | `QUOTED_NAMES_THAT_STILL_COUNT`; the rows needing a real `sudo`/`env` or git's own `refs/heads/` resolution are marked no-oracle in the comment |
+| contract V13; input-space V13 | `POWERSHELL_SCRIPTBLOCKS`, `test_violation_counts_a_switch_inside_a_powershell_block` |
+| contract V14; input-space V5, S8 | the three forged-character tests, over every private character |
+| contract V15; input-space V8, V9, V10, V11 | `REGRESSION_CASES`, `CARRIAGE_RETURN_ALLOWED`, `CARRIAGE_RETURN_FORMS`, `test_segments_reads_a_quoted_heredoc_delimiter_as_one_word` |
+| input-space V1, V2, V4, V12 | `HIDDEN_SWITCH_FORMS`: `coproc C {`, `time -p {`, `function f {`, `DO {`, `git -c user.name=a\;b commit`, `push -o x\; origin main`, `push -o { origin main` |
+| contract S1, S2, S5, S6, S7, S8; input-space S1, S2, S4, S5, S6, S10 | the `segments` groups above |
+| contract S3; input-space S7 | `test_segments_never_shows_a_stand_in_or_a_quote_mark` |
+| contract G1–G6; input-space G1–G7 | the `git_subcommand` tests; `("DO", "git", "commit")` gives `("", ())` as the designer expected |
+| contradictions: soft separator trusts the switch after it, brace rules, `${...}` mapping, `_judge` comment, docstring "below", `#`-after-CR docstring | resolved by the redo (section 3) and the docs edits of step 4; the tests above pin the new answers |
+| input-space contradiction 5 (give-up path leaves quoted operators unmapped) | not a finding in the sense the designer meant: over budget, the command comes back flagged unmodelled, so on `main` it is refused when it names `commit`/`push` and elsewhere judged unchanged (the pre-round behaviour, documented in `_prepare`). Pinned by `test_violation_plays_safe_when_a_command_is_too_tangled_to_read`, which forces `_scan` to give up because over-budget input needs deep nesting. |
+| contradiction 6 (the Class row's "only ever refuse more") | superseded by the two-readings design; the four pre-redo misses are refused |
+
+Corrections to my first expectations, none a bug: `echo { a; }` yields one invocation (the `}` after the
+`;` closes no group); a `checkout -b x; commit` in a PowerShell block is not main and so allowed; two
+rows of the bash run (`true || echo { true || echo } | ...; }`) were bash syntax errors until the
+trailing `; }` was dropped.
+
+Bash-run sweep (scratchpad `r5t/hunt.py`, not committed): 26 quoted, escaped, brace and CR tokens
+x 19 positions (`||`, `!`, groups, subshells, substitutions, backticks, `if`, a trailing `&`, `#`
+comment, a redirection, `time`) x 4 tails: 1976 commands, 650 of which land a commit on `main` in
+bash and 156 of those 8972524 allows; the guard allows none (0 bypass rows).
 
 Edge cases considered and deliberately skipped, with reasons:
+
+- **Known item, not asserted:** `true || if { true; }; then echo; fi | git checkout -b x && git commit -m x`
+  is allowed by the guard and by 8972524 although bash lands a commit. An `if` list inside an `||`
+  operand ends the operand at its `;`; no quoted, escaped or brace-argument token is involved, so it is
+  outside the class. No test pins the allow. For step 8.
+- **A committed bash oracle:** the tests carry hard-coded expectations verified by hand against bash, not a
+  subprocess oracle; a suite that needs bash 5.2 would not run on the Windows machines the hooks target
+  (round 4's step 8 note stays open).
+- **PowerShell semantics beyond play-safe:** no PowerShell is available, so its rows assert refusal and
+  nothing about what PowerShell would do; the both-shell over-refusals are pinned as such.
+- **`$'...'` ANSI-C strings:** out of scope in section 1; `UNMODELLED_OPENERS` already refuses them on `main`.
+- **Over-budget input with a real oracle:** reaching the budget needs deeply nested input, which the brief
+  rules out; the give-up path is driven by forcing `_scan` to raise.
+- **A quoted `\r` inside a heredoc body or comment:** both are dropped before the stand-ins apply, and
+  rounds 1 and 2 already pin their `\r` outcomes.
 
 ---
 
