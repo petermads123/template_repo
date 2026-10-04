@@ -1,6 +1,6 @@
 # The git guard never takes a quoted word for an operator
 
-<!-- claude-plan step=4 status=active -->
+<!-- claude-plan step=5 status=active -->
 
 | Field | Value |
 |---|---|
@@ -16,7 +16,7 @@
 | 1 | Conceptualize | `/conceptualize` | with the user | done |
 | 2 | Plan | `/plan` | with the user | done |
 | 3 | Implement | `/implement` | in `/build` | done |
-| 4 | Verify | `/verify` | in `/build` | pending |
+| 4 | Verify | `/verify` | in `/build` | done |
 | 5 | Test | `/test` | in `/build` | pending |
 | 6 | Concept check | `/concept-check` | in `/build` | pending |
 | 7 | Ship | `/ship` | in `/build` | pending |
@@ -514,6 +514,32 @@ Section 3's deviations against section 1:
 Note: section 3 lists six bullets; the brief's "five" counts the `\r` heading differently, all six are classified here. Deviation 6 (the brief's deviation 5, `segments` output): `grep` finds no test that calls `segments` on a command with `\r`, and the suite is green, so nothing pins the old separator. Checked live: `segments('a &&\r\nb')` and `segments('a\r\nb')` both give separator `;`. This matches A4 (`&&\r\n` is not trusted) and A6/the soft-separator rule that a soft separator is never trusted; `;` is the widest-set separator, so it can only refuse more. Judgment: consistent, not a criterion change; the public output change is within "a soft separator splits and shows as `;`" now in STRUCTURE.md.
 
 No criterion invalidated; no halt.
+
+### Second verify (after the redo)
+
+Run after step 3 was redone with the two readings (section 3, "Redo after step 5"). The first verify above is kept; its deviation table described the soft separator, and rows 2, 3, 4, 5 and 6 are superseded by the redo (the code no longer has `_SOFT`).
+
+| Check | Result |
+|---|---|
+| `ruff check .` | `All checks passed!` (before and after the docs edits) |
+| `ruff format --check .` | `42 files already formatted` |
+| `mypy` | `Success: no issues found in 11 source files` |
+| `pytest -q` | `1162 passed` (before and after) |
+| Plan completeness | `segments`, `git_subcommand`, `violation` (and `switch_target`, `push_targets_main`) unchanged in signature, as planned; `INLINE_WHITESPACE` is `" \t"` as planned; no unplanned public name (the `_SOFT`, `_group_position`, `_ESCAPED_OPERATORS` and `powershell` flags are all private) |
+| `STRUCTURE.md` | in sync after the auditor's edit below |
+| `python .claude/hooks/guard_git.py` | hook entry point, no showcase; runs with empty stdin, exit 0 |
+
+Structure-auditor (after the redo): no signature drift, no private name leaking, "soft separator" gone everywhere, round 3 Trust bullet and round 5 paragraph match the tests. Applied, each checked against the code: (1) STRUCTURE.md tests entry now says "ahead of the round 2, round 3, round 4 and round 5 sections"; optional: (2) the module docstring's "reads both the same way" now ends "except for the three tokens below", matching the paragraph after it; (3) the `segments` docstring states that a quoted operator character stays in its word, that the bash reading is returned and that no quote mark or stand-in appears in the output; (4) the module docstring's list of unread constructs names `${| cmd; }` as well as `${ cmd; }`.
+
+The redo's three deviations (section 3, "Redo after step 5") against section 1:
+
+| # | Deviation | Invalidates a criterion? |
+|---|---|---|
+| 1 | `coproc echo {` read as a group (bash reads `{` as an argument there); every `\|\|` form built on it still refused, checked in bash | No. Over-refusal on the safe side of A3; the both-shell-safe scope of section 1 holds. |
+| 2 | `_group_position` leaders are case-sensitive in the bash reading while the PowerShell reading keeps every brace-only token a delimiter | No. Each shell's keywords are read in its own reading, and `violation` refuses if either refuses, so A3's `do { } while` and ForEach-Object forms stay refused. |
+| 3 | `true \|\| if { true; }; then echo; fi \| git checkout -b x && git commit -m x` allowed although bash lands a commit; 8972524 allows it too and it has no quoted, escaped or brace-argument token | No. Outside the class section 1 names (a different cause: an `if` list ending an `\|\|` operand), so no criterion promises it and A6 does not cover it; left alone and noted for step 8. |
+
+No criterion invalidated; no halt. No test changed outcome in the redo beyond the two rewrites of the first run (A4, A5).
 
 ---|---|
 | `ruff check .` | |

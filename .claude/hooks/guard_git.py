@@ -25,7 +25,7 @@ a word, not a comment; quotes nest inside `"$( )"`; `<<` inside `$(( ))` or `(( 
 shift, not a heredoc; and an unquoted delimiter lets a backslash-newline join
 the closing line. Constructs it does not read -- `$'...'`, PowerShell
 here-strings, `<# #>` comments, backtick-escaped quotes and bash 5.3's
-`${ cmd; }` -- are not guessed at: while `main` is checked out, a command
+`${ cmd; }` and `${| cmd; }` -- are not guessed at: while `main` is checked out, a command
 carrying one that names `commit` or `push` anywhere, comments and bodies
 included, is refused outright, and elsewhere it is judged as parsed, as
 unreadable input always was.
@@ -174,7 +174,7 @@ shell can resolve leaves the branch unknown rather than unchanged, and a
 `commit` or `push` that meets an unknown branch is refused with a message saying
 so rather than the one about `main`.
 
-It runs for the PowerShell tool as well as Bash, and reads both the same way.
+It runs for the PowerShell tool as well as Bash, and reads both the same way except for the three tokens below.
 The git invocations that matter parse identically in either shell: quoted
 arguments, `;` chains, `{ }` blocks and here-string messages. PowerShell 5.1
 has no `&&`, so there a branch switch never carries into the next command, and
@@ -1444,7 +1444,10 @@ def segments(command: str) -> list[Segment] | None:
         invocation that contains it, which is marked `SUBSTITUTED`; the first of
         them inherits the separator that preceded the containing invocation. A
         substitution that runs nothing leaves no trace. A word that held one
-        reads `_`.
+        reads `_`. A quoted operator character (`";"`, `'&&'`, `'('`) stays in
+        its word, and the bash reading is the one returned (a backslash before
+        an operator character and a carriage return are word characters); no
+        quote mark or private stand-in appears in the output.
     """
     parsed = _segments(command)
     if parsed is None:
