@@ -1,6 +1,6 @@
 # The git guard never takes a quoted word for an operator
 
-<!-- claude-plan step=5 status=active -->
+<!-- claude-plan step=3 status=active -->
 
 | Field | Value |
 |---|---|
@@ -15,8 +15,8 @@
 |---|---|---|---|---|
 | 1 | Conceptualize | `/conceptualize` | with the user | done |
 | 2 | Plan | `/plan` | with the user | done |
-| 3 | Implement | `/implement` | in `/build` | done |
-| 4 | Verify | `/verify` | in `/build` | done |
+| 3 | Implement | `/implement` | in `/build` | in progress |
+| 4 | Verify | `/verify` | in `/build` | in progress |
 | 5 | Test | `/test` | in `/build` | pending |
 | 6 | Concept check | `/concept-check` | in `/build` | pending |
 | 7 | Ship | `/ship` | in `/build` | pending |
@@ -301,6 +301,50 @@ differential runs at step 6:
   `UNMODELLED_OPENERS`; if a PowerShell test changes outcome, halt.
 - **The cause is elsewhere.** If an A1–A4 form stays allowed after the stand-ins are in place for
   a reason other than these two causes, halt.
+
+### Revised at step 5: read the command both ways
+
+Step 5's test designers found that the soft separator of approach item 3 still lets bash land a
+commit on `main`, each confirmed in bash 5.2 with `git` shadowed:
+
+- a switch right after a soft split is trusted although in bash it is an argument:
+  `echo a\;git checkout -b x && git commit -m x` and `echo x\r git checkout -b x && git commit -m x`
+  (both refused at 8972524, so regressions), `echo \; git checkout …`, `echo { git checkout …`,
+  `echo } git checkout …`;
+- a soft split cuts one git command in two: `git -c user.name=a\;b commit -m x`,
+  `git push -o x\; origin main` from a branch;
+- a brace after a soft split, or after `coproc NAME`, `time -p` or `function NAME`, is read
+  wrongly as a group or a word (`{ true || echo \; } | …`, `true || coproc C { true; } | …`,
+  `! time -p { true; } | …`);
+- operator characters inside `${…}` other than `; & | { } < >` (`)`, `(`, a newline) still reach
+  `shlex` raw.
+
+The user chose to replace the soft separator with **two readings** (section 1 unchanged — its
+criteria and the both-shell-safe scope hold, more exactly). `_prepare`/`_scan` produce the text
+twice for the three shell-dependent tokens, and `violation` judges both and returns a refusal if
+either refuses:
+
+- **Bash reading.** A backslash-escaped operator character is a literal word character (its
+  `_QUOTED` stand-in); an unquoted `\r` is a word character (bash runs `$'\r'` as a word, so
+  `&&\r\n` puts a failing command between the `&&` and the newline, and the commit after it is
+  read across a newline); a brace-only token is a real group only where bash reads a reserved
+  word — the first word of a command, after the leaders, after `time` and its options, after
+  `coproc NAME`, or after `function NAME` / `NAME()` — and a word otherwise.
+- **PowerShell reading.** A backslash is an ordinary character and the operator after it is
+  real (`\;` is the word `\` then `;`); an unquoted `\r` is a line break; a bare `{`/`}` after a
+  command word opens or closes a scriptblock, which splits as a group does today.
+- Quoted text (single, double, inside `${…}` — every `_QUOTED` character including `(`, `)` and
+  a newline) is a word in both readings, as already built; the quote marker and `_plain` are
+  unchanged.
+- `_SOFT` is removed. `segments` (public) returns the bash reading; nothing private leaks into
+  it. The budget give-up path applies the same stand-ins to quoted text before it gives up, or
+  plays safe as today.
+
+Guide changes: guide 3's escape and `\r` handling and guide 4–5's soft rules are replaced by the
+two readings above; `violation` runs `_judge` per reading and returns the first refusal (commit,
+push, unresolved order kept within each reading, bash reading first). T3 and T4 keep their
+intents; T2 gains the `${x:-)}`, `${x:-(}` and `${x:-a\nb}` rows; T3 gains every row above; T5 is
+unchanged. The designers' reports are at the scratchpad path named in the step 3 brief.
 
 ### Coverage
 
