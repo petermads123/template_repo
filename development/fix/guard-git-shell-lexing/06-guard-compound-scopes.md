@@ -1,6 +1,6 @@
 # The git guard keeps an `||` or `!` scope across a compound command
 
-<!-- claude-plan step=1 status=active -->
+<!-- claude-plan step=2 status=active -->
 
 | Field | Value |
 |---|---|
@@ -13,7 +13,7 @@
 
 | # | Step | Skill | Runs | Status |
 |---|---|---|---|---|
-| 1 | Conceptualize | `/conceptualize` | with the user | pending |
+| 1 | Conceptualize | `/conceptualize` | with the user | done |
 | 2 | Plan | `/plan` | with the user | pending |
 | 3 | Implement | `/implement` | in `/build` | pending |
 | 4 | Verify | `/verify` | in `/build` | pending |
@@ -27,8 +27,6 @@
 Statuses: `pending`, `in progress`, `done`.
 
 ## Builds on
-
-Opened on a bug report — run `/fix` first.
 
 | Round | File | What it delivered |
 |---|---|---|
@@ -62,64 +60,76 @@ What is already on the branch that this round must not break:
 
 ## 1. Concept
 
-> Written in step 1, agreed with the user before step 2 starts. Prose, not code. Steps 3
-> to 7 run without the user, and the one thing that stops them is a finding that would
-> change this section — so what is not decided here is decided by a halt.
-
 ### Defect
-
-> Fix rounds only — a round 1 that `/fix` opened, or a later round opened on a bug report,
-> whatever its folder is called. Delete this block on a feature round; its presence, filled,
-> is the only thing that marks a round as a fix round to every step after this one. Its
-> starting content is the `/fix` diagnosis, agreed with the user like the rest of section 1
-> and written to disk with it. The root cause is on the halting line: a build that finds a
-> different cause halts rather than fixing what it found.
 
 | Field | Value |
 |---|---|
-| Observed | What happens, quoted from the reproduction. |
-| Expected | What should happen, and what says so — a docstring, a test, an earlier round's criterion. |
-| Reproduction | The exact command or call and its output. Step 3 turns this into the first test and runs it red before fixing. |
-| Root cause | `file.py:NN`, and the decision on that line that is wrong. |
-| Introduced by | The commit, or "older than the history here". |
-| Class | Other inputs the same cause breaks, and the same shape elsewhere in the repo. |
-| Blast radius | Callers of the cause, tests that will move, anything that depends on the current behaviour. |
-| Scope | `this instance` or `the class` — the user's decision, with the reason. What the class holds that is not taken goes under Explicitly out of scope by name. |
+| Observed | `violation("true \|\| if true; then echo; fi \| git checkout -b x && git commit -m x", "main")` returns `""` (allowed). In bash 5.2 with `git` shadowed by a function keeping HEAD in a file (`PATH=/usr/bin:/bin`, the oracle shown live by a plain commit), it prints `COMMIT on main`. |
+| Expected | Refused with the commit reason. Round 4's criteria and STRUCTURE.md promise an `\|\|` operand runs "to the next `&&`, `;`, `&`, newline or `case` clause terminator at its own substitution depth and group level", and a `!` scope likewise; a `;` inside a compound command is not at the operand's level. |
+| Reproduction | The call above. Also allowed, all `COMMIT on main` in bash (scratchpad `r6_class.py`, 18 rows): each of `if true; then echo; fi`, `if { true; }; then echo; fi`, `case a in a) :;; esac`, `case a in (a) :;; esac`, `while false; do :; done`, `until true; do :; done`, `for i in 1; do :; done`, `select i in; do :; done`, `[[ a && b ]]` and `{ case a in a) :;; esac; }` in `true \|\| <C> \| git checkout -b x && git commit -m x` and in `! <C> \| git checkout -b feat/x && git commit -m x` (feat/x exists). Refused correctly today: `{ true; }`, `(true; true)`, `{ if true; then :; fi; }`, `(( 1 && 1 ))`, `f() { :; }`, `[[ a \|\| b ]]`. |
+| Root cause | `.claude/hooks/guard_git.py:1930–1935` (`_walk_run`): the per-level group count `nest` moves only on the `(`/`{` and `)`/`}` operators of a segment's run. Reserved-word compounds (`if…fi`, `case…esac`, `while`/`until`/`for`/`select…done`) and `[[ … ]]` sit in segment tokens, not in runs, so the walk opens no level for them; a `;`, `;;`, newline or `&&` inside one lands on the same (depth, group) key as an `\|\|` operand or `!` scope opened outside it, and `close()` ends that scope there. A `case` pattern's `)` reaches the run as `)` and lowers `nest` (`{ case a in a) :;; esac; }`, `( case … )`). Site: `_judge`'s switch update (`ok = {target}`, `:2046`), which then trusts the switch piped after the compound. |
+| Introduced by | Round 4 (1a498a8 and its step 5 changes), which introduced the keyed operand and scope; 43eeea3 and 8972524 allow these forms too. Not a regression of a working guard: before round 4 every `\|\|` form was allowed. |
+| Class | Every reserved-word compound and `[[ ]]` anywhere inside an `\|\|` operand or a `!` scope: as the first command, as a later pipeline stage (`true \|\| git status \| case … esac \| …`), after a leader (`time if …`), with a redirection after the closer (`fi 2>/dev/null \|`), before `\|&`, written across lines (`if true\nthen :\nfi \| …`), inside `$( )`, nested; a `case` pattern's `)` inside `{ }` or `( )`. Not in the class (refused, by structure): function definitions, `(( && ))` (its `((` arrives as two `(`), `[[ a ]]` with no operator inside. Same shape elsewhere: round 3's `_loop_ranges` pairs loop words with `done` but has no `if`/`case`/`[[` pairing — a pattern to copy, not a range to reuse. PowerShell's reading runs the same walk but braces are groups there; a bypass needs both readings to allow, so the bash reading is the one to fix. |
+| Blast radius | `_walk_run` and `_judge` only. Pins that constrain the fix: `tests/test_guard_git.py:3778` (`test_violation_ends_a_scope_at_a_case_clause_terminator`: `;;`, `;&`, `;;&` still end an `\|\|` or `!` scope opened inside a clause body) and the `RUN_PINS` row `"case x in a) b ;; c) d ;; esac"` (the pattern `)` pinned as a run operator; a fix in how `_walk_run` reads it does not flip it, a fix in `_segments` would). Round 3's "a compound command ends an `&&` chain's trust" over-refusals come from `_judge`'s `ok = set(here)` on the `fi`/`done` segment, not from `_walk_run`, so a fix confined to the scope keys leaves them as they are. Nothing depends on the wrong answer. |
+| Scope | `the class`, plus a committed pure-Python container matrix test — the user's choice: the same cause in every position, and a matrix that needs no bash (so it runs on the Windows targets) is what would have caught this before it shipped. |
 
-Critique — the `diagnosis-critic`'s findings and what was done with each:
+Critique — the `diagnosis-critic`'s findings and what was done with each (verdict: cause confirmed, class incomplete):
+
+1. **The class is wider: a later pipeline stage, `\|&`, a leader, a redirection after the closer, newline-written forms, inside `$( )`, `( case … )`, and the `!` form in a group.** Applied: Class row and A2/A3.
+2. **Two pins constrain the fix (`:3778`, the `RUN_PINS` case row); round 3's compound over-refusals come from `_judge`, not `_walk_run`.** Applied: Blast radius and A4.
+3. **`_loop_ranges` is a pattern, not a range to reuse; `if a && b; then` conditions do not bypass; PowerShell needs no change; `coproc <C> \| …` lands on the switch target in bash.** Applied: Class row and A4.
 
 ### What this is
 
+A compound command written with reserved words — `if … fi`, `case … esac`, `while`/`until`/`for`/
+`select … done` — and `[[ … ]]` become groups of their own in the key that `||` operands and
+`!`/`coproc` scopes use, exactly as `{ … }` and `( … )` already are, so a terminator inside one no
+longer ends a scope opened outside it, and a `case` pattern's `)` no longer counts as a group close.
+The fix removes the cause at `_walk_run` (`:1930–1935`), where the group level moves only on
+brackets. A committed matrix of scope openers against every construct that can hold a list
+terminator guards the whole family without needing bash.
+
 ### Why it is worth building
+
+See the Defect block: a silent commit to `main` in ordinary shell, against the rule `CLAUDE.md`
+sets and the guard exists to enforce.
 
 ### Inputs and outputs
 
+Unchanged: `violation(command, branch)` takes the command line and the checked-out branch and
+returns a refusal reason or `""`. Only which commands are refused changes.
+
 ### How it connects to the rest of the repo
 
-Which existing modules it calls, which call it, what it does not touch.
+Changes `_walk_run` and the run walk in `_judge` (and, if the plan needs it, what `_segments`
+records) in `.claude/hooks/guard_git.py`; `guard_git.main` (the `PreToolUse` hook) calls it through
+`violation`. Tests in `tests/test_guard_git.py`; prose in the module docstring and STRUCTURE.md's
+guard section. No other hook touches it.
 
 ### Explicitly out of scope
 
-### Acceptance criteria
+Recorded in the plan file, not in `DEVELOPMENT.md` (the user's instruction):
 
-> Numbered, observable, and phrased so that step 6 can mark each one met or not met.
-> These are the contract. Step 2 plans against them, step 5 tests them, step 6 audits
-> against them. If a criterion cannot be observed from outside the code, rewrite it.
->
-> On a fix round the first criterion is the reproduction passing — "Given <the
-> reproduction's input>, <expected> rather than <observed>" — and the last is that nothing
-> else changed, phrased so step 6 can evidence it with more than a green suite. If the
-> scope is `the class`, each input in the class gets its own row.
+- modelling bash's actual `if`/`while` logic (round 3's play-safe choice stands);
+- the recorded misses of rounds 1–5 (hex-escape and split-quote subcommand, lone `'` in a quoted
+  `${ }`, variable switch target, compound redirection order, PowerShell glued braces and
+  `ForEach-Object`, the `coproc`/`&` loop race, unlisted wrappers, functions judged where defined);
+- the over-refusal of `[[ a || b ]] | …`, which only refuses more.
+
+### Acceptance criteria
 
 | # | The finished feature... |
 |---|---|
-| A1 | |
-| A2 | |
+| A1 | Given `true \|\| if true; then echo; fi \| git checkout -b x && git commit -m x` with `main` checked out, `violation` refuses with the commit reason rather than returning `""`. |
+| A2 | Every reserved-word compound and `[[ && ]]` inside an `\|\|` operand is refused on `main` in every position: first, a later pipeline stage, after `time`, with a redirection after the closer, before `\|&`, written across lines, and inside `$( )` — covering `if … fi` (also `if { true; }; then`), `case … esac` with `a)` and `(a)` patterns, `while`, `until`, `for` and `select … done`, and `[[ a && b ]]`. |
+| A3 | The same compounds after `!` (`! <C> \| git checkout -b feat/x && git commit -m x`, feat/x existing) are refused on `main`; `{ case a in a) :;; esac; } \| …` and `( case a in a) :;; esac ) \| …` after `\|\|` or `!` are refused. |
+| A4 | These keep their outcome: create-or-switch allowed; `true \|\| { git checkout -b x && git commit -m x; }` allowed; `;;`, `;&`, `;;&` still end an `\|\|` or `!` scope opened inside a clause body (`:3778`); round 3's compound `&&` over-refusals (`git checkout -b feat/x && if true; then :; fi && git commit -m x`, `&& for … done &&`) still refused; the `coproc <C> \| …` forms unchanged; `(( 1 && 1 ))`, `{ true; }`, `(true; true)` and function definitions still refused. |
+| A5 | A committed test, pure Python with no bash, crosses each scope opener (`true \|\|`, `false \|\|`, `!`) with each construct that holds a list terminator — `{ ; }`, `( ; )`, `$( ; )`, backticks, `if … fi`, `case … esac` with `a)` and `(a)` patterns, `while`/`until`/`for`/`select … done`, `[[ && ]]`, `(( && ))`, `f() { ; }` — bare and wrapped in `{ }`, and asserts `<opener> <construct> \| git checkout -b x && git commit -m x` is refused on `main` and allowed from another branch. |
+| A6 | Nothing else changed: the existing 1613 tests pass unmodified and rounds 1–5's criteria still hold; a differential against the guard at 6f05520 over the suite's commands with compounds inserted sends every differing row to bash with `git` shadowed — the oracle first shown live by a plain commit landing on `main` — and every difference involves a reserved-word compound or `[[ ]]`, with the oracle agreeing or the new refusal play-safe, and zero rows where the new guard allows a commit or push that bash lands on `main`. |
 
 ### Open questions
 
-> Must be empty before step 2 begins. An unanswered question here is a decision being
-> made by accident later — and nobody is watching when it happens.
+None.
 
 ---
 
