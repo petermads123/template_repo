@@ -345,6 +345,23 @@ choice and T2, T3, T5 and T6 changed with them, all still covered.
 > planned" is a complete and good entry. On a fix round, also the reproduction test's red
 > run, pasted here before the fix was written — step 6 cites it.
 
+### Reproduction, red (before any production change)
+
+`.venv/bin/pytest -q tests/test_guard_git.py -k test_violation_refuses_an_or_switch_after_a_quoted_separator_word`
+
+```
+>       assert reason.startswith(COMMIT_REASON)
+E       AssertionError: assert False
+E        +  where False = <built-in method startswith of str object at 0xa314a0>('Refused: this would commit to `main`')
+E        +    where <built-in method startswith of str object at 0xa314a0> = ''.startswith
+
+tests/test_guard_git.py:3884: AssertionError
+FAILED tests/test_guard_git.py::test_violation_refuses_an_or_switch_after_a_quoted_separator_word
+====================== 1 failed, 1070 deselected in 0.52s ======================
+```
+
+`violation(...)` returned `""` (allowed), as the Defect block's Observed row says.
+
 ---
 
 ## 4. Verification log

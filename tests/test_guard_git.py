@@ -3871,3 +3871,14 @@ def test_segments_gives_the_same_segments_with_and_without_runs(command: str) ->
 
     assert with_runs == guard_git._segments(command)
     assert with_runs is None or len(runs) == len(with_runs)
+
+
+# --- round 5: quoted words are never operators --------------------------------
+
+
+def test_violation_refuses_an_or_switch_after_a_quoted_separator_word() -> None:
+    command = 'true || echo ";" | git checkout -b x && git commit -m x'
+
+    reason = violation(command, PROTECTED)
+
+    assert reason.startswith(COMMIT_REASON)
