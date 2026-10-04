@@ -4796,3 +4796,39 @@ def test_violation_refuses_an_or_switch_after_an_if_compound() -> None:
     reason = violation(command, PROTECTED)
 
     assert reason.startswith(COMMIT_REASON)
+
+
+# bash reads a reserved word as one only when it is written plain: a backslash or a
+# quote anywhere in the word makes it an ordinary command, so the compound goes on
+# and the `git checkout -b` that follows it still runs after the `||` failed.
+ESCAPED_CLOSER_BODIES = [
+    *(
+        f"{opener} {head}; :; {word}; :; done"
+        for opener, head in (
+            ("while", "false; do"),
+            ("until", "true; do"),
+            ("for", "i in 1; do"),
+            ("select", "i in; do"),
+        )
+        for word in (r"\done", r"d\one", "do''ne", 'd"o"ne', r"do\ne")
+    ),
+    *(
+        f"if true; then :; {word}; :; fi"
+        for word in (r"\fi", r"f\i", "f''i", 'f"i"')
+    ),
+    *(f"case a in a) :; {word}; :;; esac" for word in (r"\esac", r"es\ac", "es''ac")),
+    *(f"[[ x == {word} && b ]]" for word in (r"\]]", r"]\]", "]''']")),
+]
+
+
+@pytest.mark.parametrize("body", ESCAPED_CLOSER_BODIES)
+@pytest.mark.parametrize(
+    ("opener", "target"), [("true ||", "x"), ("!", "feat/x")], ids=["or", "bang"]
+)
+def test_violation_refuses_a_switch_after_a_compound_with_an_escaped_closer(
+    body: str, opener: str, target: str
+) -> None:
+    command = f"{opener} {body} | git checkout -b {target} && git commit -m x"
+
+    assert violation(command, PROTECTED).startswith(COMMIT_REASON)
+    assert violation(command, "feat/y") == ""
