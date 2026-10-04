@@ -1,6 +1,6 @@
 # The git guard keeps an `||` or `!` scope across a compound command
 
-<!-- claude-plan step=5 status=active -->
+<!-- claude-plan step=6 status=active -->
 
 | Field | Value |
 |---|---|
@@ -17,7 +17,7 @@
 | 2 | Plan | `/plan` | with the user | done |
 | 3 | Implement | `/implement` | in `/build` | done |
 | 4 | Verify | `/verify` | in `/build` | done |
-| 5 | Test | `/test` | in `/build` | pending |
+| 5 | Test | `/test` | in `/build` | done |
 | 6 | Concept check | `/concept-check` | in `/build` | pending |
 | 7 | Ship | `/ship` | in `/build` | pending |
 | 8 | Recommend | `/recommend` | with the user | pending |
@@ -387,8 +387,28 @@ Oracle evidence after the fix (scratchpad `r6b/`): `esc.py`, 84 rows (7 `done` s
 
 | Intent | Test names | Result |
 |---|---|---|
+| T1 (A1) | `test_violation_refuses_an_or_switch_after_an_if_compound` (the step 3 reproduction, unchanged: red in section 3, green) | pass |
+| T2 (A2) | `test_violation_refuses_these_scope_commands_on_main_and_not_elsewhere` (20), `test_violation_refuses_a_switch_after_a_double_bracket_test` (27), `test_violation_refuses_a_switch_after_chained_leaders_and_a_timed_loop` (30), `test_violation_refuses_a_switch_after_a_timed_compound_before_either_pipe` (4), `test_violation_refuses_a_push_of_head_after_a_compound_in_a_scope` (36), `test_violation_refuses_a_switch_after_a_compound_with_an_escaped_closer` (60, step 4) | pass |
+| T3 (A3) | `test_violation_reads_a_case_patterns_parentheses_as_the_patterns` (36), `test_violation_refuses_a_switch_after_a_compound_closed_by_a_brace` (12), the `!` rows of the T2 tests | pass |
+| T4 (A4) | `test_violation_still_allows_these_scope_commands` (15), `test_violation_refuses_a_switch_after_a_coproc_compound` (39), `test_pairing_reports_a_command_it_could_not_pair` (20), `test_violation_trusts_no_switch_in_a_command_whose_compounds_do_not_pair` (20), `test_violation_trusts_the_same_switch_when_the_compounds_do_pair`, `test_violation_does_not_apply_the_pairing_net_to_the_powershell_reading`; the 1613 earlier tests unmodified (`:3778` and `RUN_PINS` among them) | pass |
+| T5 (A5) | `test_violation_refuses_a_scope_opener_before_every_container_construct` (198 rows, pure Python); `test_violation_judges_deeply_nested_compounds_quickly` (6) | pass |
+| Reader findings (thirteen confirmed bypasses) | `test_violation_refuses_a_switch_after_a_compound_holding_a_misplaced_opener` (96), `..._after_a_closer_that_follows_a_group_or_a_closer` (69), `..._after_a_case_with_an_empty_last_clause` (36), `test_pairing_finds_a_partner_for_every_opener_and_closer_in_a_valid_compound` (107), `test_group_position_reads_a_brace_after_closing_words_as_a_group` / `..._after_an_argument_as_a_word` (4 each), `test_violation_reads_a_brace_after_a_closer_as_a_group_in_the_bash_reading` (12), the escaped-bang tests (`test_segments_shows_an_escaped_bang_as_a_bang_without_its_mark`, `test_pairing_does_not_open_a_compound_after_an_escaped_bang`, `test_a_forged_bang_mark_is_blanked_before_it_can_make_a_leader`, `test_violation_still_steps_over_an_escaped_bang_as_a_leader`), `test_violation_keeps_the_answers_of_rounds_1_to_4` (19) | pass |
+| T6 (A6) | Existing suite unmodified (no removed line in `tests/test_guard_git.py` against dc1e629); the differential against 6f05520 is step 6's | pass; differential pending |
+
+Run: `ruff check .` clean, `ruff format --check .` clean, `mypy` clean, `pytest -q` 2476 passed (1674 after step 4, plus 802 in step 5).
+
+Readers: the `input-space` and `contract` test-designers plus the orchestrator's bash check (`r6_designer_reports.md`).
+All thirteen bypasses the check confirmed were real and inside A2/A3 (the Root cause row's class), so each was a bug to fix in place, red first (186 rows, 9386579), not a halt:
+the production changes are in section 3, Step 5 changes. Contradictions they found, all resolved in the docstrings and STRUCTURE.md: misplaced openers read as bypass not over-refusal; closers valid after `)`, `}` and another closer; `coproc NAME <compound>`; `_group_position` after a closing word; "no opener" versus "not the innermost". Every other designer case (contract 6-15, input-space 5-11) was re-run through the guard and bash in this step (`r6t/dcheck.py`, 124 rows): all agree, and each already has a test of the same shape; the one disagreement was a mis-built row of mine (the backtick form `echo \`true || if ...\``: bash prints nothing because the inner output is captured, the guard refuses, play-safe).
+
+Sweep (scratchpad `r6t/sweep.py`, bash 5.2, `git` shadowed by a function keeping HEAD in a file, an empty checkout argument failing, `PATH=/usr/bin:/bin`, stdin closed, 5 s timeout, the oracle shown live first by a plain commit printing `COMMIT on main`): 14 compound kinds (`if`, `while`, `until`, `for`, `select`, three `case` forms, `[[ ]]`, `{ }`, `( )`, `(( ))`, a function, a substitution) x 16 opener spellings (bare, assignment, redirection, backslash, wrappers, `time`, `!`, `coproc`, `\!`, quoted) x 3 closer spellings (bare, `\closer`, `'closer'`) x 11 host positions (bare, in `if`/`while` bodies with `;` or a closer written straight after, in `{ }`, `( )`, `case` clauses, with a redirection, in a substitution) x 7 scopes (`true ||`, `false ||`, `!`, `true || git status |`, `true || time`, `true || !`, `{ true ||`) x 3 tails (`|`, newline `|`, `|&`): 115,416 rows, bash lands on `main` in 12,156, guard allows 0 of those (the bypass count); 88,710 over-refusals (bash lands nothing, guard refuses), 14,550 allowed where bash lands nothing, 0 errors. The same figure in the earlier run (11:39) and in this one.
 
 Edge cases considered and deliberately skipped, with reasons:
+
+- A `[[ ... ]]` split across a `$( )` boundary or a `case` terminator: bash rejects it; covered by the unpaired shapes of `test_pairing_reports_a_command_it_could_not_pair`.
+- PowerShell `if (...) { }` and `foreach`: braces are groups already, and the pairing net is exempt for that reading; one pin (`test_violation_does_not_apply_the_pairing_net_to_the_powershell_reading`).
+- Compounds deeper than the five-thousand-link limits of round 5: covered by the depth test (2000 nested `case` and `if`, 3000 unclosed `[[`, 5000 stray closers) rather than repeated.
+- Compounds with a redirection before the body (`fi >f`), function bodies called later, and variable branch targets: recorded misses of earlier rounds (section 1, out of scope).
 
 ---
 
