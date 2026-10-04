@@ -160,8 +160,12 @@ bash reads one: not after `|`, not ahead of a case pattern's `)`, and not at all
 when the command writes a quoted `done`, which a tokenizer cannot tell from the
 word, so every loop then runs on. A `do {` inside a bash loop is bash's. Known
 over-refusals, kept: a misplaced or backslash-escaped leader (`x=1 if
-git commit`, `\!`) is stepped over, a compound command ends an `&&` chain's trust, and
-a loop in a subshell, `(for ...; done); cmd`, runs on. Known misses: a switch
+git commit`, `\!`) is stepped over, a compound command ends an `&&` chain's trust,
+a loop in a subshell, `(for ...; done); cmd`, runs on, a backslash-escaped operator or bare
+brace argument that PowerShell reads as an operator is refused although bash lands nothing
+(`echo \; git commit -m x`, `git checkout -b x \; && git commit -m x`), `'!' git checkout -b x &&
+git commit -m x` is refused because a command named `!` failing is not modelled, and
+`coproc NAME {` is read as a group even where bash reads `{` as an argument. Known misses: a switch
 target that is a variable, a redirection on a compound command, which bash runs
 before its body, and PowerShell's glued braces and `ForEach-Object` pipelines.
 Known miss: a function is judged where it is defined, not where it is

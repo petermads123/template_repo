@@ -264,16 +264,16 @@ guard is asserted to play safe there:
   `\r` in a word; no stand-in or quote mark appears in any token or separator, and every private character in
   the input is blanked, in `segments` and in `violation` (a forged `if`, a split `git`, a split push option).
 - **The `||` operand and the `!` scope** -- the reproduction row's twenty-six quoted or `${...}` words refused
-  after `true || echo W | git checkout -b x && git commit -m x`, six after `! true | echo W | ...`, allowed from
+  after `true || echo W | git checkout -b x && git commit -m x`, all twenty-six again after `! true | echo W | git checkout -b feat/x && ...`, allowed from
   another branch, plus the group form `{ true || echo } | ...; }`; a real `;` or `&&` beside a quoted one still
   ends the operand (five allowed forms).
 - **Shell-dependent tokens, both readings** -- twelve tokens (`\;`, `\&`, `\|`, `\(`, `\)`, `\{`, `\<`, `{`, `}`,
   `{}`, `}}`, `{ }`) after `echo` ahead of a switch and after an `||`; the readers' regressions (an escaped
   `;` glued to a word, `-exec true \;`, a carriage return in a word, a brace after a soft split, `coproc C {`,
-  `time -p {`, `function f {`, a cased `DO {`, `${x:-)}` and `${x:-a\nb}`, a split through `git -c a=b\;c` and
-  `push -o x\; origin main`); the over-refusals pinned on purpose (bash lands nothing, PowerShell reads the
-  token as an operator); and the PowerShell scriptblocks (`ForEach-Object { }`, `Invoke-Command`, `Start-Job`,
-  `% { }`, `try { }`, `{ git commit; }`, a `Do { } While` and `foreach` block counting a switch), asserted
+  `time -p {`, `function f {`, a cased `DO {`, `${x:-)}` and `${x:-a\nb}`, a split through `git -c user.name=a\;b commit` and
+  `push -o x\; origin main`); the thirteen over-refusals pinned on purpose (bash lands nothing; PowerShell reads the
+  token as an operator, or the guard does not model a command that fails); and the PowerShell scriptblocks (`ForEach-Object { }`, `Invoke-Command`, `Start-Job`,
+  `% { }`, `try { }`, a `Do { } While` and `foreach` block counting a switch), asserted
   refused with no oracle.
 - **Carriage return** -- `&&\r\n`, `&&\r\n\r\n`, `&& \r\n` and a backslash-CR continuation refused on `main`; a
   commit or push ended by `\r`, `\r\n` or ` \r\n` refused; a quoted `\r` and one after the last command
@@ -290,7 +290,7 @@ guard is asserted to play safe there:
   `&&`, `(` and `{`, `"$(git commit -m x)"`, the pipeline's own heredoc commit, quoted and escaped heredoc
   delimiters, `${x:-a; git commit -m x; }`, the `||` rules and three `!` forms with a quoted operator.
 - **Limits** -- four thousand quoted or escaped operators in one command and a two-thousand-link `||` chain
-  finish quickly; a command too tangled to read (`_scan` forced to give up) is refused on `main` when it names
+  finish quickly; a command too tangled to read (the pre-pass forced to give up) is refused on `main` when it names
   `commit` or `push` and allowed otherwise; the round 5 forms give the same answer twice.
 
 ### `tests/test_plan_state.py`
@@ -480,7 +480,11 @@ switch anywhere in a loop counts for all of it — bash loops from `for`, `selec
 loop only where bash reads one — not after `|`, not ahead of a case pattern's `)`, and not at all
 when the command writes a quoted `done` — and a `do {` inside a bash loop is bash's. Known
 over-refusals: a misplaced or backslash-escaped leader (`x=1 if`, `\!`) is stepped over, a compound command ends an `&&`
-chain's trust, a loop in a subshell runs on. Known misses: a function is judged where it is
+chain's trust, a loop in a subshell runs on; a backslash-escaped operator or bare brace argument that
+PowerShell reads as an operator is refused although bash lands nothing (`echo \; git commit -m x`,
+`git checkout -b x \; && git commit -m x`, `&& echo { &&`), `'!' git checkout -b x && git commit -m x` is
+refused because a command named `!` failing is not modelled, and `coproc NAME {` is read as a group even
+where bash reads `{` as an argument. Known misses: a function is judged where it is
 defined, not where it is called; a switch target that is a variable; a redirection on a compound
 command, which bash runs before its body; PowerShell's glued braces and `ForEach-Object` pipelines.
 
