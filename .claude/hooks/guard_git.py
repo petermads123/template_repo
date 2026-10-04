@@ -222,30 +222,26 @@ _QUOTED = {char: chr(0xE001 + number) for number, char in enumerate(_QUOTED_CHAR
 _QUOTE_TABLE = str.maketrans(_QUOTED)
 _UNQUOTE_TABLE = str.maketrans({stand_in: char for char, stand_in in _QUOTED.items()})
 
-#: Stands where a token is an operator in one shell and a word in the other: a
-#: backslash before an operator character, and a carriage return. It splits the
-#: command, as the PowerShell reading would, but is never trusted, never ends an
-#: `||` operand or a `!` scope and never changes a group level, as the bash
-#: reading requires.
-_SOFT = "\ue00b"
-
 #: Characters that follow a backslash in a word that bash reads as one word and
-#: PowerShell as a separator, or the other way about.
-_SOFT_ESCAPED = ";&|(){}<>\r"
+#: PowerShell as a separator: the bash reading writes the stand-in of the
+#: character, the PowerShell reading keeps the backslash as a character of its
+#: own and the operator real. A carriage return follows the same split (a word
+#: character in one reading, a line break in the other) but needs no backslash.
+_ESCAPED_OPERATORS = ";&|(){}<>"
 
 #: Every private character `_prepare` blanks in its input, so a command cannot
 #: forge one.
-_PRIVATE = (_OPEN, _CLOSE, _PLACEHOLDER, _QUOTE_MARK, _SOFT, *_QUOTED.values())
+_PRIVATE = (_OPEN, _CLOSE, _PLACEHOLDER, _QUOTE_MARK, *_QUOTED.values())
 
 #: Characters `shlex` emits as tokens of their own rather than folding into a
 #: word. The default set plus the newline, which would otherwise be whitespace
-#: and would silently join two commands written on two lines into one, and the
-#: soft separator.
-PUNCTUATION_CHARS = "();<>|&\n" + _OPEN + _CLOSE + _SOFT
+#: and would silently join two commands written on two lines into one.
+PUNCTUATION_CHARS = "();<>|&\n" + _OPEN + _CLOSE
 
 #: Whitespace, minus the newline that `PUNCTUATION_CHARS` claims. A carriage
-#: return is not whitespace: bash reads it as a word character, so `&&\r\n` runs
-#: a command named `\r`, and PowerShell reads it as a line break.
+#: return is not whitespace: the bash reading takes it for a word character, so
+#: `&&\r\n` runs a command named `\r`, and the PowerShell reading turns it into a
+#: line break before `shlex` sees it.
 INLINE_WHITESPACE = " \t"
 
 #: Tokens that end one invocation and begin the next.
@@ -257,7 +253,7 @@ SEPARATORS = frozenset({"&&", "||", ";", "|", "&"})
 #: The grouping delimiters are here too: they begin and end a command list, so
 #: `(git commit)` has to split rather than leave `(` sitting where the command
 #: name should be, which would hide the `git` behind it.
-SEPARATOR_CHARS = frozenset("&|;\n(){}" + _OPEN + _CLOSE + _SOFT)
+SEPARATOR_CHARS = frozenset("&|;\n(){}" + _OPEN + _CLOSE)
 
 #: The one separator whose right side runs only if its left side succeeded, so
 #: a branch switch before it can be trusted to have taken effect.
@@ -414,12 +410,8 @@ def _governs(token: str) -> str:
     Returns:
         The governing separator. A run containing `&&` keeps its guarantee,
         since an `&&` written at the end of a line still only runs its right
-        side if the left side succeeded -- unless it holds a soft separator:
-        `&&\r\n` runs a command named `\r` in bash, so nothing across it is
-        trusted and the run governs as `;`.
+        side if the left side succeeded.
     """
-    if _SOFT in token:
-        return ";"
     if GUARANTEEING in token:
         return GUARANTEEING
     stripped = token.strip("\n")
@@ -851,7 +843,7 @@ def _quoted_end(text: str, start: int) -> int | None:
 
 
 def _body_substitutions(
-    body: str, nesting: int, budget: list[int]
+    body: str, nesting: int, budget: list[int], powershell: bool = False
 ) -> list[tuple[str, str]]:
     r"""Pull the command substitutions out of text that bash expands.
 
@@ -866,6 +858,8 @@ def _body_substitutions(
         body: The text, with continuation lines already joined.
         nesting: How many substitutions deep the text sits.
         budget: The steps left for reading this command.
+        powershell: Whether the walk of a `$( )` reads its three tokens as
+            PowerShell does.
 
     Returns:
         The text of each command substitution that bash would run, in order,
@@ -899,7 +893,9 @@ def _body_substitutions(
             ):
                 index += 3  # arithmetic is no command; look inside it
                 continue
-            _, _, end, closed = _scan(body, index + 2, ")", failed, nesting, budget)
+            _, _, end, closed = _scan(
+                body, index + 2, ")", failed, nesting, budget, powershell
+            )
             if not closed:
                 break
             found.append((body[index + 2 : end], ")"))
@@ -961,11 +957,13 @@ _LOOP_COMMANDS = frozenset({"for", "select"})
 _LOOP_LEADERS = frozenset({"while", "until"})
 
 #: Characters that end a word, and those that make a word more than plain text.
-_WORD_ENDS = " \t\r\n;&|()<>{}"
+#: The PowerShell reading adds the carriage return, which it turns into a line
+#: break; to bash it is a word character.
+_WORD_ENDS = " \t\n;&|()<>{}"
 _WORD_SPECIALS = "\\\"'`$"
 
 
-def _prepare(command: str) -> tuple[str, bool]:
+def _prepare(command: str, powershell: bool = False) -> tuple[str, bool]:
     """Remove what a shell never runs and `shlex` cannot read.
 
     Walks the command once, tracking quotes as bash does. Outside quotes it
@@ -985,8 +983,15 @@ def _prepare(command: str) -> tuple[str, bool]:
     `$((...))` or `((...))` is a shift, and the `)` that ends a `case` pattern
     closes nothing.
 
+    Three tokens mean one thing to bash and another to PowerShell, and the
+    command is prepared once for each: a backslash before an operator character
+    (a word character in bash, a literal backslash and a real operator in
+    PowerShell), a bare carriage return (a word character in bash, a line break
+    in PowerShell) and, in `_segments`, a brace argument.
+
     Args:
         command: The full command line.
+        powershell: Read the three tokens as PowerShell does instead of bash.
 
     Returns:
         The transformed text, and whether the command contains a construct this
@@ -998,10 +1003,10 @@ def _prepare(command: str) -> tuple[str, bool]:
         command = command.replace(private, " ")
     budget = [20 * len(command) + 50_000]
     try:
-        text, unmodelled, _, _ = _scan(command, 0, "", set(), 0, budget)
+        text, unmodelled, _, _ = _scan(command, 0, "", set(), 0, budget, powershell)
     except (_TooComplexError, RecursionError):
-        # Unread, but a carriage return is still a soft separator.
-        return command.replace("\r", _SOFT), True
+        # Unread. A carriage return is still a line break to PowerShell.
+        return (command.replace("\r", "\n") if powershell else command), True
     return text, unmodelled
 
 
@@ -1012,6 +1017,7 @@ def _scan(
     failed: set[int],
     nesting: int,
     budget: list[int],
+    powershell: bool = False,
 ) -> tuple[str, bool, int, bool]:
     """Walk part of a command for `_prepare`, stopping at a closing `)` if asked.
 
@@ -1024,6 +1030,8 @@ def _scan(
             run of unclosed ones is not walked again and again.
         nesting: How many substitutions deep this walk is.
         budget: The steps left for reading this command, shared by every walk.
+        powershell: Whether the walk reads a backslash before an operator
+            character and a carriage return as PowerShell does.
 
     Returns:
         The prepared text, whether an unmodelled construct was met, the index
@@ -1066,9 +1074,11 @@ def _scan(
         if nesting >= _MAX_NESTING:
             unmodelled = True  # too deep to follow: play safe
             return False
-        inners = _body_substitutions(text, nesting + 1, budget)
+        inners = _body_substitutions(text, nesting + 1, budget, powershell)
         for inner, ends in inners:
-            prepared, flag, _, _ = _scan(inner, 0, ends, set(), nesting + 1, budget)
+            prepared, flag, _, _ = _scan(
+                inner, 0, ends, set(), nesting + 1, budget, powershell
+            )
             place(prepared, flag, target)
         return bool(inners)
 
@@ -1080,7 +1090,7 @@ def _scan(
             return None
         if position - 2 in failed:
             return None
-        found = _scan(command, position, ")", failed, nesting + 1, budget)
+        found = _scan(command, position, ")", failed, nesting + 1, budget, powershell)
         if not found[3]:
             failed.add(position - 2)
             return None
@@ -1115,7 +1125,7 @@ def _scan(
         starts_word = word == "" and plain and not in_double and top != "brace"
 
         if not in_double and top != "brace":
-            if char in _WORD_ENDS:
+            if char in _WORD_ENDS or (powershell and char == "\r"):
                 finish_word()
                 if char in ";&|\n({)":
                     command_position = True
@@ -1141,10 +1151,18 @@ def _scan(
             elif not in_double and pair[1:] in _QUOTED and top == "brace":
                 out.append(_QUOTED[pair[1]])  # one word in either shell
                 index += 2
-            elif not in_double and pair[1:] and pair[1] in _SOFT_ESCAPED:
-                # Bash reads the escaped character as text and PowerShell takes
-                # the backslash literally and the character as an operator.
-                out.append(_SOFT)
+            elif (
+                powershell
+                and not in_double
+                and pair[1:]
+                and pair[1] in _ESCAPED_OPERATORS + "\r"
+            ):
+                # PowerShell takes the backslash literally and reads the
+                # character after it as it would anywhere: the next pass.
+                out.append("\\\\")
+                index += 1
+            elif not in_double and pair[1:] and pair[1] in _ESCAPED_OPERATORS:
+                out.append(_QUOTED[pair[1]])  # bash: the character is text
                 index += 2
             else:
                 out.append(pair)
@@ -1207,7 +1225,9 @@ def _scan(
                 end = None
             if end is not None:
                 inner = re.sub(r"\\([$`\\])", r"\1", command[index + 1 : end - 1])
-                text, flag, _, _ = _scan(inner, 0, "", set(), nesting + 1, budget)
+                text, flag, _, _ = _scan(
+                    inner, 0, "", set(), nesting + 1, budget, powershell
+                )
                 place(text, flag, slot)
                 if in_double:
                     # PowerShell reads the backtick as its escape character, so
@@ -1248,6 +1268,10 @@ def _scan(
                 out.append(_QUOTE_MARK)
             out.append(command[index:end].translate(_QUOTE_TABLE))
             index, boundary = end, False
+        elif top == "brace" and char in _QUOTED and char != "}":
+            # One word in either shell, whatever the character would do outside.
+            out.append(_QUOTED[char])
+            index, boundary = index + 1, False
         elif char == "#" and boundary and top != "brace":
             stops = [command.find("\n", index)]
             if top == "bt":
@@ -1324,17 +1348,18 @@ def _scan(
         else:
             previous = command[index - 1 : index] if index else ""
             following = command[index + 1 : index + 2]
-            if char == "\r" and top != "brace":
-                out.append(_SOFT)  # a line break in one shell, a word in the other
-            elif top == "brace":
-                out.append(_QUOTED.get(char, char))  # one word, in both shells
-            else:
-                out.append(char)
+            if char == "\r" and powershell and top != "brace":
+                # A line break to PowerShell. To bash the carriage return is a
+                # word character and is copied like any other.
+                out.append("\n")
+                index, boundary = index + 1, True
+                fresh()
+                continue
+            out.append(char)
             index += 1
             starts_command = (
                 (char in ";&|" and previous not in ("<", ">") and following != ">")
                 or (char == "{" and boundary and following in (" ", "\t", "\n"))
-                or char == "\r"
             ) and top != "brace"
             boundary = char in _COMMENT_BOUNDARY
             if starts_command:
@@ -1428,7 +1453,39 @@ def segments(command: str) -> list[Segment] | None:
     ]
 
 
-def _segments(command: str, *, runs: list[_Run] | None = None) -> list[Segment] | None:
+def _group_position(words: list[str]) -> bool:
+    """Report whether bash reads a `{` or `}` after these words as a group.
+
+    The braces are reserved words, so only where a command could start: as the
+    first word, after the reserved words that take a command next, after `time`
+    and its options, after `coproc NAME` and after `function NAME`. Anywhere
+    else, `echo {`, they are arguments. Matched case-sensitively, as bash does;
+    a quoted word carries the quote mark and matches nothing.
+
+    Args:
+        words: The words of the invocation so far.
+
+    Returns:
+        True if a brace written next is a group delimiter in bash.
+    """
+    index = 0
+    while index < len(words):
+        word = words[index]
+        index += 1
+        if word in _COMMAND_LEADERS:
+            if word == "time":
+                while index < len(words) and words[index].startswith("-"):
+                    index += 1
+            elif word == "coproc" and index == len(words) - 1:
+                return True  # `coproc NAME {`
+            continue
+        return word == "function" and index == len(words) - 1  # `function NAME {`
+    return True
+
+
+def _segments(
+    command: str, *, runs: list[_Run] | None = None, powershell: bool = False
+) -> list[Segment] | None:
     """Split a command as `segments` does, leaving the placeholder as it is.
 
     Args:
@@ -1444,12 +1501,18 @@ def _segments(command: str, *, runs: list[_Run] | None = None) -> list[Segment] 
             follows it, and operators written before the close are dropped, so
             a segment whose separator is `SUBSTITUTED` has a run holding at most
             that.
+        powershell: Read the command as PowerShell does where the two shells
+            differ: every token of braces is a group delimiter, as a script
+            block's are, and `_prepare` reads a backslash before an operator
+            character and a carriage return its way. Bash reads a brace as a
+            group only where a reserved word could stand, and is the default.
 
     Returns:
         What `segments` returns, with `_PLACEHOLDER` standing in each word where
         a substitution was.
     """
-    tokens = _lex(_prepare(command)[0])
+    prepared = _prepare(command, powershell=True) if powershell else _prepare(command)
+    tokens = _lex(prepared[0])
     if tokens is None:
         return None
 
@@ -1471,6 +1534,13 @@ def _segments(command: str, *, runs: list[_Run] | None = None) -> list[Segment] 
             current.clear()
 
     for token in tokens:
+        if (
+            not powershell
+            and set(token) <= _BRACES
+            and not (token in ("{", "}") and _group_position(current))
+        ):
+            current.append(token)  # `echo {`, `echo }}`, `{}`: words in bash
+            continue
         if not _is_separator(token) and _OPEN not in token and _CLOSE not in token:
             current.append(_unquote(token))
             continue
@@ -1506,20 +1576,12 @@ def _segments(command: str, *, runs: list[_Run] | None = None) -> list[Segment] 
                 separator = SUBSTITUTED
                 after_close = True
             elif piece:
-                # A token of braces only is a word in bash and a script block in
-                # PowerShell, unless it is one brace where a command could start,
-                # which is a group in both: it splits, but is soft.
-                soft = set(piece) <= _BRACES and not (
-                    piece in ("{", "}")
-                    and all(word.lower() in _COMMAND_LEADERS for word in current)
-                )
                 if current:
                     flush()
                     pending = []
                     raw = []
-                pending.append(";" if soft else _governs(piece))
-                if not soft:
-                    raw.extend((depth, op) for op in _OPERATORS.findall(piece))
+                pending.append(_governs(piece))
+                raw.extend((depth, op) for op in _OPERATORS.findall(piece))
                 separator = _join(pending)
                 after_close = False
             # The pieces left to right: an operator glued to a mark, as in
@@ -1675,11 +1737,14 @@ def violation(command: str, branch: str) -> str:
         With `main` checked out, a command that names `commit` or `push` and
         uses syntax this guard does not read -- see `UNMODELLED_OPENERS` -- is
         refused with a reason saying so. A `commit` or `push` is otherwise
-        refused when `main` is among the branches it may run on. A command the
-        guard fails on, whatever the failure, is treated as unreadable.
+        refused when `main` is among the branches it may run on, in the bash
+        reading of the command or in the PowerShell one. A command the guard
+        fails on, whatever the failure, is treated as unreadable.
     """
     try:
-        return _judge(command, branch)
+        # Where bash and PowerShell read a token differently, each reading is
+        # judged and a refusal from either stands, bash's first.
+        return _judge(command, branch) or _judge(command, branch, powershell=True)
     except Exception:  # a hook that crashes lets the command run
         return _unreadable(command, branch)
 
@@ -1704,7 +1769,7 @@ def _quoted_done(text: str) -> bool:
     Returns:
         True if some word holds a quote or a backslash and reads `done` without.
     """
-    for word in re.findall(f"[^\\s;&|()<>{{}}{_SOFT}]+", text):
+    for word in re.findall(r"[^\s;&|()<>{}]+", text):
         word = word.replace(_QUOTE_MARK, "")
         if re.search(r"['\"\\]", word) and re.sub(r"['\"\\]", "", word) == "done":
             return True
@@ -1858,17 +1923,21 @@ def _walk_run(
     return widened
 
 
-def _judge(command: str, branch: str) -> str:
-    """Judge a command; `violation` is this with the failures caught.
+def _judge(command: str, branch: str, powershell: bool = False) -> str:
+    """Judge a command read one way; `violation` judges both and catches failures.
 
     Args:
         command: The full command line.
         branch: The branch currently checked out.
+        powershell: Read the tokens the two shells disagree on as PowerShell
+            does instead of bash.
 
     Returns:
-        What `violation` returns.
+        The reason to refuse the command read that way, or an empty string.
     """
-    prepared, unmodelled = _prepare(command)
+    prepared, unmodelled = (
+        _prepare(command, powershell=True) if powershell else _prepare(command)
+    )
     if unmodelled and branch == PROTECTED and RISKY_PATTERN.search(command):
         return (
             "Refused: this command uses syntax this guard does not read — "
@@ -1880,7 +1949,7 @@ def _judge(command: str, branch: str) -> str:
         )
 
     runs: list[_Run] = []
-    parsed = _segments(command, runs=runs)
+    parsed = _segments(command, runs=runs, powershell=powershell)
     if parsed is None:
         return _unreadable(command, branch)
 
@@ -1900,8 +1969,8 @@ def _judge(command: str, branch: str) -> str:
     # `!` or `coproc` leads, both keyed by where the list sits: its substitution
     # depth and how many groups are open there. Only an operator at that key ends
     # one, or the group or substitution it sits in closing. The key is read from
-    # the operators the tokenizer found, so a word that only looks like one -- a
-    # quoted `;` or `&&`, a literal `{` -- moves it; that is a known miss.
+    # the operators the tokenizer found: a quoted `;` or `&&` is a word to it, and
+    # a brace is a group only where the reading in force says so.
     nest: dict[int, int] = {}
     operands: list[tuple[_Key, set[str]]] = []
     negating: set[_Key] = set()
