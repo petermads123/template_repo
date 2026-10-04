@@ -88,7 +88,12 @@ the operand runs from the `||` to the next `&&`, `;`, `&`, newline or `case` cla
 terminator (`;;`, `;&`, `;;&`) at its own substitution depth and group level -- a
 newline only where no `||`, `|` or `&&` runs into it -- or until the group or
 substitution it sits in closes, and only inside it is the switch trusted. A
-substitution runs on the
+reserved-word compound -- `if` to `fi`, `case` to `esac`, `while`, `until`, `for` or
+`select` to `done`, and a `[[` to its `]]` -- is a group of its own in that key, as
+`{ }` and `( )` are, so a `;` or `&&` written inside one does not end an operand or
+a `!` scope opened outside it; the parentheses of a `case` pattern are the
+pattern's, not a group's. An opener with no closer, and a closer that matches no
+opener, are a syntax error to bash and are left out. A substitution runs on the
 branches in effect for the command that contains it, and a switch inside it
 counts for that command and for what follows. A switch whose target a
 substitution made (`git checkout "$(echo main)"`) is one only the shell can
@@ -961,6 +966,28 @@ _Run = tuple[tuple[int, str], ...]
 #: Stands in a run, at the depth of a substitution that has just closed, for the
 #: end of that substitution: whatever was open at that depth or deeper is over.
 _CLOSED = "$)"
+
+#: Stand in a run, after an invocation's own operators, for a reserved-word
+#: compound (`if`, `case`, a loop, `[[`) that opens or closes there. An opener
+#: carries its kind after the marker. `_walk_run` reads each as it reads a group's
+#: `(` or `)`: the compound is a level of its own.
+_COMPOUND_OPEN = "$<"
+_COMPOUND_CLOSE = "$>"
+
+#: Words that open a compound command: as leaders, and as the command word.
+_COMPOUND_LEADERS = frozenset({"if", "while", "until"})
+_COMPOUND_WORDS = frozenset({"case", "for", "select", "[["})
+
+#: The openers each closing word pairs with.
+_CLOSER_OPENERS = {
+    "fi": ("if",),
+    "esac": ("case",),
+    "done": ("while", "until", "for", "select"),
+    "]]": ("[[",),
+}
+
+#: The operators a closing word may follow: it ends a list.
+_BEFORE_CLOSER = frozenset({";", "\n", "&", ";;", ";&", ";;&"})
 
 #: Words that open a bash loop, and the leaders among them.
 _LOOP_COMMANDS = frozenset({"for", "select"})
@@ -1863,12 +1890,128 @@ def _loop_ranges(
     return widened
 
 
+def _openers(tokens: tuple[str, ...]) -> tuple[tuple[str, ...], int]:
+    """Find the compound commands an invocation opens, in the order written.
+
+    The reserved words `if`, `while` and `until` are leaders and can chain; `case`,
+    `for`, `select` and `[[` are the command word. A `[[` closed in the same
+    invocation holds nothing that could split a list and is left out.
+
+    Args:
+        tokens: The invocation's tokens.
+
+    Returns:
+        The kinds opened, and how many of them are leaders written before the
+        first `!` or `coproc` (all of them when there is none).
+    """
+    index, leaders = _walk_prefix(tokens)
+    kinds = [word for word in leaders if word in _COMPOUND_LEADERS]
+    before = 0
+    for word in leaders:
+        if word in _UNCERTAIN_LEADERS:
+            break
+        if word in _COMPOUND_LEADERS:
+            before += 1
+    word = tokens[index] if index < len(tokens) else ""
+    if word in _COMPOUND_WORDS and not (word == "[[" and "]]" in tokens[index + 1 :]):
+        kinds.append(word)
+    return tuple(kinds), before
+
+
+def _own_operators(segment: Segment, run: _Run) -> list[str]:
+    """List the operators of a run that were written at the invocation's depth.
+
+    Args:
+        segment: The invocation.
+        run: The operators written before it.
+
+    Returns:
+        Those at its own substitution depth, the end of a substitution left out.
+    """
+    return [op for level, op in run if level == segment.depth and op != _CLOSED]
+
+
+def _compound_spans(
+    parsed: list[Segment], runs: list[_Run]
+) -> tuple[dict[int, tuple[str, ...]], dict[int, int], dict[int, int]]:
+    """Pair the reserved-word compounds of a command with their closing words.
+
+    Each substitution depth has its own stack. `fi`, `esac` and `done` close the
+    innermost open compound of their kind when they start an invocation that
+    follows a list's end and is not a case pattern; a `]]` token closes an open
+    `[[`. An opener with no closer at its depth, and a closer that does not match
+    the innermost opener, are ignored: bash rejects those as a syntax error, and
+    ignoring them leaves the reading as it was. The end of a substitution drops
+    what was open inside it.
+
+    Args:
+        parsed: The invocations of the command, in order.
+        runs: The operators written before each, as `_segments` collects them.
+
+    Returns:
+        The matched compounds each invocation opens, as kinds in the order
+        written; how many each invocation closes; and how many of the first are
+        leaders written before the invocation's first `!` or `coproc`.
+    """
+    opened: dict[int, tuple[str, ...]] = {}
+    leaders: dict[int, int] = {}
+    matched: dict[int, set[int]] = {}
+    closes: dict[int, int] = {}
+    stacks: dict[int, list[tuple[int, int, str]]] = {}
+    for index, segment in enumerate(parsed):
+        run = runs[index] if index < len(runs) else ()
+        for level in [level for level in stacks if level > segment.depth]:
+            del stacks[level]
+        for level, operator in run:
+            if operator == _CLOSED:
+                for deeper in [deeper for deeper in stacks if deeper >= level]:
+                    del stacks[deeper]
+        stack = stacks.setdefault(segment.depth, [])
+        tokens = segment.tokens
+        word = tokens[0] if tokens else ""
+        wanted: tuple[str, ...] = ()
+        if word in _CLOSER_OPENERS and word != "]]":
+            own = _own_operators(segment, run)
+            following = parsed[index + 1] if index + 1 < len(parsed) else None
+            pattern = False
+            if following is not None and index + 1 < len(runs):
+                after = _own_operators(following, runs[index + 1])
+                pattern = (
+                    following.depth == segment.depth
+                    and after[:1] == [")"]
+                    and all(op in ("(", "{") for op in after[1:])
+                )
+            if own and own[-1] in _BEFORE_CLOSER and not pattern:
+                wanted = _CLOSER_OPENERS[word]
+        elif "]]" in tokens:
+            wanted = _CLOSER_OPENERS["]]"]
+        if wanted and stack and stack[-1][2] in wanted:
+            start, ordinal, _ = stack.pop()
+            matched.setdefault(start, set()).add(ordinal)
+            closes[index] = closes.get(index, 0) + 1
+        kinds, before = _openers(tokens)
+        for ordinal, kind in enumerate(kinds):
+            stack.append((index, ordinal, kind))
+        opened[index] = kinds
+        leaders[index] = before
+    spans: dict[int, tuple[str, ...]] = {}
+    firsts: dict[int, int] = {}
+    for start, ordinals in matched.items():
+        kinds = opened[start]
+        spans[start] = tuple(
+            kind for ordinal, kind in enumerate(kinds) if ordinal in ordinals
+        )
+        firsts[start] = sum(1 for ordinal in ordinals if ordinal < leaders[start])
+    return spans, closes, firsts
+
+
 def _walk_run(
     run: _Run,
     ok: set[str],
     nest: dict[int, int],
     operands: list[tuple[_Key, set[str]]],
     negating: set[_Key],
+    patterns: dict[_Key, bool],
 ) -> set[str]:
     """Read one run of operators for the `||` operands and `!` scopes it ends.
 
@@ -1879,24 +2022,34 @@ def _walk_run(
     substitution or a deeper group is another list's. A newline counts only in a
     run that holds nothing else -- an `||`, `|` or `&&` before a newline
     continues the list. The end of a substitution ends everything open inside it,
-    at its depth or deeper.
+    at its depth or deeper. A reserved-word compound is a group of its own: its
+    opening marker raises the level as `(` does and its closing marker ends what
+    was opened inside it as `)` does. The parentheses of a `case` pattern are the
+    pattern's, not a group's.
 
     Args:
         run: The operators between two invocations, in written order, each with
-            the substitution depth it was written at.
+            the substitution depth it was written at, then the markers of the
+            compounds that open or close at the invocation.
         ok: The branches HEAD could be on if every command of the current `&&`
             chain succeeded.
         nest: How many groups are open at each level; updated.
         operands: The `||` operands being read, with what their left side
             trusted; entries are added and removed.
         negating: The lists a `!` or `coproc` leads; keys are removed.
+        patterns: For each level a `case` opened, whether the next parenthesis is
+            part of a pattern; entries are added, changed and removed.
 
     Returns:
         The branches the operands that ended trusted on their left side, for the
         caller to add to `ok`.
     """
     widened: set[str] = set()
-    only_newlines = all(op == "\n" for _, op in run if op != _CLOSED)
+    only_newlines = all(
+        op == "\n"
+        for _, op in run
+        if op != _CLOSED and not op.startswith((_COMPOUND_OPEN, _COMPOUND_CLOSE))
+    )
 
     def close(at: int, group: int, *, below: bool) -> None:
         # Ends what was opened at `group` -- or, for a close, in any group
@@ -1912,13 +2065,28 @@ def _walk_run(
     for level, operator in run:
         group = nest.get(level, 0)
         key = (level, group)
-        if operator == _CLOSED:
+        if operator.startswith(_COMPOUND_OPEN):
+            nest[level] = group + 1
+            if operator == _COMPOUND_OPEN + "case":
+                patterns[(level, group + 1)] = True
+        elif operator == _COMPOUND_CLOSE:
+            patterns.pop(key, None)
+            left = max(group - 1, 0)
+            close(level, left, below=True)
+            nest[level] = left
+        elif operator == "(" and patterns.get(key):
+            continue  # the optional opening parenthesis of a case pattern
+        elif operator == ")" and patterns.get(key):
+            patterns[key] = False  # the pattern's end, not a group's
+        elif operator == _CLOSED:
             for entry in [e for e in operands if e[0][0] >= level]:
                 operands.remove(entry)
                 widened.update(entry[1])
             negating.difference_update([k for k in negating if k[0] >= level])
             for deeper in [n for n in nest if n >= level]:
                 del nest[deeper]
+            for case_key in [k for k in patterns if k[0] >= level]:
+                del patterns[case_key]
         elif operator == "||":
             negating.discard(key)  # the negation covers the left side only
             if operands and operands[-1][0] == key:
@@ -1927,6 +2095,8 @@ def _walk_run(
                 operands.append((key, set(ok)))
         elif operator in _LIST_ENDS and (operator != "\n" or only_newlines):
             close(level, group, below=False)
+            if operator in (";;", ";&", ";;&") and key in patterns:
+                patterns[key] = True  # the next clause starts with a pattern
         elif operator in ("(", "{"):
             nest[level] = group + 1
         elif operator in (")", "}"):
@@ -1987,14 +2157,34 @@ def _judge(command: str, branch: str, powershell: bool = False) -> str:
     nest: dict[int, int] = {}
     operands: list[tuple[_Key, set[str]]] = []
     negating: set[_Key] = set()
+    patterns: dict[_Key, bool] = {}
+    opens, closes, leaders = _compound_spans(parsed, runs)
     for number, segment in enumerate(parsed):
         for level in [level for level in nest if level > segment.depth]:
             del nest[level]
+        for case_key in [k for k in patterns if k[0] > segment.depth]:
+            del patterns[case_key]
         negating.difference_update([k for k in negating if k[0] > segment.depth])
         while operands and operands[-1][0][0] > segment.depth:
             ok |= operands.pop()[1]  # a substitution that has ended
         run = runs[number] if number < len(runs) else ()
-        ok |= _walk_run(run, ok, nest, operands, negating)
+        ok |= _walk_run(run, ok, nest, operands, negating, patterns)
+        # The compounds that close and open here follow the invocation's own
+        # operators. A `!` or `coproc` scope sits outside the `if`, `while` and
+        # `until` written before it and inside the ones after, so the level is
+        # read between the two.
+        kinds = opens.get(number, ())
+        split = leaders.get(number, 0)
+        shut = ((segment.depth, _COMPOUND_CLOSE),) * closes.get(number, 0)
+        first = shut + tuple(
+            (segment.depth, _COMPOUND_OPEN + kind) for kind in kinds[:split]
+        )
+        later = tuple((segment.depth, _COMPOUND_OPEN + kind) for kind in kinds[split:])
+        if first:
+            ok |= _walk_run(first, ok, nest, operands, negating, patterns)
+        scope = (segment.depth, nest.get(segment.depth, 0))
+        if later:
+            ok |= _walk_run(later, ok, nest, operands, negating, patterns)
         if number in loops:
             ok |= loops[number]
             possible |= loops[number]
@@ -2050,7 +2240,7 @@ def _judge(command: str, branch: str, powershell: bool = False) -> str:
         else:
             ok = set(here)
         if _leads_uncertainly(segment.tokens):
-            negating.add((segment.depth, nest.get(segment.depth, 0)))
+            negating.add(scope)
 
     return ""
 

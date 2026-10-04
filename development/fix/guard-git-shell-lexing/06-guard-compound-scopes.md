@@ -1,6 +1,6 @@
 # The git guard keeps an `||` or `!` scope across a compound command
 
-<!-- claude-plan step=3 status=active -->
+<!-- claude-plan step=4 status=active -->
 
 | Field | Value |
 |---|---|
@@ -15,7 +15,7 @@
 |---|---|---|---|---|
 | 1 | Conceptualize | `/conceptualize` | with the user | done |
 | 2 | Plan | `/plan` | with the user | done |
-| 3 | Implement | `/implement` | in `/build` | pending |
+| 3 | Implement | `/implement` | in `/build` | done |
 | 4 | Verify | `/verify` | in `/build` | pending |
 | 5 | Test | `/test` | in `/build` | pending |
 | 6 | Concept check | `/concept-check` | in `/build` | pending |
@@ -327,6 +327,18 @@ FAILED tests/test_guard_git.py::test_violation_refuses_an_or_switch_after_an_if_
 ```
 
 `violation` returned `""` (allowed), the shape the Defect block's Observed row describes.
+
+Green after the fix: the same test passes, and the whole suite is 1614 passed (1613 before plus the reproduction), no existing test changed outcome.
+
+Deviations from the plan, none of which touch section 1:
+
+- `_compound_spans` returns a third dict besides the plan's two: for each invocation that opens a matched compound, how many of those are `if`/`while`/`until` leaders written before its first `!` or `coproc`. `_judge` needs it to key a `!` scope between the leaders' opens and the command word's open (guide 3); counting leaders without regard to which ones paired would raise the key past a level that was never raised. Matched openers are a subset, not a prefix, of an invocation's kinds (a closer pops the top of the stack first), so the pairing records ordinals.
+- A private helper `_openers(tokens)` finds the kinds an invocation opens and the leader count, and `_own_operators(segment, run)` lists a run's operators at the invocation's own depth. Neither is public.
+- `_judge` passes the markers to `_walk_run` as one extra call per invocation (two when a `!`/`coproc` scope has to be keyed between the leaders and the command word) rather than appending them to the invocation's run. The result is the same sequence of operators; a separate call keeps the newline-only test of the invocation's own run untouched and lets `_judge` read the level in between. `_walk_run` still ignores markers in that test and handles them before the case-pattern logic.
+- A closing word `fi`, `esac` or `done` is a pattern, not a closer, when the next invocation's own run opens with `)` and carries only `(` or `{` after it; a plain `next separator is )` test (as `_loop_ranges` uses) would also reject `( while x; do :; done ); y`.
+- Known residual, same as `_loop_ranges`' `_quoted_done` note: a closer written `\done` as the first word of an invocation reads as `done` (a backslash does not set the quote mark), so `true || while x; do \done; :; done | ...` pairs the loop at the wrong word. `_quoted_done` is deliberately not used here: any `echo "done"` in a command would otherwise switch the fix off.
+
+Sanity check against bash 5.2 (git shadowed by a function keeping HEAD in a temp file, an empty checkout argument failing, `PATH=/usr/bin:/bin`, stdin closed, a timeout; shown live first by a plain `git commit -m x` landing `COMMIT on main`): the 45 rows of scratchpad `r6_class.py` (15 constructs x `true ||`, `!`, `coproc`), the 26 rows of `dc6_rows.txt` and 20 extra rows (`r6/extra.py`) all agree: every row where bash lands on `main` is refused, none allowed. Allowed rows land on `x` or run nothing in bash (`true || if true; then git checkout -b x && git commit; fi`, `if ! git diff --quiet; then git checkout -b feat/x && git commit -m x; fi`, create-or-switch). Perf: 3,000 nested `if` openers with closers finish in 0.4 s, 5,000 in 1.2 s.
 
 ---
 

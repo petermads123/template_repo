@@ -293,6 +293,10 @@ guard is asserted to play safe there:
   finish quickly; a command too tangled to read (the pre-pass forced to give up) is refused on `main` when it names
   `commit` or `push` and allowed otherwise; the round 5 forms give the same answer twice.
 
+Round 6 (`development/fix/guard-git-shell-lexing/06-...`) adds the reproduction for compounds, under its
+own heading at the end of the file: `true || if true; then echo; fi | git checkout -b x && git commit -m x`
+refused on `main` instead of allowed. Step 5 extends it.
+
 ### `tests/test_plan_state.py`
 
 Covers `.claude/hooks/plan_state.py`. `parse` against a complete marker, a file with none,
@@ -449,7 +453,11 @@ trusted as well as the switch (`a || git checkout -b x && git commit` is refused
 `git checkout -b feat/x || git checkout feat/x && git commit` allowed): the operand runs from
 the `||` to the next `&&`, `;`, `&`, newline or `case` clause terminator (`;;`, `;&`, `;;&`) at its own
 substitution depth and group level — a newline only where no `||`, `|` or `&&` runs into it — or until
-the group or substitution it sits in closes, and only inside it is the switch trusted. What still cannot be read is refused when it names `commit` or
+the group or substitution it sits in closes, and only inside it is the switch trusted. A reserved-word compound
+(`if` to `fi`, `case` to `esac`, `while`, `until`, `for` or `select` to `done`, `[[` to `]]`) is a group of its own
+in that key, as `{ }` and `( )` are, so a terminator inside one does not end an operand or `!` scope opened outside
+it, and a `case` pattern's parentheses are the pattern's rather than a group's; an opener with no closer or a closer
+that matches no opener is left out, as bash rejects it. What still cannot be read is refused when it names `commit` or
 `push` — matched on word boundaries, so `committee` is not a commit — while `main` is
 checked out, and allowed anywhere else.
 
