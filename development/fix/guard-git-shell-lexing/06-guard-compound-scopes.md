@@ -135,46 +135,138 @@ None.
 
 ## 2. Plan
 
-> Written in step 2, accepted by the user before step 3 starts. Concrete enough that
-> step 3 is transcription, not invention.
-
 ### Approach
 
-One paragraph on the chosen approach, and one on what was rejected and why.
+**Chosen: pair the compounds in a pass over the segments, as round 3's `_loop_ranges` pairs loops
+with `done`, and let each paired compound raise the same per-level group count that `{` and `(`
+raise; read a `case` pattern's parentheses in the run walk.**
+
+1. **Pairing pass.** A new private `_compound_spans(parsed)` walks the invocations with one stack
+   per substitution depth and returns, for each invocation index, how many compounds open after it
+   and how many close after it. Openers are the reserved words a shell reads as the start of a
+   compound at command position: `if`, `while` and `until` among an invocation's leading words
+   (they are leaders, so several can chain: `if while false; do :; done; then`), and `case`, `for`,
+   `select` or `[[` as its command word (the word after leaders, `!`, `time` and its options,
+   `coproc`, assignments and redirections, exactly where `_walk_prefix` stops). Closers are an
+   invocation whose first token is `fi`, `esac` or `done` (with `_loop_ranges`' rule that a `done`
+   after `|`, or ahead of a case pattern's `)`, is not one), and an invocation that holds a `]]`
+   token while a `[[` is open at its depth. Each closer pops the innermost open compound of its
+   kind's family (`fi`↔`if`, `esac`↔`case`, `done`↔`while`/`until`/`for`/`select`, `]]`↔`[[`). An
+   opener with no closer at its depth, or a closer that does not match, is ignored — bash rejects
+   that command as a syntax error, so it runs nothing, and ignoring it leaves today's reading. A
+   quoted keyword carries round 5's quote mark and matches nothing.
+2. **The walk.** `_judge` already walks each invocation's run through `_walk_run` with the shared
+   `nest`. After an invocation's run is walked, it raises `nest[segment.depth]` once per compound
+   opening there; after a closer's run is walked, it ends every `||` operand and `!` scope keyed
+   above the outer group (`ok |= base` for each, as a group close does) and lowers the count once
+   per compound closing. So `true || if true; then echo; fi | git checkout -b x && git commit` reads
+   its two `;` one level deep, the `fi` closes that level, the `|` and the `&&` are back at the
+   operand's key, and the `&&` unions `main` back in.
+3. **`case` patterns.** `_walk_run` keeps, for each key that a `case` opened, whether a pattern is
+   expected: true at the opener and after each `;;`, `;&` or `;;&` at that key. While a pattern is
+   expected, a `(` at that key (the optional leading parenthesis of `(a)`) is not a group, and the
+   first `)` at that key ends the pattern instead of closing a group. A real subshell later in the
+   clause body (`a) (cd x; y) ;;`) is read as today. The run pins stay as they are: the `)` still
+   reaches the run; only how the walk reads it changes.
+
+This removes the cause at `_walk_run` (`:1930–1935`): the group level now moves for every construct
+that holds a list, not only for brackets.
+
+**Rejected:**
+- **Have `_scan` emit private markers for compound openers, closers and pattern parentheses.** The
+  pre-pass knows command position, but it is the most verified and most delicate code in the
+  module, and moving the pattern `)` out of the runs flips the `RUN_PINS` case row that section 1
+  keeps.
+- **Keep every operand open to the end of the command once a compound appears.** It fixes nothing:
+  an operand that never closes never unions `main` back in, so the commit is still trusted.
+- **Count compounds in the PowerShell reading.** PowerShell's `if`, `while`, `foreach` take braces,
+  which are already groups; its keywords have no `fi`/`done`/`esac`, so the pairing pass ignores
+  them as unmatched there, which is the intended result.
 
 ### Modules
 
 | Path | New or changed | Purpose |
 |---|---|---|
+| `.claude/hooks/guard_git.py` | changed | Private `_compound_spans`; `_judge` raises and lowers `nest` around the compounds; `_walk_run` reads a `case` pattern's parentheses; module docstring |
+| `tests/test_guard_git.py` | changed | Round 6 heading: reproduction, the class forms, the pins A4 keeps, and the container matrix |
+| `STRUCTURE.md` | changed | Guard section prose (compounds are groups for `\|\|` operands and `!` scopes; `case` patterns) and the round 6 tests paragraph |
 
 ### Public API
 
-> Every public class and function, with its full signature as it will be written.
-> `Covers` links back to the acceptance criteria above.
+No public signature or constant changes. `violation`, `segments`, `git_subcommand` and the rest
+keep their signatures; `segments` output is unchanged.
 
 | Signature | Module | Purpose | Covers |
 |---|---|---|---|
+| `violation(command: str, branch: str) -> str` | `guard_git.py` | Unchanged signature. A reserved-word compound or `[[ ]]` inside an `\|\|` operand or `!` scope no longer ends it. | A1–A6 |
 
 ### Implementation guide
 
-Ordered. Each entry small enough to finish and check.
-
-1.
-2.
+1. **Reproduction first (fix round).** Add `test_violation_refuses_an_or_switch_after_an_if_compound`
+   asserting `violation("true || if true; then echo; fi | git checkout -b x && git commit -m x", "main")`
+   starts with the commit reason, under a new heading "round 6: compounds keep an `||` or `!` scope"
+   at the end of the file. Run it red, paste the run into section 3, commit before any production
+   change. If it is already green, halt.
+2. **`_compound_spans(parsed: list[Segment]) -> tuple[dict[int, int], dict[int, int]]`.** Opens and
+   closes per invocation index, as approach item 1. Reuse `_walk_prefix` for the leading words and
+   the command word, and reuse `_loop_ranges`' `done` rule (factor it into a small private helper
+   both call rather than copying it).
+3. **`_judge`.** Compute the spans once per reading, next to `loops`. In the segment loop, after
+   `_walk_run` returns: for a closer, call the same close-and-union path a `)`/`}` takes for the
+   current level (so operands and `!` keys inside the compound end, `ok |= base`), then lower
+   `nest[segment.depth]`; for an opener, raise it. Openers and closers on one invocation (`[[ a ]]`)
+   net out. Never lower below 0.
+4. **`_walk_run` case state.** Add a private parameter for the set of case keys expecting a pattern
+   (or a small dict), passed from `_judge`; `_judge` adds the key `(depth, nest after raising)` when
+   a `case` opens and drops it when `esac` closes. In `_walk_run`: a `(` at a key expecting a pattern
+   is skipped; the first `)` at such a key clears the expectation and is skipped; `;;`, `;&`, `;;&`
+   at a case key set it again (after their usual close).
+5. **Docs.** Module docstring and STRUCTURE.md guard section: compounds and `[[ ]]` are groups for
+   `||` operands and `!` scopes; a `case` pattern's parentheses are not. The tests entry gets a
+   round 6 paragraph.
 
 ### Test intents
 
-> High-level: what a test must prove, not how it is written. Step 5 turns each of these
-> into concrete cases, including the edge cases.
-
 | # | Must prove | Covers |
 |---|---|---|
-| T1 | | |
+| T1 | `true \|\| if true; then echo; fi \| git checkout -b x && git commit -m x` on `main` refused with the commit reason: red before, green after | A1 |
+| T2 | Every A2 compound in every A2 position after `true \|\|` and `git status \|\|` refused on `main` (each checked in bash with the oracle); the same commands from another branch allowed; a push of `HEAD` in that shape refused | A2 |
+| T3 | The A3 `!` forms (feat/x existing) refused on `main`; `{ case a in a) :;; esac; } \| …` and `( case a in a) :;; esac ) \| …` after `\|\|` and `!` refused; `case a in (a) …` patterns; a real subshell inside a clause body still a group | A3 |
+| T4 | The A4 list keeps its outcome, including `:3778`'s terminator test and the `RUN_PINS` case row unchanged; an unmatched opener or closer (`true \|\| if true; then echo \| …`, a stray `fi`) leaves today's reading | A4 |
+| T5 | The container matrix of A5: openers `true \|\|`, `false \|\|`, `!` × constructs `{ ; }`, `( ; )`, `$( ; )`, backticks, `if … fi`, `case … esac` (`a)` and `(a)`), `while`/`until`/`for`/`select … done`, `[[ && ]]`, `(( && ))`, `f() { ; }`, bare and wrapped in `{ }`: `<opener> <construct> \| git checkout -b x && git commit -m x` refused on `main` and allowed from `feat/y`, as one parametrized test with readable ids | A5 |
+| T6 | See below. | A6 |
+
+T6 in full. The existing suite passes unmodified; rounds 1–5's criteria are re-checked. The
+differential runs at step 6:
+- **Baseline.** `git show 6f05520:.claude/hooks/guard_git.py`, loaded from the scratchpad with
+  `.claude/hooks` on `sys.path` and registered in `sys.modules`.
+- **Corpus.** Every `(command, branch)` the suite passes to `violation`, captured with a scratch
+  `-p` plugin.
+- **Variants.** Prefixes `true || <C> | `, `! <C> | ` and `true || git status | <C> | ` for a
+  representative `<C>` of each compound family, and each command wrapped as the body of
+  `if true; then …; fi`; branches `main` and `feat/x`.
+- **What goes to bash.** Differing rows only, oracle as in round 5 (shown live first). PowerShell-only
+  rows listed, not run.
+- **Pass condition.** Every difference involves a reserved-word compound or `[[ ]]`; the oracle
+  agrees or the new refusal is play-safe; zero rows where the new guard allows a commit or push
+  that bash lands on `main`.
 
 ### Risks
 
-What could make this harder than it looks, and what the build should do if it does —
-including whether it should halt.
+- **A closer that is not one.** `done` as an argument, a quoted `fi`, an `esac` inside a pattern:
+  the command-position and quote-mark rules decide; if a test shows a word read as a closer where
+  bash does not, fix inside the build. An unmatched closer is ignored, so the error direction is
+  "today's reading", never a new hole.
+- **An existing test changes outcome.** Halt — unless it is a refusal that stays a refusal.
+- **PowerShell.** If a PowerShell test changes outcome, halt.
+- **The cause is elsewhere.** If an A1–A3 form stays allowed once compounds raise the level, for a
+  reason other than the Root cause row, halt.
+
+### Coverage
+
+- **Every criterion has a Public API entry:** A1–A6 through `violation`.
+- **Every criterion has a test intent:** A1→T1, A2→T2, A3→T3, A4→T4, A5→T5, A6→T6.
+- **Nothing in the Public API lacks a criterion.** No new public surface.
 
 ---
 
