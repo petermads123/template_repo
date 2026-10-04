@@ -48,14 +48,6 @@ rounds 1 to 4 (step 6 re-checks them), the 1161 guard tests, and in particular q
 commit messages, heredoc and comment handling, substitution extraction, the `||` operand union and
 the `!` scope.
 
----|---|---|
-
-This round came from recommendation `<R#>` of round `<N>`, which read:
-
-> <the recommendation, quoted from that round's section 8>
-
-What is already on the branch that this round must not break:
-
 ---
 
 ## 1. Concept
@@ -69,7 +61,7 @@ What is already on the branch that this round must not break:
 | Reproduction | The call above. Also allowed, all `COMMIT on main` in bash: the same with `"&&"`, `'&'`, `\&`, `-exec true \;`, `echo {`, `echo '('`, `echo ";"";"`; `{ true \|\| echo } \| git checkout -b x && git commit -m x; }`; `! true \| echo ';' \| git checkout -b feat/x && git commit -m x` (feat/x exists, so the checkout fails); `git checkout -b feat/x &&\r\ngit commit -m x` on `main` with feat/x existing (bash reads `\r` as a failing command word after `&&`, then the newline ends the list), also `&&\r\n\r\n` and `&& \r\n`. |
 | Root cause | (1) `.claude/hooks/guard_git.py:1242`, `_lex` runs posix `shlex`, which resolves quotes and escapes and keeps no record that `";"`, `'&&'`, `\;` or `\&` was quoted; `_is_separator` (`:329`, `set(token) <= SEPARATOR_CHARS`) is the site — by then a quoted `;` and a real one are the same string — and `_segments` (`:1329`/`:1333`) splits on it. Round 4's `_walk_run` keys on those false operators, so an `\|\|` operand or a `!` scope ends early or the group level shifts. A bare `{`/`}` word in argument position is read as a group the same way. (2) A separate cause of a different kind: `INLINE_WHITESPACE = " \t\r"` (`:197`) makes `\r` whitespace, deleting a word bash runs, so the `&&` before it is trusted; `_COMMENT_BOUNDARY` (`:293`) and `_DELIMITER_END` (`:297`) already exclude `\r`. |
 | Introduced by | Older than this branch: `_lex` with `punctuation_chars`, `_is_separator` and `INLINE_WHITESPACE` are on `main` (009f6e3, "Rebuild guard_git.py's parsing"). Round 4 made the false operators load-bearing for the `\|\|` operand and the `!` scope. |
-| Class | (1) A quoted or escaped token made only of operator characters: `;`, `&&`, `&`, `\|`, `\|\|`, `(`, `)`, `{`, `}`, a quoted newline, concatenations like `";"";"` and `a';'`. Several are refused today only by which operator they become (`')'`, `'}'`, `'\|'`, `\|\|`, `a';'`, `{}`, `{ }`, `-exec true {} +`), so the criterion holds on `segments` as well as on `violation`. (2) A bare `{`/`}` in argument position. (3) `\r` before a newline after an operator. (4) Over-refusals of the same family (bash runs no git): a quoted word at command position read as a leader, an assignment or a redirection — `'if' git commit -m x` (round 3 pinned it), `'!' git checkout -b x && git commit -m x`, `"X=1" git commit -m x`, `'>' x git commit -m x` — and `echo ";" git commit -m x`, `git checkout feat/y ";" git commit -m x`. **Shell constraint:** the guard runs for the PowerShell tool too and reads both shells the same way (module docstring, `main()` never reads `tool_name`). Single and double quotes make a string in both shells, so a quoted token is never an operator in either. But `\` is not an escape in PowerShell (`echo \; git commit` runs the commit there), a bare `{` after a command word is a scriptblock that runs (`ForEach-Object { git commit -m x }`, `Invoke-Command -ScriptBlock { … }`, `Start-Job { … }`, refused today only because `{` splits), and `\r` is a line terminator there (`&&\r\n` is a real `&&` in PowerShell 7). |
+| Class | (1) A quoted or escaped token made only of operator characters: `;`, `&&`, `&`, `\|`, `\|\|`, `(`, `)`, `{`, `}`, a quoted newline, concatenations like `";"";"` and `a';'`. Several are refused today only by which operator they become (`')'`, `'}'`, `'\|'`, `\|\|`, `a';'`, `{}`, `{ }`, `-exec true {} +`), so the criterion holds on `segments` as well as on `violation`. (2) A bare `{`/`}` in argument position, and any token made only of braces (`}}`, `{}`). (2b) An operator character inside an unquoted `${…}` (`${x:-;}`), which both shells read as one word (added at step 2). (3) `\r` before a newline after an operator. (4) Over-refusals of the same family (bash runs no git): a quoted word at command position read as a leader, an assignment or a redirection — `'if' git commit -m x` (round 3 pinned it), `'!' git checkout -b x && git commit -m x`, `"X=1" git commit -m x`, `'>' x git commit -m x` — and `echo ";" git commit -m x`, `git checkout feat/y ";" git commit -m x`. **Shell constraint:** the guard runs for the PowerShell tool too and reads both shells the same way (module docstring, `main()` never reads `tool_name`). Single and double quotes make a string in both shells, so a quoted token is never an operator in either. But `\` is not an escape in PowerShell (`echo \; git commit` runs the commit there), a bare `{` after a command word is a scriptblock that runs (`ForEach-Object { git commit -m x }`, `Invoke-Command -ScriptBlock { … }`, `Start-Job { … }`, refused today only because `{` splits), and `\r` is a line terminator there (`&&\r\n` is a real `&&` in PowerShell 7). |
 | Blast radius | `_lex`'s callers: `_segments` (`:1307`) and the pre-pass check (`:965`, which only tests for `None`). Tests that pin current behaviour: `tests/test_guard_git.py:2429` (`git checkout -b feat/y &&\r\ngit commit -m "$(date)"\r\n` allowed), the CR heredoc tests (`:971`, `:2056–2073`), and round 3's quoted-leader over-refusal pins. The module docstring's "reads both the same way" and STRUCTURE.md's matching text. Nothing depends on the wrong answer. |
 | Scope | `the class`, played safe for both shells — the user's choice over "quotes only" and over a guard that reads which shell sent the command: quotes are text in both shells, and for the three shell-dependent tokens the guard only ever refuses more, in either shell, with no new dependency on the payload. |
 
@@ -132,10 +124,10 @@ Recorded in the plan file, not in `DEVELOPMENT.md` (the user's instruction):
 | # | The finished feature... |
 |---|---|
 | A1 | Given `true \|\| echo ";" \| git checkout -b x && git commit -m x` with `main` checked out, `violation` refuses with the commit reason rather than returning `""`. |
-| A2 | A quoted token is never an operator: `segments('echo ";" x')` returns one invocation (`echo`, `;`, `x`), and the same holds for `"&&"`, `'&'`, `'\|'`, `'\|\|'`, `'('`, `')'`, `'{'`, `'}'`, a quoted newline, `";"";"` and `a';'`; every `\|\|`- and `!`-form built on one (the Reproduction row's quoted forms, `! true \| echo ';' \| …`) is refused on `main`. |
+| A2 | A quoted token is never an operator: `segments('echo ";" x')` returns one invocation (`echo`, `;`, `x`), and the same holds for `"&&"`, `'&'`, `'\|'`, `'\|\|'`, `'('`, `')'`, `'{'`, `'}'`, a quoted newline, `";"";"` and `a';'`; every `\|\|`- and `!`-form built on one (the Reproduction row's quoted forms, `! true \| echo ';' \| …`) is refused on `main`. The same holds inside an unquoted `${…}`, which both shells read as one word: `true \|\| echo ${x:-;} \| git checkout -b x && git commit -m x` is refused on `main` (added at step 2, the user's choice). |
 | A3 | The shell-dependent tokens play safe: the forms with `\;`, `\&`, `-exec true \;`, and a bare `{` or `}` argument (`true \|\| echo { \| …`, `{ true \|\| echo } \| …; }`) are refused on `main`, and `Get-Item . \| ForEach-Object { git commit -m x }`, `Invoke-Command -ScriptBlock { git commit -m x }` and `Start-Job { git push origin main }` stay refused on `main`. |
 | A4 | `git checkout -b feat/x &&\r\ngit commit -m x`, `&&\r\n\r\n` and `&& \r\n` are refused on `main`; `tests/test_guard_git.py:2429` changes from allowed to refused (agreed with this concept); `git commit\r\n`, `git push\r\n` and `git push origin main\r\n` stay refused. |
-| A5 | A quoted word at command position is not shell syntax: `'if' git commit -m x`, `'!' git checkout -b x && git commit -m x`, `"X=1" git commit -m x`, `'>' x git commit -m x` and `echo ";" git commit -m x` are allowed on `main` (round 3's quoted-leader pins change to allowed, agreed with this concept); `"git" commit -m x` stays refused. |
+| A5 | A quoted word at command position is not shell syntax: `'if' git commit -m x`, `'!' git commit -m x`, `"!" git commit -m x`, `"X=1" git commit -m x`, `'>' x git commit -m x` and `echo ";" git commit -m x` are allowed on `main` (round 3's quoted-leader pins for `'if'` and `"!"` change to allowed, agreed with this concept; its `\!`, `x=1 if`, `>/dev/null !` and `sudo -n !` pins stay refused); `'!' git checkout -b x && git commit -m x` stays refused, an over-refusal recorded on purpose (bash is safe there only because a command named `!` fails, which the guard does not model — changed at step 2, the user's choice); `"git" commit -m x` stays refused. |
 | A6 | Nothing else changed: the existing tests pass unmodified except the changes A4 and A5 name, and rounds 1–4's criteria still hold; a differential against the guard at 8972524 over the suite's commands with quoted, escaped, bare-brace and carriage-return variants sends every differing row to bash with `git` shadowed — the oracle first shown live by a plain commit landing on `main` — and every difference involves one of those tokens, with the oracle agreeing or the new refusal play-safe, and zero rows where the new guard allows a commit or push that bash lands on `main`. |
 
 ### Open questions
@@ -174,10 +166,12 @@ escape and substitution frame. So `_scan` changes what it emits, in three ways:
    `SEPARATOR_CHARS`. It still splits the command — bash would read a word there and
    PowerShell a separator, so splitting keeps PowerShell's reading — but `_governs` reads it
    as `;`, never `&&`, so nothing across it is trusted, and `_OPERATORS` does not match it,
-   so it never ends an `||` operand or a `!` scope and never changes a group level. A bare
-   `{` or `}` token that is not at command position (the invocation being built already has a
-   word) is treated as `_SOFT` by `_segments` too, so `ForEach-Object { git commit -m x }`
-   still splits and stays refused while `true || echo { | …` no longer shifts the group level.
+   so it never ends an `||` operand or a `!` scope and never changes a group level. A token
+   made only of braces is treated as `_SOFT` by `_segments` too, unless it is exactly `{` or `}`
+   at command position — the invocation being built is empty or holds only unmarked
+   `_COMMAND_LEADERS` words (so bash's `then {`, `do {`, `! {`, `coproc {`, `time {` and
+   PowerShell's `do {` stay real groups). So `ForEach-Object { git commit -m x }` still splits
+   and stays refused while `true || echo { | …` and `echo }}` no longer shift the group level.
 
 This removes cause (1) at `_lex`/`_is_separator` — the knowledge `shlex` throws away is
 written into the text before `shlex` runs — and cause (2) by making `\r` a separator that is
@@ -224,26 +218,37 @@ private character each but keep their names and types; `INLINE_WHITESPACE` loses
    in the input exactly as it blanks `_OPEN`, `_CLOSE` and `_PLACEHOLDER`, so a command cannot
    forge them. Add `_SOFT` to `PUNCTUATION_CHARS` and `SEPARATOR_CHARS`; remove `\r` from
    `INLINE_WHITESPACE`.
-3. **`_scan` emits them.** Where `_scan` copies a character whose innermost frame is a single
-   or double quote, copy its `_QUOTED` stand-in instead if it has one. Where it copies an
-   opening quote that starts a word (the previous emitted character is whitespace, an
-   operator, the start, or a mark), write `_QUOTE_MARK` before it. Where it copies an
+3. **`_scan` emits them.** Two copy sites carry quoted text and both map `_QUOTED` over what
+   they copy: the single-quote slice (`command[index:end]` around `:1139–1142`, contents only,
+   which also covers single quotes inside recursive scans of `"$( )"`) and the per-character
+   copy inside a double-quote frame (around `:1131`). The same mapping applies to characters
+   copied inside an unquoted `${…}` (the `brace` frame, around `:1216–1225`); a `$( )` inside
+   any of these is code and is extracted as today. A heredoc opener's quoted word (`<<";"`,
+   around `:1164`) is mapped too. Write `_QUOTE_MARK` before an opening quote when `_scan`'s own
+   state says a word starts there — `word == "" and plain` before the word-end pre-check
+   (`:1021–1029`) updates it, outside the dq and brace frames — rather than by looking at the
+   previous emitted character. Where it copies an
    unquoted backslash pair whose second character is an operator character, write `_SOFT`
    instead of the pair. Where it copies an unquoted `\r`, write `_SOFT`. Substitution text that
    `_scan` extracts and re-scans gets the same treatment, since it goes through `_scan`.
    Heredoc bodies are dropped before this and are unaffected; a heredoc delimiter line
    followed by `\r` keeps closing as today (`_DELIMITER_END` already excludes `\r`).
-4. **`_governs`.** A piece containing `_SOFT` and no `&&` governs as `;`; a run containing
-   `_SOFT` never governs as `&&` (`_join` already returns the first non-`&&` piece).
+4. **`_governs`.** Any piece containing `_SOFT` governs as `;`, with or without `&&` in it —
+   `shlex` lexes `&&\r\n` as the one piece `&&<SOFT>\n`, so this is what keeps it from being
+   trusted. `raw` still records the `&&` and the newline through `_OPERATORS`.
 5. **`_segments`.** After classification, map `_QUOTED` stand-ins back to their characters in
-   every token. A token that is exactly `{` or `}` while `current` already holds a word is
-   handled as `_SOFT` (splits, governs as `;`, adds nothing to `raw`). `_SOFT` adds nothing to
+   every token. A token made only of `{` and `}` is handled as `_SOFT` (splits, governs as `;`,
+   adds nothing to `raw`) unless it is exactly `{` or `}` and `current` is empty or holds only
+   unmarked `_COMMAND_LEADERS` words; that one is a real group as today. `_SOFT` adds nothing to
    `raw` (`_OPERATORS` does not match it). Keep `_QUOTE_MARK` in the tokens.
 6. **`_plain(token) -> str`.** A private helper that removes `_QUOTE_MARK`. `segments` applies
    it with the placeholder mapping, so the public output never shows the marker. In
-   `_walk_prefix`, the leader, assignment and redirection checks compare the raw token; the
-   wrapper and executable checks compare `_plain(token)`. `git_subcommand` returns the
-   subcommand and arguments through `_plain`. Any other place that compares a token's text to
+   `_walk_prefix`, the leader, assignment, redirection and fd checks compare the raw token only
+   before the first wrapper; the wrapper and executable checks, and after a wrapper the option
+   skip and the assignment check (`env "X=1"` is `env`'s own argument), compare `_plain(token)`.
+   `git_subcommand` maps `_plain` over `tokens[start:]` before walking git's own options, so
+   `git "--no-pager" commit` and `git "-c" a=b commit` still find `commit`, and returns the
+   subcommand and arguments marker-free; `_redirected` does the same. Any other place that compares a token's text to
    a name (`_loop_ranges`' loop words, `_leads_uncertainly`, `_redirected`, `switch_target`'s
    callers) reads it through `_plain` unless it is checking shell syntax, in which case a
    quoted token is correctly not that syntax.
@@ -258,21 +263,22 @@ private character each but keep their names and types; `INLINE_WHITESPACE` loses
 | # | Must prove | Covers |
 |---|---|---|
 | T1 | `true \|\| echo ";" \| git checkout -b x && git commit -m x` on `main` refused with the commit reason: red before, green after | A1 |
-| T2 | `segments` keeps each quoted operator token in its word (`";"`, `"&&"`, `'&'`, `'\|'`, `'\|\|'`, `'('`, `')'`, `'{'`, `'}'`, a quoted newline, `";"";"`, `a';'`, and a quoted `;` inside `"$( )"` that is code, not quoted, still splitting); every `\|\|`/`!` form from the Reproduction row built on a quoted token refused on `main`, each checked in bash | A2 |
-| T3 | `\;`, `\&`, `\|`, `-exec true \;` and a bare `{`/`}` argument forms refused on `main`; `ForEach-Object { git commit -m x }`, `Invoke-Command -ScriptBlock { git commit -m x }`, `Start-Job { git push origin main }` and `{ git commit -m x; }` refused on `main`; a soft separator never carries `&&` trust (`git checkout -b x \; && git commit -m x` refused on `main`) | A3 |
+| T2 | `segments` keeps each quoted operator token in its word (`";"`, `"&&"`, `'&'`, `'\|'`, `'\|\|'`, `'('`, `')'`, `'{'`, `'}'`, a quoted newline, `";"";"`, `a';'`, and a quoted `;` inside `"$( )"` that is code, not quoted, still splitting; a `;` inside an unquoted `${x:-;}` kept in its word); every `\|\|`/`!` form from the Reproduction row built on a quoted token refused on `main`, each checked in bash | A2 |
+| T3 | `\;`, `\&`, `\|`, `-exec true \;` and a bare `{`/`}` argument forms refused on `main`; `ForEach-Object { git commit -m x }`, `Invoke-Command -ScriptBlock { git commit -m x }`, `Start-Job { git push origin main }` and `{ git commit -m x; }` refused on `main`; a soft separator never carries `&&` trust (`git checkout -b x \; && git commit -m x` refused on `main`); brace-only tokens (`{ true || echo }} | git checkout -b x && git commit -m x; }`, `echo {}`) soft; real groups after a leader (`then {`, `do {`, `! {`) and PowerShell's `do { … } while ($x)` loop tests (`:3287`, `:3301`, `:3302`) unchanged | A3 |
 | T4 | `&&\r\n`, `&&\r\n\r\n`, `&& \r\n` forms refused on `main`; the test at `:2429` rewritten to refused; `git commit\r\n`, `git push\r\n`, `git push origin main\r\n` refused; the CR heredoc tests (`:971`, `:2056–2073`) keep their outcomes | A4 |
-| T5 | `'if' git commit -m x`, `'!' git checkout -b x && git commit -m x`, `"X=1" git commit -m x`, `'>' x git commit -m x`, `echo ";" git commit -m x` allowed on `main` (round 3's quoted-leader pins rewritten to allowed); `"git" commit -m x`, `git "commit" -m x`, `"sudo" git commit -m x`, `git checkout "main"; git commit -m x` from a branch refused; forged stand-ins and markers in the input blanked; `git_subcommand` returns marker-free text | A5 |
+| T5 | `'if' git commit -m x`, `'!' git commit -m x`, `"!" git commit -m x`, `"X=1" git commit -m x`, `'>' x git commit -m x`, `echo ";" git commit -m x` allowed on `main` (round 3's `'if'` and `"!"` pins at `:3182–3187` rewritten to allowed, the others kept); `'!' git checkout -b x && git commit -m x` pinned refused; `"git" commit -m x`, `git "commit" -m x`, `"sudo" git commit -m x`, `git "--no-pager" commit -m x`, `git "-c" a=b commit -m x`, `sudo "-E" git commit -m x`, `time "-p" git commit -m x`, `env "X=1" git commit -m x`, `git checkout "main"; git commit -m x` from a branch refused; forged stand-ins and markers in the input blanked; `git_subcommand` returns marker-free text | A5 |
 | T6 | See below. | A6 |
 
-T6 in full. The existing suite passes unmodified except the tests A4 and A5 name, which step 3
-or 5 rewrites with a one-line note each in section 5; rounds 1–4's criteria are re-checked. The
+T6 in full. The existing suite passes unmodified except the tests A4 and A5 name — `:2429`, and round
+3's `'if'` and `"!"` rows at `:3182–3187` — which step 3 or 5 rewrites with a one-line note each
+in section 5; rounds 1–4's criteria are re-checked. The
 differential runs at step 6:
 - **Baseline.** `git show 8972524:.claude/hooks/guard_git.py`, loaded from the scratchpad with
   `.claude/hooks` on `sys.path` and registered in `sys.modules`.
 - **Corpus.** Every `(command, branch)` the suite passes to `violation`, captured with a scratch
   `-p` plugin.
 - **Variants.** Each command with a quoted-operator argument inserted after its first word
-  (`";"`, `"&&"`, `'('`, `'{'`), an escaped one (`\;`), a bare `{`, and each newline replaced by
+  (`";"`, `"&&"`, `'('`, `'{'`), an escaped one (`\;`), a bare `{`, a `${x:-;}`, and each newline replaced by
   `\r\n`; prefixes `true || echo ";" | ` and `! true | echo ';' | `; branches `main` and `feat/x`.
 - **What goes to bash.** Differing rows only, oracle as in round 4 (`git` shadowed with HEAD in a
   file, an empty checkout argument failing, `PATH=/usr/bin:/bin`, wrappers shadowed, stdin
@@ -302,6 +308,34 @@ differential runs at step 6:
   `segments`, A5 through `git_subcommand`.
 - **Every criterion has a test intent:** A1→T1, A2→T2, A3→T3, A4→T4, A5→T5, A6→T6.
 - **Nothing in the Public API lacks a criterion.** No new public surface.
+
+Re-checked after the critique: the Public API is unchanged; A2 and A5 changed at the user's
+choice and T2, T3, T5 and T6 changed with them, all still covered.
+
+### Critique
+
+`plan-critic` verdict: accept with changes. Every finding applied:
+
+1. **`'!' git checkout -b x && git commit -m x` cannot be allowed: bash is safe only because a
+   command named `!` fails.** Put to the user, who chose to change A5: `'!' git commit -m x` and
+   `"!" git commit -m x` allowed, the `&&` form pinned refused; the round 3 rows that change are
+   named in T5 and T6.
+2. **The bare-brace rule broke PowerShell's `do {` loop and bash's `then {`.** Applied: a brace
+   is real when the invocation is empty or holds only unmarked leaders (approach, guide 5, T3).
+3. **The quote marker stopped option and wrapper walks (`git "--no-pager" commit`,
+   `sudo "-E" git`, `env "X=1" git`).** Applied: raw checks only before the first wrapper,
+   `_plain` over git's options and in `_redirected` (guide 6, T5).
+4. **`&&\r\n` lexes as one piece that still governed as `&&`.** Applied: any piece holding
+   `_SOFT` governs as `;` (guide 4).
+5. **Single-quoted text is copied as a slice, not per character.** Applied: guide 3 names the
+   copy sites.
+6. **Brace-only tokens such as `}}` stayed real separators.** Applied: any brace-only token is
+   soft unless it is an exact brace at command position (guide 5, T3).
+7. **`${…}` hides the same defect.** Put to the user, who chose to include it: A2 and the Class
+   row, guide 3, T2, T6.
+8. **Finding a word-starting quote from the previous emitted character is fragile.** Applied:
+   guide 3 uses `_scan`'s own `word`/`plain` state.
+9. **Leftover template text in Builds on.** Applied: removed.
 
 ---
 
