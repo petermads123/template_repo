@@ -245,6 +245,14 @@ _PLACEHOLDER = "\x1f"
 #: redirection. Everything that reads a token's text strips it with `_plain`.
 _QUOTE_MARK = "\ue000"
 
+#: Written by `_scan` in front of an escaped `!` (`\!`). Bash runs a command named
+#: `!` there, but round 3 records stepping over it as a leader as an over-refusal,
+#: so `_walk_prefix` and `_group_position` still read it as one while `_openers`
+#: does not let it start a compound. Everything that reads a token's text strips it
+#: with `_plain`.
+_BANG_MARK = "\ue00b"
+_ESCAPED_BANG = _BANG_MARK + "!"
+
 #: The characters that are operators when bare and plain text in quotes. `_scan`
 #: writes each one inside quotes (and inside an unquoted `${ }`) as its own
 #: private character, so `shlex` keeps it in its word and `_segments` maps it
@@ -263,7 +271,7 @@ _ESCAPED_OPERATORS = ";&|(){}<>"
 
 #: Every private character `_prepare` blanks in its input, so a command cannot
 #: forge one.
-_PRIVATE = (_OPEN, _CLOSE, _PLACEHOLDER, _QUOTE_MARK, *_QUOTED.values())
+_PRIVATE = (_OPEN, _CLOSE, _PLACEHOLDER, _QUOTE_MARK, _BANG_MARK, *_QUOTED.values())
 
 #: Characters `shlex` emits as tokens of their own rather than folding into a
 #: word. The default set plus the newline, which would otherwise be whitespace
@@ -418,7 +426,7 @@ def _plain(token: str) -> str:
     Returns:
         The token's text as the shell would see it.
     """
-    return token.replace(_QUOTE_MARK, "")
+    return token.replace(_QUOTE_MARK, "").replace(_BANG_MARK, "")
 
 
 def _unquote(token: str) -> str:
@@ -554,8 +562,8 @@ def _walk_prefix(tokens: tuple[str, ...]) -> tuple[int, tuple[str, ...]]:
             while index < len(tokens) and _plain(tokens[index]).startswith("-"):
                 index += 1
             continue
-        if view in _STEPPED_LEADERS:
-            leaders.append(view)
+        if view in _STEPPED_LEADERS or view == _ESCAPED_BANG:
+            leaders.append("!" if view == _ESCAPED_BANG else view)
             index += 1  # the command it leads starts at the next word
             continue
         return index, tuple(leaders)
@@ -1003,8 +1011,16 @@ _CLOSER_OPENERS = {
     "]]": ("[[",),
 }
 
-#: The operators a closing word may follow: it ends a list.
+#: The operators a closing word may follow: it ends a list, or a group or a case
+#: pattern whose last item bash lets a reserved word follow directly.
 _BEFORE_CLOSER = frozenset({";", "\n", "&", ";;", ";&", ";;&"})
+_BEFORE_CLOSER_OR_GROUP = _BEFORE_CLOSER | {")", "}"}
+
+#: The words that close a compound other than `[[`, and the words an invocation
+#: may start with to open one after `coproc NAME`.
+_CLOSING_WORDS = frozenset({"fi", "esac", "done"})
+_COMPOUND_STARTS = _COMPOUND_LEADERS | _COMPOUND_WORDS
+_RESERVED_STARTS = _COMMAND_LEADERS | _COMPOUND_WORDS
 
 #: Words that open a bash loop, and the leaders among them.
 _LOOP_COMMANDS = frozenset({"for", "select"})
@@ -1232,11 +1248,14 @@ def _scan(
                 out.append(_QUOTED[pair[1]])  # bash: the character is text
                 index += 2
             else:
-                # `\!` stays unmarked: bash runs a command named `!`, but round 3
+                # `\!` gets its own mark: bash runs a command named `!`, but round 3
                 # records stepping over it as an over-refusal, and a leader read
-                # as a leader only ever refuses more.
-                if not in_double and top != "brace" and pair[1:] != "!":
-                    mark()
+                # as a leader only ever refuses more. It must not open a compound.
+                if not in_double and top != "brace":
+                    if pair[1:] == "!":
+                        out.append(_BANG_MARK)
+                    else:
+                        mark()
                 out.append(pair)
                 index += 2
             boundary = False
@@ -1547,6 +1566,8 @@ def _group_position(words: list[str]) -> bool:
     while index < len(words):
         word = words[index]
         index += 1
+        if word == _ESCAPED_BANG:
+            word = "!"
         if word in _COMMAND_LEADERS:
             if word == "time":
                 while index < len(words) and words[index].startswith("-"):
@@ -1925,32 +1946,62 @@ def _loop_ranges(
     return widened
 
 
-def _openers(tokens: tuple[str, ...]) -> tuple[tuple[str, ...], int]:
+def _openers(tokens: tuple[str, ...]) -> tuple[tuple[str, ...], int, bool]:
     """Find the compound commands an invocation opens, in the order written.
 
-    The reserved words `if`, `while` and `until` are leaders and can chain; `case`,
-    `for`, `select` and `[[` are the command word. A `[[` closed in the same
-    invocation holds nothing that could split a list and is left out.
+    Bash reads a reserved word only as the first word of a command, and a command
+    starts again after another reserved word that takes one: `if`, `then`, `while`,
+    `!`, `time` and its options, and `coproc` with its optional name. After an
+    assignment, a redirection, a wrapper program or any ordinary word it is an
+    ordinary word, and so is a word written with a quote or a backslash. So the
+    walk steps over reserved words only, and stops at anything else. The reserved
+    words `if`, `while` and `until` are leaders and can chain; `case`, `for`,
+    `select` and `[[` are the command word. A `[[` closed in the same invocation
+    holds nothing that could split a list and is left out.
 
     Args:
-        tokens: The invocation's tokens.
+        tokens: The invocation's tokens, as written (the quote mark is kept).
 
     Returns:
-        The kinds opened, and how many of them are leaders written before the
-        first `!` or `coproc` (all of them when there is none).
+        The kinds opened, how many of them are leaders written before the first
+        `!` or `coproc` (all of them when there is none), and whether the
+        invocation opens a `[[` it also closes.
     """
-    index, leaders = _walk_prefix(tokens)
-    kinds = [word for word in leaders if word in _COMPOUND_LEADERS]
+    kinds: list[str] = []
     before = 0
-    for word in leaders:
-        if word in _UNCERTAIN_LEADERS:
+    uncertain = False
+    index = 0
+    count = len(tokens)
+    while index < count:
+        word = tokens[index]
+        if word == "time":
+            index += 1
+            while index < count and tokens[index].startswith("-"):
+                index += 1
+            continue
+        if word not in _STEPPED_LEADERS:
             break
+        index += 1
+        if word in _UNCERTAIN_LEADERS:
+            uncertain = True
         if word in _COMPOUND_LEADERS:
-            before += 1
-    word = tokens[index] if index < len(tokens) else ""
-    if word in _COMPOUND_WORDS and not (word == "[[" and "]]" in tokens[index + 1 :]):
-        kinds.append(word)
-    return tuple(kinds), before
+            kinds.append(word)
+            if not uncertain:
+                before += 1
+        if word == "coproc":
+            named = (
+                index + 1 < count
+                and tokens[index] not in _RESERVED_STARTS
+                and tokens[index + 1] in _COMPOUND_STARTS
+            )
+            index += 1 if named else 0  # `coproc NAME compound`
+    word = tokens[index] if index < count else ""
+    closed = False
+    if word in _COMPOUND_WORDS:
+        closed = word == "[[" and "]]" in tokens[index + 1 :]
+        if not closed:
+            kinds.append(word)
+    return tuple(kinds), before, closed
 
 
 def _own_operators(segment: Segment, run: _Run) -> list[str]:
@@ -1966,18 +2017,36 @@ def _own_operators(segment: Segment, run: _Run) -> list[str]:
     return [op for level, op in run if level == segment.depth and op != _CLOSED]
 
 
+def _leading_closers(tokens: tuple[str, ...], start: int) -> list[str]:
+    """List the closing words written one after another from a position.
+
+    Args:
+        tokens: The invocation's tokens.
+        start: Where the run may begin.
+
+    Returns:
+        `fi`, `esac` and `done` words in order, up to the first other token.
+    """
+    words: list[str] = []
+    for token in tokens[start:]:
+        if token not in _CLOSING_WORDS:
+            break
+        words.append(token)
+    return words
+
+
 def _compound_spans(
     parsed: list[Segment], runs: list[_Run]
-) -> tuple[dict[int, tuple[str, ...]], dict[int, int], dict[int, int]]:
+) -> tuple[dict[int, tuple[str, ...]], dict[int, int], dict[int, int], bool]:
     """Pair the reserved-word compounds of a command with their closing words.
 
     Each substitution depth has its own stack. `fi`, `esac` and `done` close the
     innermost open compound of their kind when they start an invocation that
-    follows a list's end and is not a case pattern; a `]]` token closes an open
-    `[[`. An opener with no closer at its depth, and a closer that does not match
-    the innermost opener, are ignored: bash rejects those as a syntax error, and
-    ignoring them leaves the reading as it was. The end of a substitution drops
-    what was open inside it.
+    follows a list's end, a `)` or a `}` and is not a case pattern, and so does
+    each closing word that follows another one (`fi fi`) or a `]]` that closed a
+    `[[` (`[[ a ]] fi`): bash reads a reserved word after any of them. A `]]`
+    token closes an open `[[`. The end of a substitution drops what was open
+    inside it.
 
     Args:
         parsed: The invocations of the command, in order.
@@ -1985,27 +2054,33 @@ def _compound_spans(
 
     Returns:
         The matched compounds each invocation opens, as kinds in the order
-        written; how many each invocation closes; and how many of the first are
-        leaders written before the invocation's first `!` or `coproc`.
+        written; how many each invocation closes; how many of the first are
+        leaders written before the invocation's first `!` or `coproc`; and
+        whether every opener and every closing word found its partner. A command
+        that does not pair is a syntax error to bash, or a shape this pairing
+        does not read, and the caller treats every branch switch in it as unsure.
     """
     opened: dict[int, tuple[str, ...]] = {}
     leaders: dict[int, int] = {}
     matched: dict[int, set[int]] = {}
     closes: dict[int, int] = {}
     stacks: dict[int, list[tuple[int, int, str]]] = {}
+    paired = True
     for index, segment in enumerate(parsed):
         run = runs[index] if index < len(runs) else ()
         for level in [level for level in stacks if level > segment.depth]:
+            paired = paired and not stacks[level]
             del stacks[level]
         for level, operator in run:
             if operator == _CLOSED:
                 for deeper in [deeper for deeper in stacks if deeper >= level]:
+                    paired = paired and not stacks[deeper]
                     del stacks[deeper]
         stack = stacks.setdefault(segment.depth, [])
         tokens = segment.tokens
-        word = tokens[0] if tokens else ""
-        wanted: tuple[str, ...] = ()
-        if word in _CLOSER_OPENERS and word != "]]":
+        kinds, before, bracketed = _openers(tokens)
+        closing: list[str] = []
+        if tokens[:1] and tokens[0] in _CLOSING_WORDS:
             own = _own_operators(segment, run)
             following = parsed[index + 1] if index + 1 < len(parsed) else None
             pattern = False
@@ -2016,19 +2091,30 @@ def _compound_spans(
                     and after[:1] == [")"]
                     and all(op in ("(", "{") for op in after[1:])
                 )
-            if own and own[-1] in _BEFORE_CLOSER and not pattern:
-                wanted = _CLOSER_OPENERS[word]
-        elif "]]" in tokens:
-            wanted = _CLOSER_OPENERS["]]"]
-        if wanted and stack and stack[-1][2] in wanted:
-            start, ordinal, _ = stack.pop()
-            matched.setdefault(start, set()).add(ordinal)
-            closes[index] = closes.get(index, 0) + 1
-        kinds, before = _openers(tokens)
+            if not pattern:
+                if own and own[-1] in _BEFORE_CLOSER_OR_GROUP:
+                    closing = _leading_closers(tokens, 0)
+                else:
+                    paired = False  # a closing word where none can stand
+        elif "]]" in tokens and (bracketed or (stack and stack[-1][2] == "[[")):
+            at = tokens.index("]]")
+            if not bracketed:
+                start, ordinal, _ = stack.pop()
+                matched.setdefault(start, set()).add(ordinal)
+                closes[index] = closes.get(index, 0) + 1
+            closing = _leading_closers(tokens, at + 1)
+        for word in closing:
+            if stack and stack[-1][2] in _CLOSER_OPENERS[word]:
+                start, ordinal, _ = stack.pop()
+                matched.setdefault(start, set()).add(ordinal)
+                closes[index] = closes.get(index, 0) + 1
+            else:
+                paired = False  # a closing word that matches no open compound
         for ordinal, kind in enumerate(kinds):
             stack.append((index, ordinal, kind))
         opened[index] = kinds
         leaders[index] = before
+    paired = paired and not any(stacks.values())
     spans: dict[int, tuple[str, ...]] = {}
     firsts: dict[int, int] = {}
     for start, ordinals in matched.items():
@@ -2037,7 +2123,7 @@ def _compound_spans(
             kind for ordinal, kind in enumerate(kinds) if ordinal in ordinals
         )
         firsts[start] = sum(1 for ordinal in ordinals if ordinal < leaders[start])
-    return spans, closes, firsts
+    return spans, closes, firsts, paired
 
 
 def _walk_run(
@@ -2193,7 +2279,7 @@ def _judge(command: str, branch: str, powershell: bool = False) -> str:
     operands: list[tuple[_Key, set[str]]] = []
     negating: set[_Key] = set()
     patterns: dict[_Key, bool] = {}
-    opens, closes, leaders = _compound_spans(parsed, runs)
+    opens, closes, leaders, paired = _compound_spans(parsed, runs)
     for number, segment in enumerate(parsed):
         for level in [level for level in nest if level > segment.depth]:
             del nest[level]
@@ -2267,7 +2353,13 @@ def _judge(command: str, branch: str, powershell: bool = False) -> str:
         if target and not _redirected(segment.tokens):
             # What `!` negates and `coproc` backgrounds leaves the `&&` after it
             # unsure whether the switch happened.
-            unsure = bool(negating) or _leads_uncertainly(segment.tokens)
+            # A compound the pairing could not close leaves the levels it counts
+            # in doubt, so a switch is not trusted in the bash reading either.
+            unsure = (
+                bool(negating)
+                or _leads_uncertainly(segment.tokens)
+                or not (paired or powershell)
+            )
             ok = here | {target} if unsure else {target}
             possible.add(target)
             for _, targets in frames:
