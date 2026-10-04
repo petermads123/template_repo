@@ -4803,21 +4803,13 @@ def test_violation_refuses_an_or_switch_after_an_if_compound() -> None:
 # and the `git checkout -b` that follows it still runs after the `||` failed.
 ESCAPED_CLOSER_BODIES = [
     *(
-        f"{opener} {head}; :; {word}; :; done"
-        for opener, head in (
-            ("while", "false; do"),
-            ("until", "true; do"),
-            ("for", "i in 1; do"),
-            ("select", "i in; do"),
-        )
+        f"{head}; do :; {word}; :; done"
+        for head in ("while false", "until true", "for i in 1", "select i in")
         for word in (r"\done", r"d\one", "do''ne", 'd"o"ne', r"do\ne")
     ),
-    *(
-        f"if true; then :; {word}; :; fi"
-        for word in (r"\fi", r"f\i", "f''i", 'f"i"')
-    ),
+    *(f"if true; then :; {word}; :; fi" for word in (r"\fi", r"f\i", "f''i", 'f"i"')),
     *(f"case a in a) :; {word}; :;; esac" for word in (r"\esac", r"es\ac", "es''ac")),
-    *(f"[[ x == {word} && b ]]" for word in (r"\]]", r"]\]", "]''']")),
+    *(f"[[ x == {word} && b ]]" for word in (r"\]]", r"]\]", "]'']")),
 ]
 
 
