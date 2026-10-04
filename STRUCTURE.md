@@ -94,35 +94,11 @@ found anywhere else.
 
 ### `tests/test_guard_git.py`
 
-Covers `.claude/hooks/guard_git.py`, and is the regression suite for the quoting defect
-its parser was rebuilt to fix. `segments` for quoting, every separator, a separator glued
-to a word or to a newline, a run of newlines, a newline inside a quoted message, a `#`
-inside a word, and input that cannot be lexed at all; `git_subcommand` for each spelling
-of the executable and the options that hide the subcommand; `push_targets_main` for every
-refspec shape that reaches `main`; `switch_target` for both subcommands, their new-branch
-options, an option left without a value and a file restore; `violation` for the whole
-behavioural matrix — punctuation in a commit message, a branch switch trusted across `&&`
-and across an `&&` ending a line but distrusted across everything else, including a mixed
-run such as `; &&`, a subshell that has closed and another repository reached with `-C`;
-commands hidden behind grouping delimiters; unreadable input, matched on word boundaries
-so `committee` is not a commit; and every refusal that held before the rewrite. `main` is
-exercised end to end against a throwaway repository: a commit on `main` refused with exit
-2 and the reason on stderr, a commit allowed after branching and off `main`, payloads that
-are not a git command, an unparseable payload, and a byte-order mark, plus a commit on
-`main` sent from the PowerShell tool and a check that `settings.json` registers the hook for
-both shell tools. `violation` is also run over PowerShell's own forms: `;` chains,
-`if ($?) { }` blocks, here-string messages, backtick continuations and `$env:` assignments,
-refused on `main` and allowed elsewhere, and pushes to `main` refused from any branch.
-
-The command-recognition cases follow: a commit or push hidden behind variable assignments,
-behind each redirection form including `2>&1`, inside backticks and `$( )`, and under each
-of the five wrapper programs; the executable in five spellings and cases; each push option
-whose value would otherwise be read as the remote; `@` and `refs/heads/main` reduced to
-the branches they name; an unresolvable switch refusing from either branch with its own
-message; and the commands that must stay allowed — `echo git commit`, `grep push log.txt`,
-`sudo apt install git`, `time ls`, and a commit message naming both `sudo` and `git push`.
-One test asserts a documented miss rather than a fix: `sudo -u me git push` is allowed,
-because only options are skipped after a wrapper and never a bare word.
+Covers `.claude/hooks/guard_git.py` — every public function plus `main` end to end against a
+throwaway repository, over both Bash and PowerShell command forms — and is the regression
+suite for the quoting defect its parser was rebuilt to fix. One test asserts a documented
+miss rather than a fix: `sudo -u me git push` is allowed, because only options are skipped
+after a wrapper and never a bare word.
 
 The shell-lexing cases follow, ahead of the round 2, round 3, round 4, round 5 and round 6 sections. The reproduction for the defect `fix/guard-git-shell-lexing` fixes comes first: a heredoc whose body carries a stray quote (`python3 - <<'EOF'` ... `EOF`), allowed on `main` rather than refused as unreadable. Then, each checked against real bash with `git` shadowed by an echo function:
 
@@ -334,35 +310,16 @@ instead; the `false ||` operand runs, so those rows are refused as play-safe); e
 
 ### `tests/test_plan_state.py`
 
-Covers `.claude/hooks/plan_state.py`. `parse` against a complete marker, a file with none,
-a step outside 1-10, an uppercase status, a missing Branch row, a missing title, an
-unreadable path, a nested `type/topic` folder read as a relative `feature`, a file outside
-the plans directory falling back to its parent's name, and an unprefixed filename such as
-`TEMPLATE.md` giving round 0 and an empty `feature`; `all_plans` for a missing plans
-directory, recursion, files without a marker, modification-time ordering and relative
-paths; `active_plan` for none, one and several active at once; `feature_rounds` for round
-ordering, a nested feature folder, feature isolation and an unknown feature; `git_lines`/`current_branch` against a throwaway
-repository, including a detached HEAD and a directory that is not a repository at all; and
-`main` printing the plans it finds, with one active and with none. `Plan.step_name` and
-`Plan.gated` are covered either side of `GATE_FROM_STEP`.
+Covers `.claude/hooks/plan_state.py`: every public function, the `Plan` properties either
+side of `GATE_FROM_STEP`, and the git helpers against a throwaway repository.
 
 ### `tests/test_stop_gate.py`
 
-Covers `.claude/hooks/stop_gate.py`. `venv_tool` for both layouts, neither, and which wins
-when both exist; `capture` for output, a non-zero exit and an expired timeout;
-`changed_python_files` and `tracked_python_files` against a throwaway repository, including
-a rename, a `.gitignore` and work committed on a branch; `structure_problems` in both
-directions plus placeholder paths; `stray_test_files`; `missing_init_files`; and
-`advisory_notes`, `notice` and `block`; `enforce` for blocking on one failure, for gathering
-every check's problems into a single reason, and for returning quietly when all four pass; and
-`main` for an unreadable payload, a turn already blocked once, the `.skip-gate` escape hatch,
-enforcement with no plan and Python changed, and the advisory path below the gate step.
-
-`gate_failures` is driven through a monkeypatched `venv_tool` and `capture` rather than
-real executables. Running it for real would invoke Ruff, mypy and `pytest` from inside
-`pytest`, and building stub executables would need a shell script on POSIX and an `.exe` on
-Windows. `enforce` and `main` are driven the same way, with the four checks monkeypatched, so
-neither reaches a real tool either.
+Covers `.claude/hooks/stop_gate.py`: every public function and `main`'s paths through the
+gate. `gate_failures`, `enforce` and `main` are driven through a monkeypatched `venv_tool`,
+`capture` and checks rather than real executables: running them for real would invoke Ruff,
+mypy and `pytest` from inside `pytest`, and stub executables would need a shell script on
+POSIX and an `.exe` on Windows.
 
 
 ## Plans: `development/`
@@ -406,7 +363,7 @@ session resumes from, and what `/create-pr` builds the pull request body from.
 |---|---|
 | `settings.json` | Registers the four hooks; pre-approves ruff/mypy/pytest, `python -m`, and the git commands the pipeline uses (read-only ones plus add, commit, push, fetch, checkout, switch, merge, mv) so an unattended build never stalls on a prompt — `guard_git.py` is what keeps that safe |
 | — | Every skill pins `model` and `effort` in its frontmatter; the table in `CLAUDE.md` says which and why |
-| `skills/build/` | `/build` — steps 3 to 7 as one unattended block: a subagent per step on its pinned model, the step's readers (`structure-auditor`, `test-designer`) run by the orchestrator and handed over in the brief, work-in-progress commits, commit and push after each, halting rules, trace relay, resume from the marker or an interrupted run |
+| `skills/build/` | `/build` — steps 3 to 7 as one unattended block, with `models.md` holding the per-step model and effort table and its rationale: a subagent per step on its pinned model, the step's readers (`structure-auditor`, `test-designer`) run by the orchestrator and handed over in the brief, work-in-progress commits, commit and push after each, halting rules, trace relay, resume from the marker or an interrupted run |
 | `rules/python.md` | Coding conventions, auto-loaded for `**/*.py` |
 | `skills/repo-setup/` | `/repo-setup` — one-time setup of a repo made from this template; carries `main_protect.solo.json` and `main_protect.collab.json` |
 | `skills/feature/` | `/feature` — starts or resumes the pipeline |
