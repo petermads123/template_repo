@@ -242,6 +242,13 @@ against bash 5.2 with `git` shadowed by a function keeping HEAD in a file:
   around a substitution, operators dropped before a close), and the segments identical whether or not
   the runs are collected.
 
+Round 5 (`development/fix/guard-git-shell-lexing/05-...`) adds the reproduction for quoted
+operators, under its own heading at the end of the file: `true || echo ";" | git checkout -b x && git commit -m x`
+refused on `main` instead of allowed. Three existing tests changed outcome as the concept agreed:
+round 3's quoted `'if'` and `"!"` pins are now allowed on `main`
+(`test_violation_allows_a_quoted_leader_on_main`) and the `&&\r\n` row of the substitution-trust test is
+now refused (`test_violation_refuses_a_commit_after_an_and_and_carriage_return`).
+
 ### `tests/test_plan_state.py`
 
 Covers `.claude/hooks/plan_state.py`. `parse` against a complete marker, a file with none,
@@ -428,12 +435,23 @@ switch anywhere in a loop counts for all of it — bash loops from `for`, `selec
 (keywords in any case) to the end of the command, a loop's condition included. A `done` closes a
 loop only where bash reads one — not after `|`, not ahead of a case pattern's `)`, and not at all
 when the command writes a quoted `done` — and a `do {` inside a bash loop is bash's. Known
-over-refusals: a quoted or misplaced leader is stepped over, a compound command ends an `&&`
+over-refusals: a misplaced leader is stepped over, a compound command ends an `&&`
 chain's trust, a loop in a subshell runs on. Known misses: a function is judged where it is
 defined, not where it is called; a switch target that is a variable; a redirection on a compound
-command, which bash runs before its body; PowerShell's glued braces and `ForEach-Object` pipelines;
-a word that only looks like an operator (a quoted `;`, `&&` or `&`, a literal `{`, `}`, `(` or `)`
-argument), read as the operator, so it can end an `||` operand or a `!` scope early.
+command, which bash runs before its body; PowerShell's glued braces and `ForEach-Object` pipelines.
+
+A quoted word is never an operator. The pre-pass writes what `shlex` would throw away into the
+text: inside quotes, and inside an unquoted `${ }`, each of `; & | ( ) { } < >` and the newline
+becomes a private stand-in that stays in its word and is mapped back by `segments`, so `echo ";" x`
+is one invocation and no quoted text reaches an `||` operand or a `!` scope. A word that starts
+with a quote carries a private mark, so `'if'`, `"!"`, `"X=1"` and `'>'` are words and not a
+reserved word, an assignment or a redirection (`'!' git commit -m x` is allowed on `main`), while
+`"git" commit` is still git: every comparison of a token's text strips the mark. Three tokens differ
+between bash and PowerShell and are read to be safe in both, as a *soft separator* — a backslash
+before an operator character, a bare `{` or `}` argument and a carriage return: each still splits the
+command, reads as `;` so nothing across it is trusted, and never ends an `||` operand or a `!` scope
+or shifts a group level (`&&\r\n` is not trusted; `ForEach-Object { git commit }` stays refused). A
+brace is a real group only where a command could start.
 
 `shlex` is not a shell, so a private pass runs in front of it and removes what
 bash never runs: a `#` at the start of a word comments out the rest of its line, a

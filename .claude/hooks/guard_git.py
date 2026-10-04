@@ -1,4 +1,4 @@
-"""PreToolUse hook: stop commits and pushes that would land on `main`.
+r"""PreToolUse hook: stop commits and pushes that would land on `main`.
 
 `CLAUDE.md` says never commit to `main`, and the remote protects it anyway — but
 a rejected push happens after the mistake, and a local commit on `main` has to
@@ -100,6 +100,25 @@ hole this hook exists to close. Anywhere else, unreadable input is allowed: the
 guard catches slips, and one that blocks legitimate work is worse than one that
 misses an exotic invocation.
 
+A quoted word is never an operator. `shlex` throws away which text was quoted,
+so the pass writes it into the text first: inside quotes, and inside an unquoted
+`${ }`, each of `; & | ( ) { } < >` and the newline becomes a private stand-in
+that `shlex` keeps in its word and `segments` turns back, so `echo ";" x` is one
+invocation and no quoted text reaches an `||` operand or a `!` scope. A word
+that starts with a quote carries a private mark in front, so `'if'`, `"!"`,
+`"X=1"` and `'>'` are words, not a reserved word, an assignment or a
+redirection (`'!' git commit -m x` is allowed on `main`), while `"git" commit`
+is still git: every comparison of a token's text strips the mark. Three tokens
+mean different things to the two shells this hook serves, and are read to be
+safe in both: a backslash before an operator character (`\;` is a word in bash
+and an operator in PowerShell), a bare `{` or `}` used as an argument (a script
+block in PowerShell, `ForEach-Object { git commit }`), and a carriage return (a
+word in bash, so `&&\r\n` runs a command named `\r`, a line break in
+PowerShell). Each is a soft separator: it still splits the command, as
+PowerShell would, but it is read as `;`, so nothing across it is trusted, and it
+never ends an `||` operand or a `!` scope or shifts a group level. A brace is a
+real group only where a command could start (after `;`, `then`, `do`, `!`).
+
 Inside a segment the command's name is found where a shell would find it, after
 the prefix of variable assignments and redirections, with backticks stripped and
 the executable matched without regard to case. A short list of wrapper programs
@@ -133,15 +152,11 @@ and a loop's condition counts with its body. A `done` closes a loop only where
 bash reads one: not after `|`, not ahead of a case pattern's `)`, and not at all
 when the command writes a quoted `done`, which a tokenizer cannot tell from the
 word, so every loop then runs on. A `do {` inside a bash loop is bash's. Known
-over-refusals, kept: a quoted or misplaced leader (`'if' git commit`, `x=1 if
+over-refusals, kept: a misplaced leader (`x=1 if
 git commit`) is stepped over, a compound command ends an `&&` chain's trust, and
 a loop in a subshell, `(for ...; done); cmd`, runs on. Known misses: a switch
 target that is a variable, a redirection on a compound command, which bash runs
-before its body, and PowerShell's glued braces and `ForEach-Object` pipelines;
-a word that only looks like an operator -- a quoted `;`, `&&` or `&`, a literal
-`{`, `}`, `(` or `)` argument -- which the tokenizer reads as the operator, so it
-can end an `||` operand or a `!` scope early (`true || echo ";" | git checkout -b
-x && git commit -m x`).
+before its body, and PowerShell's glued braces and `ForEach-Object` pipelines.
 Known miss: a function is judged where it is defined, not where it is
 called, so `f() { git commit; }; git checkout main; f` is not seen.
 
@@ -157,6 +172,9 @@ The git invocations that matter parse identically in either shell: quoted
 arguments, `;` chains, `{ }` blocks and here-string messages. PowerShell 5.1
 has no `&&`, so there a branch switch never carries into the next command, and
 a commit on `main` is refused even straight after `git checkout -b`.
+Where the two shells disagree -- a backslash before an operator character, a bare
+brace argument, a carriage return -- the token is read to be safe in both: it
+splits the command but is never trusted (a soft separator, below).
 
 Stdlib only: `jq` may not be available and hook commands default to
 Git Bash on Windows, so the usual shell recipe does not work here.
@@ -188,13 +206,46 @@ _CLOSE = "\x1e"
 #: branch. Blanked in the input like the two marks.
 _PLACEHOLDER = "\x1f"
 
+#: Written by `_scan` before the opening quote of a word that starts with one, so
+#: a token still says it was quoted after `shlex` has dropped the quotes: a quoted
+#: `if`, `!`, `X=1` or `>` is a word, not a reserved word, an assignment or a
+#: redirection. Everything that reads a token's text strips it with `_plain`.
+_QUOTE_MARK = "\ue000"
+
+#: The characters that are operators when bare and plain text in quotes. `_scan`
+#: writes each one inside quotes (and inside an unquoted `${ }`) as its own
+#: private character, so `shlex` keeps it in its word and `_segments` maps it
+#: back.
+_QUOTED_CHARS = ";&|(){}<>\n"
+_QUOTED = {char: chr(0xE001 + number) for number, char in enumerate(_QUOTED_CHARS)}
+_QUOTE_TABLE = str.maketrans(_QUOTED)
+_UNQUOTE_TABLE = str.maketrans({stand_in: char for char, stand_in in _QUOTED.items()})
+
+#: Stands where a token is an operator in one shell and a word in the other: a
+#: backslash before an operator character, and a carriage return. It splits the
+#: command, as the PowerShell reading would, but is never trusted, never ends an
+#: `||` operand or a `!` scope and never changes a group level, as the bash
+#: reading requires.
+_SOFT = "\ue00b"
+
+#: Characters that follow a backslash in a word that bash reads as one word and
+#: PowerShell as a separator, or the other way about.
+_SOFT_ESCAPED = ";&|(){}<>\r"
+
+#: Every private character `_prepare` blanks in its input, so a command cannot
+#: forge one.
+_PRIVATE = (_OPEN, _CLOSE, _PLACEHOLDER, _QUOTE_MARK, _SOFT, *_QUOTED.values())
+
 #: Characters `shlex` emits as tokens of their own rather than folding into a
 #: word. The default set plus the newline, which would otherwise be whitespace
-#: and would silently join two commands written on two lines into one.
-PUNCTUATION_CHARS = "();<>|&\n" + _OPEN + _CLOSE
+#: and would silently join two commands written on two lines into one, and the
+#: soft separator.
+PUNCTUATION_CHARS = "();<>|&\n" + _OPEN + _CLOSE + _SOFT
 
-#: Whitespace, minus the newline that `PUNCTUATION_CHARS` claims.
-INLINE_WHITESPACE = " \t\r"
+#: Whitespace, minus the newline that `PUNCTUATION_CHARS` claims. A carriage
+#: return is not whitespace: bash reads it as a word character, so `&&\r\n` runs
+#: a command named `\r`, and PowerShell reads it as a line break.
+INLINE_WHITESPACE = " \t"
 
 #: Tokens that end one invocation and begin the next.
 SEPARATORS = frozenset({"&&", "||", ";", "|", "&"})
@@ -205,7 +256,7 @@ SEPARATORS = frozenset({"&&", "||", ";", "|", "&"})
 #: The grouping delimiters are here too: they begin and end a command list, so
 #: `(git commit)` has to split rather than leave `(` sitting where the command
 #: name should be, which would hide the `git` behind it.
-SEPARATOR_CHARS = frozenset("&|;\n(){}" + _OPEN + _CLOSE)
+SEPARATOR_CHARS = frozenset("&|;\n(){}" + _OPEN + _CLOSE + _SOFT)
 
 #: The one separator whose right side runs only if its left side succeeded, so
 #: a branch switch before it can be trusted to have taken effect.
@@ -329,8 +380,32 @@ def _is_separator(token: str) -> bool:
     return token != "" and set(token) <= SEPARATOR_CHARS
 
 
+def _plain(token: str) -> str:
+    """Remove the quote mark from a token.
+
+    Args:
+        token: A token from `_segments`.
+
+    Returns:
+        The token's text as the shell would see it.
+    """
+    return token.replace(_QUOTE_MARK, "")
+
+
+def _unquote(token: str) -> str:
+    """Turn the stand-ins for quoted operator characters back into the characters.
+
+    Args:
+        token: One token from the lexer.
+
+    Returns:
+        The token with each stand-in replaced by the character it stands for.
+    """
+    return token.translate(_UNQUOTE_TABLE)
+
+
 def _governs(token: str) -> str:
-    """Reduce one separator token to the separator that governs it.
+    r"""Reduce one separator token to the separator that governs it.
 
     Args:
         token: A token for which `_is_separator` is true.
@@ -338,8 +413,12 @@ def _governs(token: str) -> str:
     Returns:
         The governing separator. A run containing `&&` keeps its guarantee,
         since an `&&` written at the end of a line still only runs its right
-        side if the left side succeeded.
+        side if the left side succeeded -- unless it holds a soft separator:
+        `&&\r\n` runs a command named `\r` in bash, so nothing across it is
+        trusted and the run governs as `;`.
     """
+    if _SOFT in token:
+        return ";"
     if GUARANTEEING in token:
         return GUARANTEEING
     stripped = token.strip("\n")
@@ -417,32 +496,41 @@ def _walk_prefix(tokens: tuple[str, ...]) -> tuple[int, tuple[str, ...]]:
     """
     index = 0
     leaders: list[str] = []
+    wrapped = False
     while index < len(tokens):
         token = tokens[index]
-        if ASSIGNMENT.match(token):
+        # A quoted word is never shell syntax, so the checks for an assignment, a
+        # redirection and a leader read the token with its quote mark. After a
+        # wrapper the words are the wrapper's own arguments, and are read as
+        # text, which only ever refuses more.
+        view = _plain(token) if wrapped else token
+        if ASSIGNMENT.match(view):
             index += 1
             continue
-        if token.startswith(REDIRECTION_STARTS):
+        if view.startswith(REDIRECTION_STARTS):
             index += 2  # the operator and the file it redirects to
             continue
         if (
-            token.isdigit()
+            view.isdigit()
             and index + 1 < len(tokens)
-            and tokens[index + 1].startswith(REDIRECTION_STARTS)
+            and (
+                _plain(tokens[index + 1]) if wrapped else tokens[index + 1]
+            ).startswith(REDIRECTION_STARTS)
         ):
             index += 1  # a file descriptor; its operator is handled next pass
             continue
-        if Path(_strip_substitution(token)).name.lower() in WRAPPERS:
+        if Path(_strip_substitution(_plain(token))).name.lower() in WRAPPERS:
             index += 1
+            wrapped = True
             # Only options are skipped, never a bare word, so this cannot walk
             # past a command name. An option that takes a value hides what
             # follows it -- `sudo -u me git push` reads as `me` -- which is a
             # miss rather than a false refusal.
-            while index < len(tokens) and tokens[index].startswith("-"):
+            while index < len(tokens) and _plain(tokens[index]).startswith("-"):
                 index += 1
             continue
-        if token in _STEPPED_LEADERS:
-            leaders.append(token)
+        if view in _STEPPED_LEADERS:
+            leaders.append(view)
             index += 1  # the command it leads starts at the next word
             continue
         return index, tuple(leaders)
@@ -501,6 +589,7 @@ def _redirected(tokens: tuple[str, ...]) -> bool:
         True if a global option redirects git elsewhere.
     """
     index = _command_index(tokens) + 1
+    tokens = tuple(_plain(token) for token in tokens)
     while index < len(tokens):
         token = tokens[index]
         if token in REDIRECTING_OPTIONS:
@@ -851,6 +940,9 @@ _LIST_ENDS = frozenset({";", "\n", "&", "&&", "||", ";;", ";&", ";;&"})
 #: them: `)&&` is `)` then `&&`.
 _OPERATORS = re.compile(r"\|\||&&|\|&|;;&?|;&|[;&|(){}\n]")
 
+#: A token made only of these is a brace word, not a group.
+_BRACES = frozenset("{}")
+
 #: Where a list is: the depth of the substitution it sits in, and how many
 #: `(` and `{` are open there.
 _Key = tuple[int, int]
@@ -901,13 +993,14 @@ def _prepare(command: str) -> tuple[str, bool]:
         to read within its budget comes back unchanged and flagged, so that
         `violation` plays safe rather than running out of time.
     """
-    command = command.replace(_OPEN, " ").replace(_CLOSE, " ")
-    command = command.replace(_PLACEHOLDER, " ")
+    for private in _PRIVATE:
+        command = command.replace(private, " ")
     budget = [20 * len(command) + 50_000]
     try:
         text, unmodelled, _, _ = _scan(command, 0, "", set(), 0, budget)
     except (_TooComplexError, RecursionError):
-        return command, True
+        # Unread, but a carriage return is still a soft separator.
+        return command.replace("\r", _SOFT), True
     return text, unmodelled
 
 
@@ -1017,6 +1110,8 @@ def _scan(
         pair = command[index : index + 2]
         top = frames[-1] if frames else ""
         in_double = top == "dq"
+        # A quote here opens a word: no text has been read in the current one.
+        starts_word = word == "" and plain and not in_double and top != "brace"
 
         if not in_double and top != "brace":
             if char in _WORD_ENDS:
@@ -1042,6 +1137,14 @@ def _scan(
             if in_double and pair[1:] not in ('"', "\\", "$", "`"):
                 out.append(char)  # a backslash that escapes nothing
                 index += 1
+            elif not in_double and pair[1:] in _QUOTED and top == "brace":
+                out.append(_QUOTED[pair[1]])  # one word in either shell
+                index += 2
+            elif not in_double and pair[1:] and pair[1] in _SOFT_ESCAPED:
+                # Bash reads the escaped character as text and PowerShell takes
+                # the backslash literally and the character as an operator.
+                out.append(_SOFT)
+                index += 2
             else:
                 out.append(pair)
                 index += 2
@@ -1055,6 +1158,8 @@ def _scan(
             if in_double:
                 frames.pop()
             else:
+                if starts_word:
+                    out.append(_QUOTE_MARK)
                 frames.append("dq")
             out.append(char)
             index, boundary = index + 1, False
@@ -1128,7 +1233,7 @@ def _scan(
             index += 1
             continue
         if in_double:
-            out.append(char)
+            out.append(_QUOTED.get(char, char))  # text in quotes, not an operator
             index += 1
             continue
 
@@ -1138,7 +1243,9 @@ def _scan(
             index, boundary = end, False
         elif char == "'":
             end = _skip_single(command, index)
-            out.append(command[index:end])
+            if starts_word:
+                out.append(_QUOTE_MARK)
+            out.append(command[index:end].translate(_QUOTE_TABLE))
             index, boundary = end, False
         elif char == "#" and boundary and top != "brace":
             stops = [command.find("\n", index)]
@@ -1161,7 +1268,7 @@ def _scan(
                 index, boundary = index + 2, True
                 continue
             delimiter, quoted, end = word_read
-            out.append(command[index:end])
+            out.append(_quote_heredoc_word(command[index:end]))
             queue.append((delimiter, dash, quoted))
             queue_slots.append(slot)
             index, boundary = end, False
@@ -1216,17 +1323,54 @@ def _scan(
         else:
             previous = command[index - 1 : index] if index else ""
             following = command[index + 1 : index + 2]
-            out.append(char)
+            if char == "\r" and top != "brace":
+                out.append(_SOFT)  # a line break in one shell, a word in the other
+            elif top == "brace":
+                out.append(_QUOTED.get(char, char))  # one word, in both shells
+            else:
+                out.append(char)
             index += 1
             starts_command = (
                 (char in ";&|" and previous not in ("<", ">") and following != ">")
                 or (char == "{" and boundary and following in (" ", "\t", "\n"))
+                or char == "\r"
             ) and top != "brace"
             boundary = char in _COMMENT_BOUNDARY
             if starts_command:
                 fresh()
 
     return "".join(out), unmodelled, length, closer == ""
+
+
+def _quote_heredoc_word(text: str) -> str:
+    """Write a heredoc operator and its delimiter word with the quoting kept.
+
+    Args:
+        text: The `<<`, an optional `-` and the delimiter word, as written.
+
+    Returns:
+        The text with each operator character inside the word's quotes, or
+        escaped by a backslash, replaced by its stand-in, so a word such as
+        `";"` stays a word when `shlex` takes the quotes off it.
+    """
+    result: list[str] = []
+    index = 0
+    while index < len(text):
+        char = text[index]
+        if char in "'\"":
+            end = text.find(char, index + 1)
+            end = len(text) if end == -1 else end
+            result.append(char + text[index + 1 : end].translate(_QUOTE_TABLE))
+            index = end
+            continue
+        if char == "\\" and index + 1 < len(text):
+            following = text[index + 1]
+            result.append(_QUOTED.get(following, "\\" + following))
+            index += 2
+            continue
+        result.append(char)
+        index += 1
+    return "".join(result)
 
 
 def _lex(prepared: str) -> list[str] | None:
@@ -1275,7 +1419,7 @@ def segments(command: str) -> list[Segment] | None:
         return None
     return [
         Segment(
-            tuple(token.replace(_PLACEHOLDER, "_") for token in segment.tokens),
+            tuple(_plain(token).replace(_PLACEHOLDER, "_") for token in segment.tokens),
             segment.separator,
             segment.depth,
         )
@@ -1327,11 +1471,11 @@ def _segments(command: str, *, runs: list[_Run] | None = None) -> list[Segment] 
 
     for token in tokens:
         if not _is_separator(token) and _OPEN not in token and _CLOSE not in token:
-            current.append(token)
+            current.append(_unquote(token))
             continue
         for piece in re.split(f"([{_OPEN}{_CLOSE}])", token):
             if piece and piece not in (_OPEN, _CLOSE) and not _is_separator(piece):
-                current.append(piece)  # a mark glued to punctuation that is no operator
+                current.append(_unquote(piece))  # a mark glued to a non-operator
             elif piece == _OPEN:
                 flush()
                 opened.append(
@@ -1361,12 +1505,20 @@ def _segments(command: str, *, runs: list[_Run] | None = None) -> list[Segment] 
                 separator = SUBSTITUTED
                 after_close = True
             elif piece:
+                # A token of braces only is a word in bash and a script block in
+                # PowerShell, unless it is one brace where a command could start,
+                # which is a group in both: it splits, but is soft.
+                soft = set(piece) <= _BRACES and not (
+                    piece in ("{", "}")
+                    and all(word.lower() in _COMMAND_LEADERS for word in current)
+                )
                 if current:
                     flush()
                     pending = []
                     raw = []
-                pending.append(_governs(piece))
-                raw.extend((depth, op) for op in _OPERATORS.findall(piece))
+                pending.append(";" if soft else _governs(piece))
+                if not soft:
+                    raw.extend((depth, op) for op in _OPERATORS.findall(piece))
                 separator = _join(pending)
                 after_close = False
             # The pieces left to right: an operator glued to a mark, as in
@@ -1389,19 +1541,20 @@ def git_subcommand(tokens: tuple[str, ...]) -> tuple[str, tuple[str, ...]]:
     start = _command_index(tokens)
     if start >= len(tokens):
         return "", ()
-    if Path(_strip_substitution(tokens[start])).name.lower() not in GIT_NAMES:
+    if Path(_strip_substitution(_plain(tokens[start]))).name.lower() not in GIT_NAMES:
         return "", ()
 
+    words = tuple(_plain(token) for token in tokens)
     index = start + 1
-    while index < len(tokens):
-        token = tokens[index]
+    while index < len(words):
+        token = words[index]
         if token in OPTIONS_WITH_VALUE:
             index += 2
             continue
         if token.startswith("-"):
             index += 1
             continue
-        return token, tokens[index + 1 :]
+        return token, words[index + 1 :]
     return "", ()
 
 
@@ -1550,7 +1703,8 @@ def _quoted_done(text: str) -> bool:
     Returns:
         True if some word holds a quote or a backslash and reads `done` without.
     """
-    for word in re.findall(r"[^\s;&|()<>{}]+", text):
+    for word in re.findall(f"[^\\s;&|()<>{{}}{_SOFT}]+", text):
+        word = word.replace(_QUOTE_MARK, "")
         if re.search(r"['\"\\]", word) and re.sub(r"['\"\\]", "", word) == "done":
             return True
     return False

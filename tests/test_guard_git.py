@@ -2426,7 +2426,6 @@ def test_violation_runs_a_substitution_before_the_command_around_it(
         'git checkout -b "$(echo feat/y)" && git commit -m x',
         'git checkout -b feat/y && git commit -m "$( )x"',
         'git checkout -b feat/y && git commit -m "Use ``foo`` here"',
-        'git checkout -b feat/y &&\r\ngit commit -m "$(date)"\r\n',
     ],
 )
 def test_violation_carries_and_trust_into_and_through_a_substitution(
@@ -3179,8 +3178,6 @@ def test_violation_pins_the_refusal_after_a_trusted_compound_command(
 @pytest.mark.parametrize(
     "command",
     [
-        "'if' git commit -m x",
-        '"!" git commit -m x',
         "\\! git commit -m x",
         "x=1 if git commit -m x",
         ">/dev/null ! git commit -m x",
@@ -3192,7 +3189,8 @@ def test_violation_pins_a_quoted_or_misplaced_leader_as_an_over_refusal(
 ) -> None:
     # Bash reads none of these as a reserved word and runs no git; the walk
     # steps over a leader wherever it sits in the prefix, after the quotes are
-    # gone. Recorded so changing it is a decision.
+    # gone. Recorded so changing it is a decision. (A quoted `'if'` or `"!"` is
+    # no longer here: round 5 reads a quoted word as a word.)
     assert violation(command, PROTECTED).startswith(COMMIT_REASON)
 
 
@@ -3882,3 +3880,18 @@ def test_violation_refuses_an_or_switch_after_a_quoted_separator_word() -> None:
     reason = violation(command, PROTECTED)
 
     assert reason.startswith(COMMIT_REASON)
+
+
+@pytest.mark.parametrize("command", ["'if' git commit -m x", '"!" git commit -m x'])
+def test_violation_allows_a_quoted_leader_on_main(command: str) -> None:
+    # Rewritten from round 3's over-refusal pins: bash reads a quoted word as a
+    # word, so no git runs.
+    assert violation(command, PROTECTED) == ""
+
+
+def test_violation_refuses_a_commit_after_an_and_and_carriage_return() -> None:
+    # Rewritten from round 2's allowed pin: `&&\r` runs a command named `\r` in
+    # bash, so the switch before it is not trusted.
+    command = 'git checkout -b feat/y &&\r\ngit commit -m "$(date)"\r\n'
+
+    assert violation(command, PROTECTED).startswith(COMMIT_REASON)

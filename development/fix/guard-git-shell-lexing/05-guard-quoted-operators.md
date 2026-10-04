@@ -1,6 +1,6 @@
 # The git guard never takes a quoted word for an operator
 
-<!-- claude-plan step=3 status=active -->
+<!-- claude-plan step=4 status=active -->
 
 | Field | Value |
 |---|---|
@@ -15,7 +15,7 @@
 |---|---|---|---|---|
 | 1 | Conceptualize | `/conceptualize` | with the user | done |
 | 2 | Plan | `/plan` | with the user | done |
-| 3 | Implement | `/implement` | in `/build` | pending |
+| 3 | Implement | `/implement` | in `/build` | done |
 | 4 | Verify | `/verify` | in `/build` | pending |
 | 5 | Test | `/test` | in `/build` | pending |
 | 6 | Concept check | `/concept-check` | in `/build` | pending |
@@ -361,6 +361,35 @@ FAILED tests/test_guard_git.py::test_violation_refuses_an_or_switch_after_a_quot
 ```
 
 `violation(...)` returned `""` (allowed), as the Defect block's Observed row says.
+
+### Deviations from the plan
+
+Built as planned, with these small departures:
+
+- **Brace leaders compare in lower case.** Guide 5 says a lone `{`/`}` is a real group when the
+  invocation holds only unmarked `_COMMAND_LEADERS` words. PowerShell spells `Do { } While` in any
+  case and two existing tests (`DO {`, `Do {`) failed with a case-sensitive test, so the check lower-cases
+  the word (`word.lower() in _COMMAND_LEADERS`); a quoted word still carries its mark and never matches.
+- **Backslash escapes in a heredoc delimiter word and in an unquoted `${ }`** become the operator's
+  stand-in (a word character), not `_SOFT`: `_SOFT` is punctuation to `shlex` and would split the word
+  (and `<<` + `_SOFT` would swallow the command name after it as a redirection target).
+- **`_scan` calls `fresh()` after an unquoted `\r`**, so a substitution written after a carriage return
+  lands in front of the invocation it belongs to.
+- **`_prepare`'s give-up path** (`command, True`) now also turns `\r` into `_SOFT`, since `\r` is no
+  longer whitespace and a raw `commit\r` would otherwise stop reading as `commit`.
+- **`_quoted_done`** strips the quote mark and excludes `_SOFT` when it splits words, to keep its meaning.
+- **A piece holding `_SOFT` governs as `;`** even when it is only `\r\n` (formerly `\n`), so
+  `segments` shows `;` for a CRLF line break; no existing test pins the old value.
+
+Existing tests rewritten (the three A4/A5 name, one line each):
+
+- `test_violation_carries_and_trust_into_and_through_a_substitution`: the `&&\r\n` row (was `:2429`)
+  removed from the allowed list; now `test_violation_refuses_a_commit_after_an_and_and_carriage_return`.
+- `test_violation_pins_a_quoted_or_misplaced_leader_as_an_over_refusal`: the `'if'` and `"!"` rows removed;
+  now `test_violation_allows_a_quoted_leader_on_main`.
+
+After the fix the reproduction is green; the suite is 1162 passed (1161 before, plus the reproduction, the two
+replacement tests (four new cases), minus the three rows moved out of parametrized lists).
 
 ---
 
