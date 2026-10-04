@@ -298,7 +298,35 @@ own heading at the end of the file: `true || if true; then echo; fi | git checko
 refused on `main` instead of allowed. Step 4 adds the reproduction for a closer written with an escape or a
 quote (`true || while false; do :; \done; :; done | git checkout -b x && git commit -m x`, also `d\one`,
 `do''ne`, `f\i`, `es\ac` and `[[ x == \]] && b ]]`, after `true ||` and `!`): sixty rows, each checked in bash
-to land the commit on `main`. Step 5 extends it.
+to land the commit on `main`. Step 5 adds the rest of the round's suite, each row run in bash 5.2 with `git`
+shadowed by a function keeping HEAD in a file (an empty checkout argument failing, `PATH=/usr/bin:/bin`, stdin
+closed, a timeout, the oracle shown live first by a plain commit landing on `main`) and, except where noted, landing the
+commit on `main`. The scope openers are `true ||`, `git status ||` and `!` (the matrix adds `false ||`, whose operand
+runs, so those rows are refused as play-safe); each body is also asserted allowed from another branch:
+
+- **Misplaced openers** -- sixteen words that look like an opener but follow an assignment, a redirection, a wrapper,
+  a backslash or a quote (`x=1 while`, `>/dev/null until`, `sudo if`, `env while`, `nohup case`, `time 'if'`,
+  `\! while`) inside an `if` and a `while` body.
+- **Closer runs** -- a closing word written straight after `)`, `}` or another closer (`(echo) fi`, `{ :; } fi`,
+  `fi fi`, `done done`, `[[ a ]] fi`, `((1)) fi`, `case ... b) (:) esac`), twenty-three bodies; a `}` after a closer is a group
+  in both readings; `coproc NAME <compound>` and `coproc <compound>` (thirteen bodies); `case` with an empty last
+  clause bare, in `{ }` and in `( )`; a brace after a closing word in `_group_position`.
+- **The rest of the class** -- `[[ ]]` forms, a `case` pattern's parentheses after each terminator, nested cases and
+  patterns spelled like a closing word, chained leaders, the arithmetic `for`, `time -p` before `|` and `|&`, and a push
+  of `HEAD` in those shapes refused with the push reason.
+- **Whole commands** -- a compound inside a substitution, backticks and an unquoted heredoc body; the negation inside
+  a leading `if` and the clause-terminator scopes still allowed; the compound `&&` over-refusals, `coproc` forms,
+  `(( ))`, `{ }`, `( )` and function definitions kept refused; fifteen rows allowed.
+- **The pairing** -- `_compound_spans` reports every valid body above as paired and twenty unpaired shapes as not (an
+  opener left open, a closer with no opener or the wrong one, one inside a substitution that ends first); a command that
+  does not pair is refused with the commit reason after a switch the bash reading would otherwise trust, and allowed
+  from another branch; the PowerShell reading is exempt; `\!` shows as `!` in `segments`, opens no compound, and a forged
+  mark is blanked.
+- **The container matrix** -- three openers by twenty-two constructs that hold a list terminator (`{ ; }`, `( ; )`,
+  `$( ; )`, backticks, `if`, `case` with `a)` and `(a)` patterns, the loops, `[[ && ]]`, `(( && ))`, a function, and
+  nests of them) bare, in braces and with the whole command in braces: 198 rows, pure Python.
+- **Depth** -- two thousand nested `case`, two thousand nested `if` (closed with `;` and with a run of closers), three
+  thousand unclosed `[[` and five thousand stray closers finish in seconds.
 
 ### `tests/test_plan_state.py`
 
@@ -460,14 +488,21 @@ the group or substitution it sits in closes, and only inside it is the switch tr
 (`if` to `fi`, `case` to `esac`, `while`, `until`, `for` or `select` to `done`, `[[` to `]]`) is a group of its own
 in that key, as `{ }` and `( )` are, so a terminator inside one does not end an operand or `!` scope opened outside
 it, and a `case` pattern's parentheses (the optional `(` and the first `)` after `in` or after a `;;`, `;&` or `;;&`)
-are the pattern's rather than a group's. `if`, `while` and `until` open one as leaders, chained or not, and `case`,
-`for`, `select` and `[[` as the command word; a `[[` whose `]]` is in the same invocation opens nothing. `fi`, `esac`
-and `done` close one only as the first word of an invocation that follows `;`, a newline, `&` or a `case` clause
-terminator and is not itself a case pattern, and a `]]` token closes an open `[[`. Each substitution depth pairs its
-own, and a substitution's end drops what was open inside it. An opener with no closer, or a closer that does not
-match the innermost open compound, is left out, as bash rejects it; a reserved word written with a quote or a
-backslash anywhere in it (`\done`, `d\one`, `do''ne`, `"done"`) is an ordinary word in bash and neither opens nor
-closes one. A `!` or `coproc` scope is keyed between the compounds its invocation opens: outside an `if`, `while` or
+are the pattern's rather than a group's. Bash reads a reserved word only as the first word of a command, so `if`,
+`while` and `until` open a compound as leaders, chained or not, and `case`, `for`, `select` and `[[` as the command
+word, where the walk from the start of the invocation meets only reserved words that take a command next (`then`,
+`do`, `else`, `elif`, `!`, `time` and its options, `coproc` with or without a name: `coproc C while …`). After an
+assignment, a redirection, a wrapper program or any ordinary word, and when the word is written with a quote or a
+backslash, it is an ordinary word and opens nothing (`x=1 while`, `>/dev/null if`, `sudo case`, `\! while`); a `[[`
+whose `]]` is in the same invocation opens nothing. `fi`, `esac` and `done` close one as the first word of an
+invocation that follows `;`, a newline, `&`, a `case` clause terminator, a `)` or a `}`, as each further closing word
+written after one (`fi fi`, `done done`), and as the closing word after a `]]` that closed a `[[` (`[[ a ]] fi`); a
+closing word ahead of a case pattern's `)` is the pattern's and closes nothing. A `]]` token closes an open `[[`. Each
+substitution depth pairs its own, and a substitution's end drops what was open inside it. A command in which some
+opener or closer finds no partner (an opener left open, a closer that matches nothing or the wrong kind, a closing
+word where none can stand) is a syntax error to bash, or a shape the pairing does not read, so in the bash reading no
+branch switch in it is trusted: each leaves `main` among the branches HEAD could be on, as a `!` does, and the
+command can only be refused more, never less (the PowerShell reading has no `fi` and is exempt). A `!` or `coproc` scope is keyed between the compounds its invocation opens: outside an `if`, `while` or
 `until` written before the `!`, and inside one written after it or opened by the command word. So
 `! if true; then echo; fi | git checkout -b feat/x && git commit -m x` keeps the scope past the `fi` and is refused,
 while in `if ! git diff --quiet; then git checkout -b feat/x && git commit -m x; fi` the `;` before `then` ends it
@@ -501,7 +536,8 @@ switch anywhere in a loop counts for all of it — bash loops from `for`, `selec
 (keywords in any case) to the end of the command, a loop's condition included. A `done` closes a
 loop only where bash reads one — not after `|`, not ahead of a case pattern's `)`, and not at all
 when the command writes a quoted `done` — and a `do {` inside a bash loop is bash's. Known
-over-refusals: a misplaced or backslash-escaped leader (`x=1 if`, `\!`) is stepped over, a compound command ends an `&&`
+over-refusals: a misplaced or backslash-escaped leader (`x=1 if`, `\!`) is stepped over when finding the command's name
+(it opens no compound), a compound command ends an `&&`
 chain's trust, a loop in a subshell runs on; a backslash-escaped operator or bare brace argument that
 PowerShell reads as an operator is refused although bash lands nothing (`echo \; git commit -m x`,
 `git checkout -b x \; && git commit -m x`, `&& echo { &&`), `'!' git checkout -b x && git commit -m x` is
@@ -517,7 +553,8 @@ becomes a private stand-in that stays in its word and is mapped back by `segment
 is one invocation and no quoted text reaches an `||` operand or a `!` scope. A word that holds a quote or a
 backslash escape anywhere in it carries a private mark in front of the first one, so `'if'`, `"!"`, `"X=1"`,
 `'>'`, `d\one` and `do''ne` are words and not a reserved word, a compound's closer, an assignment or a
-redirection (`\!` is the one exception, left unmarked because round 3 records it as an over-refusal) (`'!' git commit -m x` is allowed on `main`), while
+redirection (`\!` has a mark of its own, which keeps the round 3 over-refusal of stepping over it as a leader but lets it
+open no compound) (`'!' git commit -m x` is allowed on `main`), while
 `"git" commit` is still git: every comparison of a token's text strips the mark. Three tokens differ
 between bash and PowerShell, so the pre-pass writes the text twice and `violation` judges both
 readings, returning a refusal from either (bash's first). A backslash before an operator character is
@@ -527,7 +564,8 @@ so the commit after it is read across a newline) and a line break in PowerShell;
 argument is a word in bash and a script block delimiter in PowerShell (`ForEach-Object { git commit }`
 stays refused). In the bash reading a brace is a group only where a reserved word could stand — the
 first word, after `;`, a newline or an operator, after `then`, `do`, `!` and the other leaders, after
-`time` and its options, after `coproc NAME` and after `function NAME` — and a word anywhere else
+`time` and its options, after `coproc NAME`, after `function NAME` and after a run of closing words (`fi`, `esac`,
+`done`) — and a word anywhere else
 (`echo {`, `echo }}`, `{}`); leaders match case-sensitively. In the PowerShell reading every brace
 token is a delimiter, as it was before round 5. `segments` returns the bash reading.
 

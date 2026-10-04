@@ -340,6 +340,15 @@ Deviations from the plan, none of which touch section 1:
 
 Sanity check against bash 5.2 (git shadowed by a function keeping HEAD in a temp file, an empty checkout argument failing, `PATH=/usr/bin:/bin`, stdin closed, a timeout; shown live first by a plain `git commit -m x` landing `COMMIT on main`): the 45 rows of scratchpad `r6_class.py` (15 constructs x `true ||`, `!`, `coproc`), the 26 rows of `dc6_rows.txt` and 20 extra rows (`r6/extra.py`) all agree: every row where bash lands on `main` is refused, none allowed. Allowed rows land on `x` or run nothing in bash (`true || if true; then git checkout -b x && git commit; fi`, `if ! git diff --quiet; then git checkout -b feat/x && git commit -m x; fi`, create-or-switch). Perf: 3,000 nested `if` openers with closers finish in 0.4 s, 5,000 in 1.2 s.
 
+Step 5 changes (production code, all inside the class and the Root cause row's site; none touches section 1):
+
+- Confirmed bypasses found by the step 5 readers and the orchestrator's bash check (thirteen shapes: a word that only looks like an opener after an assignment, a redirection, a wrapper or `\!`; a closer written straight after `)`, `}` or another closer; `coproc NAME <compound>`; an empty last `case` clause). Red first (186 rows, commit 9386579), then fixed.
+- `_openers(tokens)` now follows bash's reserved-word rule: it walks only reserved words that take a command (`then`, `do`, `else`, `elif`, `!`, `if`, `while`, `until`, `time` + options, `coproc` + optional name) and stops at anything else; it no longer reuses `_walk_prefix`. It returns a third value (whether a `[[` is closed in the same invocation). A quoted or escaped word is never reserved; `\!` is told apart from `!` by a second private mark `_BANG_MARK` (`_ESCAPED_BANG`), which `_plain` strips, `_walk_prefix` and `_group_position` still read as the round 3 leader, and `_openers` does not.
+- `_compound_spans` closes on a closing word after `;`, newline, `&`, a `case` terminator, `)` or `}`; on each further closing word of a run (`fi fi`); and on the run after a `]]` that closed a `[[`. It returns a fourth value, `paired`.
+- Safety net (orchestrator's decision B): when `paired` is false (an opener left open, a closer that matches nothing or the wrong kind, a closing word where none can stand, an opener dropped when a substitution ends), `_judge` treats every branch switch in the bash reading as unsure (`ok = here | {target}`), so a mis-pairing can only over-refuse. The PowerShell reading is exempt: it has no `fi`, and its `if (...) { }` would otherwise always be unpaired. No existing test changed outcome.
+- `_group_position` reads a brace after a run of `fi`, `esac`, `done` as a group, so `{ if true; then :; fi }` is a group in the bash reading too (it was refused only through the PowerShell reading).
+- Docstrings (module and private) and STRUCTURE.md brought in line with all of the above.
+
 ---
 
 ## 4. Verification log

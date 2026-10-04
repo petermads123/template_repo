@@ -4994,6 +4994,10 @@ def test_violation_refuses_a_switch_after_a_compound_closed_by_a_brace(
 
 
 DOUBLE_BRACKET_BODIES = [
+    "[[ a ]]",
+    "if [[ a ]]; then :; fi",
+    "until [[ a ]]; do :; done",
+    "while [[ -z a ]]; do :; done",
     "if [[ a && b ]]; then :; fi",
     "while [[ a && b ]] && false; do :; done",
     "until [[ a && b ]]; do :; done",
@@ -5029,6 +5033,28 @@ def test_group_position_reads_a_brace_after_an_argument_as_a_word(
     words: list[str],
 ) -> None:
     assert not guard_git._group_position(words)
+
+
+PUSH_SHAPE_BODIES = [
+    "if true; then echo; fi",
+    "if true; then (echo) fi",
+    "case a in a) :;; esac",
+    "while false; do x=1 if; done",
+    "if true; then if true; then :; fi fi",
+    "coproc C while false; do :; done",
+]
+
+
+@pytest.mark.parametrize("body", PUSH_SHAPE_BODIES)
+@pytest.mark.parametrize("push", ["git push origin HEAD", "git push"])
+@pytest.mark.parametrize(("opener", "target"), SCOPE_OPENERS)
+def test_violation_refuses_a_push_of_head_after_a_compound_in_a_scope(
+    body: str, push: str, opener: str, target: str
+) -> None:
+    command = f"{opener} {body} | git checkout -b {target} && {push}"
+
+    assert violation(command, PROTECTED).startswith(PUSH_REASON), command
+    assert violation(command, "feat/y") == "", command
 
 
 @pytest.mark.parametrize("body", DOUBLE_BRACKET_BODIES)
