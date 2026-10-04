@@ -1,6 +1,6 @@
 # The git guard never takes a quoted word for an operator
 
-<!-- claude-plan step=6 status=active -->
+<!-- claude-plan step=7 status=active -->
 
 | Field | Value |
 |---|---|
@@ -18,7 +18,7 @@
 | 3 | Implement | `/implement` | in `/build` | done |
 | 4 | Verify | `/verify` | in `/build` | done |
 | 5 | Test | `/test` | in `/build` | done |
-| 6 | Concept check | `/concept-check` | in `/build` | pending |
+| 6 | Concept check | `/concept-check` | in `/build` | done |
 | 7 | Ship | `/ship` | in `/build` | pending |
 | 8 | Recommend | `/recommend` | with the user | pending |
 | 9 | Pull request | `/create-pr` | with the user | pending |
@@ -635,19 +635,62 @@ Edge cases considered and deliberately skipped, with reasons:
 
 | # | Criterion | Met | Evidence |
 |---|---|---|---|
-| A1 | | | |
+| A1 | `true \|\| echo ";" \| git checkout -b x && git commit -m x` refused on `main` with the commit reason | yes | Red: section 3's run at 0db4f6e (`violation(...)` returned `""`, `1 failed`); the same call against the baseline module (`base89.py`, 8972524) returns `''` again today. Green: `pytest -q tests/test_guard_git.py -k test_violation_refuses_an_or_switch_after_a_quoted_separator_word` `1 passed`; scratch `r5c/crit5.py` prints `Refused: this would commit to \`main\`...`; in bash the same line prints `COMMIT@main` (differential below). |
+| A2 | A quoted token is never an operator; the `\|\|`/`!` forms built on one are refused; `${x:-;}` included | yes | `crit5.py`: `segments('echo ";" x')` is one invocation `('echo', ';', 'x')`; the same for all twelve listed words; `true \|\| echo W \| git checkout -b x && git commit -m x` and `! true \| echo W \| git checkout -b feat/x && git commit -m x` refused on `main` for fourteen words (the twelve, `${x:-;}`, `'<'`), plus the group form and `${x:-;}` form. Differential: the `q;`, `q&&`, `q(`, `q{`, `${x:-;}`, `pre\|\|` and `pre!` variants, 456 rows bash lands on `main` that 8972524 allowed are now refused. |
+| A3 | Shell-dependent tokens play safe (`\;`, `\&`, `-exec true \;`, bare `{`/`}`; PowerShell scriptblocks stay refused) | yes | `crit5.py`: the seven listed forms refused on `main`; `Start-Job { git push origin main }` refused. Suite: `test_segments_returns_the_bash_reading_of_the_shell_dependent_tokens`, `test_violation_refuses_an_or_switch_after_a_shell_dependent_token`, `test_violation_refuses_a_git_command_inside_a_powershell_scriptblock`. The `esc;` and `bare{` variants of the differential: 0 bypass rows. |
+| A4 | `&&\r\n`, `&&\r\n\r\n`, `&& \r\n` refused; `:2429` refused; `git commit\r\n`, `git push\r\n`, `git push origin main\r\n` stay refused | yes | `crit5.py`: all seven checked, the old `:2429` command refused. `git diff 8972524 -- tests/` shows the row removed from the allowed list and `test_violation_refuses_a_commit_after_an_and_and_carriage_return` added. `crlf` variant: 14 differing rows, 0 bypass. |
+| A5 | A quoted word at command position is not shell syntax; `'!' git checkout -b x && git commit -m x` and `"git" commit -m x` stay refused | yes | `crit5.py`: the six allowed rows allowed, `\!`, `x=1 if`, `>/dev/null !`, `sudo -n !`, the `'!'` `&&` form and `"git" commit` refused. Old suite against the new guard: exactly the `'if'` and `"!"` rows differ (section A6 below). |
+| A6 | Nothing else changed; differential against 8972524 with bash as oracle | yes | See "Differential" below: 22,908 rows, 1,392 differing, 1,380 sent to bash, 0 bypass rows; 12,100 allowed rows run, 30 land on `main`, all four recorded misses and all allowed by 8972524 too. `git diff 8972524 -- tests/` removes exactly three test rows plus one comment line. 1613 passed, ruff, ruff format, mypy clean. |
 
-Drift found, and what was done about it:
+Root cause re-read against the diff: cause (1) is removed where it arises, not at its symptom. `_scan` now writes `_QUOTED` stand-ins for operator characters inside quotes and `${ }` and a `_QUOTE_MARK` before a word-starting quote, so `shlex` and `_is_separator` never see a quoted `;` as an operator (`guard_git.py`, `git diff 8972524`); cause (2) is `INLINE_WHITESPACE = " \t"` (`\r` is no longer whitespace). The step-5 redesign (two readings, bash first, PowerShell second) replaced the soft separator; `violation` refuses when either refuses.
+
+Scope check: Scope took `the class`, played safe for both shells. Every class member in the Defect block's Class row has a test (quoted operator words: 26 `QUOTED_OPERATOR_SOURCES`; bare braces and escapes: `HIDDEN_SWITCH_FORMS`; `\r`: `CARRIAGE_RETURN_FORMS`; over-refusals: `QUOTED_WORD_AT_COMMAND_POSITION`). Nothing from "Explicitly out of scope" was built: no `tool_name` is read (`grep tool_name guard_git.py` finds none), no `$'...'` change, no committed bash oracle test. No public signature or constant name changed; every new name starts with `_` (`INLINE_WHITESPACE` changes value, as planned). No showcase (hook entry point; runs on empty stdin). DEVELOPMENT.md untouched.
+
+### Differential (A6 / T6)
+
+Scratchpad `r5c/diff.py`, `allowed.py`, `post.py`, `regress.py`, `crit5.py`. Baseline `git show 8972524:.claude/hooks/guard_git.py` loaded beside `.claude/hooks` and registered in `sys.modules`. The oracle was shown live first: `git commit -m x` on `main` printed `(True, 'ok')` (a commit landing on `main`), and on `feat/x` `(False, 'ok')`. Oracle: bash 5.2 with `git` shadowed by a function keeping HEAD in a temp file, an empty checkout argument failing, `PATH=/usr/bin:/bin`, `sudo`/`doas`/`nohup`/`env` shadowed, stdin `DEVNULL`, 10 s timeout, no nesting past a hostile bound (300 chars, 6 `$(`, 12 `(`, 8 backticks).
+
+| Item | Count |
+|---|---|
+| Corpus: `(command, branch)` pairs the suite passes to `violation` (scratch `-p` plugin) | 1,357 pairs, 1,114 unique commands |
+| Variants x branches (`plain`, `";"`, `"&&"`, `'('`, `'{'` after the first word; `\;`; bare `{`; `${x:-;}`; CRLF; `true \|\| echo ";" \| `; `! true \| echo ';' \| `; `main` and `feat/x`) | 22,908 rows |
+| Differing between 8972524 and the new guard | 1,392 (496 new allows what the baseline refused; 896 new refuses what the baseline allowed) |
+| Sent to bash | 1,380 (2 PowerShell-only rows listed, not run: `Do "&&" { git commit -m x; git checkout main } While ($x)` and `Do '{' {...} While ($x)`, both on `feat/x`; 10 hostile skipped) |
+| New refuses, baseline allowed | 456 land on `main` in bash (fixes), 399 land nothing (play-safe over-refusals), 31 bash syntax errors |
+| New allows, baseline refused | 465 land nothing, 24 bash syntax errors, 5 timeouts (`until ";" git commit -m x; do :; done` loops forever on a command named `;`: git never runs) |
+| Bypass rows (new allows, bash lands a commit or push on `main`) among the differing rows | 0 |
+| Differing rows with no quote, backslash, brace or CR character | 33, every one a forged private-use stand-in (``-``, as in `echo;git commit -m x`) in the corpus from round 5's own forged-character tests; the new guard blanks them and refuses, the baseline allowed (play-safe) |
+| Plain (unmodified) suite commands that differ, old suite only | exactly 3, the rows the plan names: `'if' git commit -m x`, `"!" git commit -m x` and the `&&\r\n` row (round 5's new tests add the other plain differences, all of them quoted or escaped forms) |
+| Test diff against 8972524 | removed lines: the `&&\r\n` row, `'if'` and `"!"` rows, one comment line reworded (extended, not deleted: "Recorded so changing it is a decision." kept) |
+
+Allowed-rows pass: every one of the 12,517 rows the new guard allows was run through bash except 417 PowerShell or hostile rows; 12,100 ran: 10,654 land nothing, 1,405 are bash syntax errors landing nothing, 11 timed out (all `until <quoted operator> git commit ...; do :; done`, git never runs) and 30 land on `main`. The 30 are four commands, each also allowed by 8972524 and each a recorded miss, with the quoted-operator, `pre\|\|` and `pre!` prefixes of the same four: `echo "${x:-'$(git commit -m x)'}"` and `echo "${x:-'}" "$(git commit -m x)" "'}"` (round 2's lone `'` inside a quoted `${ }`), `echo $'it\'s'; git co""mmit -m x # '` (round 1's split-quote subcommand) and `git $'\x63ommit' -m x` (round 1's hex-escape subcommand). The known `true || if { true; }; then echo; fi | git checkout -b x && git commit -m x` item is not in the corpus, so it did not appear. Unattributed landings: 0.
+
+Drift found, and what was done about it: none. One observation, not drift: `coproc echo {` is read as a group (bash reads `{` as an argument there), an over-refusal recorded in section 4.
 
 ### Earlier rounds still hold
 
-> Later rounds only. Re-check every acceptance criterion from every earlier round in this
-> folder: this round changed code they depend on, and their tests passing is necessary but
-> not sufficient — a criterion can be satisfied by tests that no longer describe what the
-> feature does.
-
 | Round | # | Criterion | Still met | Evidence |
 |---|---|---|---|---|
+| 1 | A1 | Heredoc with stray quote allowed | yes | `r5c/regress.py` row, allowed on `main` |
+| 1 | A2 | Heredoc bodies as data, `$( )` and backticks in unquoted body judged, `git commit -F - <<'EOF'` refused as a commit | yes | ten rows in `regress.py` (quoted delimiters allowed, unquoted body substitutions refused on `main` and from a branch, `-F -` refused on `main` and allowed on `feat/x`) |
+| 1 | A3 | `#` as bash reads it | yes | three rows |
+| 1 | A4 | Backslash-newline joins | yes | three rows |
+| 1 | A5 | Play safe on rare forms | yes | `$'...'`, `<# #>`, here-string, backtick-quote, heredoc plus `# '` refused on `main`; allowed on `feat/x`; `echo $'a'` allowed |
+| 1 | A6 | Nothing else changed | yes | the 1613-test suite includes round 1's tests; round 5's differential over the suite's commands (above) |
+| 2 | A1-A3 | `$( )` in quoted positions, backticks | yes | `regress.py` rows (`echo "$(git commit -m x)"`, `out="$(...)"` on `main` and a branch, the nine A2 positions, `EOF)` heredoc cases, the four backtick forms) |
+| 2 | A4 | Process substitution | yes | three rows |
+| 2 | A5 | Substitution before its command | yes | four rows, `&&` trust carried in |
+| 2 | A6 | `main` as any branch it could land on | yes | seven rows |
+| 2 | A7 | Funsub plays safe | yes | refused on `main`, allowed from a branch, harmless `echo ${ date; }` allowed |
+| 2 | A8 | Harmless substitutions allowed, pipeline heredoc commit refused on `main` and allowed on a branch | yes | five rows |
+| 2 | A9 | Nothing else changed | yes | suite green; the five rewritten round 1 tests remain; round 5 changed none of them |
+| 3 | A1-A5 | Reserved words, switch after a reserved word, `!`/`coproc` trust, loops | yes | thirty-four `regress.py` rows (every A2 form, A3 from a branch, A4 including the accepted cost, A5 loops) |
+| 3 | A6 | Words that are not commands, `{ }`, `time`, `case`, function forms, `-C` ignored | yes | nine rows; the quoted `'if'`/`"!"` rows moved to allowed at A5 of this round, as agreed in section 1 |
+| 3 | A7 | Nothing else changed | yes | suite green |
+| 4 | A1-A4 | The `\|\|` operand union and its forms, `!` scope leak, stays-allowed list | yes | thirty rows: every listed form refused and the five allowed forms allowed |
+| 4 | A5 | Nothing else changed; differential | yes | suite green; this round's differential covers the same module against the round 4 head |
+
+`regress.py`: 138 rows, 0 mismatches against the expected outcome of each criterion's own examples.
 
 ---
 
