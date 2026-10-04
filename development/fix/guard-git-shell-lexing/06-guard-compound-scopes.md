@@ -1,6 +1,6 @@
 # The git guard keeps an `||` or `!` scope across a compound command
 
-<!-- claude-plan step=7 status=active -->
+<!-- claude-plan step=8 status=active -->
 
 | Field | Value |
 |---|---|
@@ -19,7 +19,7 @@
 | 4 | Verify | `/verify` | in `/build` | done |
 | 5 | Test | `/test` | in `/build` | done |
 | 6 | Concept check | `/concept-check` | in `/build` | done |
-| 7 | Ship | `/ship` | in `/build` | pending |
+| 7 | Ship | `/ship` | in `/build` | done |
 | 8 | Recommend | `/recommend` | with the user | pending |
 | 9 | Pull request | `/create-pr` | with the user | pending |
 | 10 | Review | `/watch-pr` | on the pull request | pending |
@@ -477,10 +477,12 @@ Regression result: all rounds 1-5 criteria hold. 2,476 tests pass, none of round
 
 ## 7. Ship log
 
+Gates on the whole tree: ruff check clean, ruff format 43 files formatted, mypy clean (11 files), pytest 2476 passed. Review: no TODO/FIXME/debug, no stray files (only plan files, guard, tests, STRUCTURE.md in the diff against main), every step left a commit. The interrupted step 5 run is recorded by its WIP commits above.
+
 | Field | Value |
 |---|---|
-| Commits | |
-| Pushed to | |
+| Commits | `f3afcc5 Concept check: the git guard keeps an \|\| or ! scope across a compound command`<br>`4e80d56 Test: round 6 compound scopes, edge-case suite and sweep`<br>`4cbbf99 WIP step 5: push-of-HEAD shapes and single-invocation [[ ]] rows, docs brought up to the reserved-word rule`<br>`6e29ac7 WIP step 5: a brace after a closing word is a group in the bash reading, docstring brought up to the rule`<br>`fc2ce18 WIP step 5: round 6 edge-case suite (misplaced openers, closer runs, coproc, pairing net, container matrix)`<br>`e360d1d WIP step 5: bash's reserved-word rule for openers and closers, and a pairing failure plays safe`<br>`9386579 WIP step 5: reserved-word position and closer-run bypasses, red (186 rows)`<br>`dc1e629 Verify: the git guard keeps an \|\| or ! scope across a compound command`<br>`dbd8074 WIP step 4: mark a word with a quote or escape anywhere in it, closing the escaped-closer bypass`<br>`bed1b0d WIP step 4: escaped closer reproduction, red (60 rows)`<br>`c89651e WIP step 4: escaped closer reproduction, red`<br>`353e2fa Keep an \|\| or ! scope across reserved-word compounds in the git guard`<br>`2f14f81 WIP step 3: reproduction, red`<br>`257a564 Plan accepted: the git guard keeps an \|\| or ! scope across a compound command`<br>`a003b23 Plan: the git guard keeps an \|\| or ! scope across a compound command`<br>`8dd8b56 Plan: remove leftover template text in Builds on`<br>`bc42c3d Plan (draft, before critique): the git guard keeps an \|\| or ! scope across a compound command`<br>`39818fc Concept: the git guard keeps an \|\| or ! scope across a compound command`<br>(plus the Ship commit that closes the round) |
+| Pushed to | `origin/fix/guard-git-shell-lexing` |
 
 ---
 
