@@ -20,8 +20,8 @@ the input, as in bash, when the delimiter never arrives). Left in, a quote in a
 comment or a body pairs with one in the next command, and either hides a real
 `git commit` or makes a harmless command look unbalanced. The pass tracks what
 it is inside, because bash's rules change there: a `#` after the `)` of a
-`$( )`, inside `${ }` or after a carriage return is part of a word, not a
-comment; quotes nest inside `"$( )"`; `<<` inside `$(( ))` or `(( ))` is a
+`$( )`, inside `${ }` or, as bash reads it, after a carriage return is part of
+a word, not a comment; quotes nest inside `"$( )"`; `<<` inside `$(( ))` or `(( ))` is a
 shift, not a heredoc; and an unquoted delimiter lets a backslash-newline join
 the closing line. Constructs it does not read -- `$'...'`, PowerShell
 here-strings, `<# #>` comments, backtick-escaped quotes and bash 5.3's
@@ -110,15 +110,21 @@ that starts with a quote carries a private mark in front, so `'if'`, `"!"`,
 `"X=1"` and `'>'` are words, not a reserved word, an assignment or a
 redirection (`'!' git commit -m x` is allowed on `main`), while `"git" commit`
 is still git: every comparison of a token's text strips the mark. Three tokens
-mean different things to the two shells this hook serves, and are read to be
-safe in both: a backslash before an operator character (`\;` is a word in bash
-and an operator in PowerShell), a bare `{` or `}` used as an argument (a script
-block in PowerShell, `ForEach-Object { git commit }`), and a carriage return (a
-word in bash, so `&&\r\n` runs a command named `\r`, a line break in
-PowerShell). Each is a soft separator: it still splits the command, as
-PowerShell would, but it is read as `;`, so nothing across it is trusted, and it
-never ends an `||` operand or a `!` scope or shifts a group level. A brace is a
-real group only where a command could start (after `;`, `then`, `do`, `!`).
+mean different things to the two shells this hook serves, so the command is read
+twice, once as each, and refused if either reading refuses it (bash's first). A
+backslash before an operator character is part of a word in bash (`\;` is the
+character `;`) and a literal backslash in PowerShell, which leaves the operator
+real; a bare `{` or `}` used as an argument is a word in bash and, in
+PowerShell, opens or closes a script block (`ForEach-Object { git commit }`); a
+carriage return is a word character in bash, so `&&\r\n` runs a command named
+`\r` and the commit after it is read across a newline, and a line break in
+PowerShell. In the bash reading a brace is a group delimiter only where a
+reserved word could stand: as the first word, after `;`, a newline or an
+operator, after `then`, `do`, `else`, `elif`, `if`, `while`, `until`, `!`,
+`coproc` or `time` and its options, and after `coproc NAME` or `function NAME`;
+anywhere else (`echo {`, `echo }}`) it is a word. In the PowerShell reading every
+brace is a delimiter. `segments` and everything private to it show the bash
+reading.
 
 Inside a segment the command's name is found where a shell would find it, after
 the prefix of variable assignments and redirections, with backticks stripped and
@@ -174,8 +180,8 @@ arguments, `;` chains, `{ }` blocks and here-string messages. PowerShell 5.1
 has no `&&`, so there a branch switch never carries into the next command, and
 a commit on `main` is refused even straight after `git checkout -b`.
 Where the two shells disagree -- a backslash before an operator character, a bare
-brace argument, a carriage return -- the token is read to be safe in both: it
-splits the command but is never trusted (a soft separator, below).
+brace argument, a carriage return -- the command is read both ways and refused if
+either reading refuses it (the two readings, above).
 
 Stdlib only: `jq` may not be available and hook commands default to
 Git Bash on Windows, so the usual shell recipe does not work here.

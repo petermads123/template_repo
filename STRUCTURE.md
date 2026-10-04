@@ -447,11 +447,17 @@ is one invocation and no quoted text reaches an `||` operand or a `!` scope. A w
 with a quote carries a private mark, so `'if'`, `"!"`, `"X=1"` and `'>'` are words and not a
 reserved word, an assignment or a redirection (`'!' git commit -m x` is allowed on `main`), while
 `"git" commit` is still git: every comparison of a token's text strips the mark. Three tokens differ
-between bash and PowerShell and are read to be safe in both, as a *soft separator* — a backslash
-before an operator character, a bare `{` or `}` argument and a carriage return: each still splits the
-command, reads as `;` so nothing across it is trusted, and never ends an `||` operand or a `!` scope
-or shifts a group level (`&&\r\n` is not trusted; `ForEach-Object { git commit }` stays refused). A
-brace is a real group only where a command could start.
+between bash and PowerShell, so the pre-pass writes the text twice and `violation` judges both
+readings, returning a refusal from either (bash's first). A backslash before an operator character is
+a word character in bash (the operator's stand-in) and a literal backslash in PowerShell, which leaves
+the operator real; a carriage return is a word character in bash (`&&\r\n` runs a command named `\r`,
+so the commit after it is read across a newline) and a line break in PowerShell; a bare `{` or `}`
+argument is a word in bash and a script block delimiter in PowerShell (`ForEach-Object { git commit }`
+stays refused). In the bash reading a brace is a group only where a reserved word could stand — the
+first word, after `;`, a newline or an operator, after `then`, `do`, `!` and the other leaders, after
+`time` and its options, after `coproc NAME` and after `function NAME` — and a word anywhere else
+(`echo {`, `echo }}`, `{}`); leaders match case-sensitively. In the PowerShell reading every brace
+token is a delimiter, as it was before round 5. `segments` returns the bash reading.
 
 `shlex` is not a shell, so a private pass runs in front of it and removes what
 bash never runs: a `#` at the start of a word comments out the rest of its line, a
@@ -513,11 +519,11 @@ meets an unknown branch is refused with a message saying so rather than the one 
 |---|---|
 | `Segment` | Frozen dataclass: `tokens`, the `separator` that preceded them — one of `SEPARATORS`, a newline, a grouping delimiter (`""` for the first) or `SUBSTITUTED` — and `depth: int = 0`, the number of command substitutions the invocation sits inside. |
 | `SUBSTITUTED: str` | `"$("`, the separator of an invocation whose command substitutions ran immediately before it. |
-| `segments(command: str) -> list[Segment] \| None` | Split a command into invocations after comments, continuations and heredoc bodies are removed, or None if it cannot be read: an unbalanced quote or a trailing backslash. A heredoc whose delimiter never arrives takes the rest of the input as its body. Every command substitution — in a word, in backticks, in `<( )`/`>( )`, in an arithmetic expansion or in an unquoted heredoc body — becomes invocations of its own, one depth deeper, immediately before the invocation that contains it, which is marked `SUBSTITUTED`; the first of them inherits the separator that preceded the containing invocation, and a substitution that runs nothing leaves no trace. A word that held one reads `_`. A quoted operator character stays in its word (`echo ";" x` is one invocation), a soft separator — an escaped operator character, a bare brace argument or a carriage return — splits and shows as `;`, and no private stand-in or quote mark appears in the output. |
+| `segments(command: str) -> list[Segment] \| None` | Split a command into invocations after comments, continuations and heredoc bodies are removed, or None if it cannot be read: an unbalanced quote or a trailing backslash. A heredoc whose delimiter never arrives takes the rest of the input as its body. Every command substitution — in a word, in backticks, in `<( )`/`>( )`, in an arithmetic expansion or in an unquoted heredoc body — becomes invocations of its own, one depth deeper, immediately before the invocation that contains it, which is marked `SUBSTITUTED`; the first of them inherits the separator that preceded the containing invocation, and a substitution that runs nothing leaves no trace. A word that held one reads `_`. A quoted operator character stays in its word (`echo ";" x` is one invocation), and it returns the bash reading — an escaped operator character is a word character, a bare brace argument is a word unless a reserved word could stand there, and a carriage return stays in its word — while no private stand-in or quote mark appears in the output. |
 | `git_subcommand(tokens: tuple[str, ...]) -> tuple[str, tuple[str, ...]]` | Identify the git subcommand and its arguments. |
 | `push_targets_main(args: tuple[str, ...], branch: str) -> bool` | Whether a push would update `main`. |
 | `switch_target(subcommand: str, args: tuple[str, ...]) -> str` | The branch a `checkout`/`switch` moves to, `""` when it moves none, or the sentinel `UNRESOLVED` (`"?"`) for a target only the running shell can resolve — `-`, `@{-1}`, or a word a command substitution made (for `-B` and `-C`, the name they take). |
-| `violation(command: str, branch: str) -> str` | The reason to refuse, or `""` to allow. Judges every invocation, substitutions included, against every branch it may run on. While `main` is checked out, a command carrying any of `UNMODELLED_OPENERS` that names `commit` or `push` is refused outright. Never raises: a failure of any kind while judging is treated as unreadable input, refused on `main` when the command names `commit` or `push` and allowed elsewhere. |
+| `violation(command: str, branch: str) -> str` | The reason to refuse, or `""` to allow. Judges every invocation, substitutions included, against every branch it may run on, in the bash reading of the command and then in the PowerShell one (they differ on a backslash before an operator character, a bare brace argument and a carriage return), refusing if either refuses. While `main` is checked out, a command carrying any of `UNMODELLED_OPENERS` that names `commit` or `push` is refused outright. Never raises: a failure of any kind while judging is treated as unreadable input, refused on `main` when the command names `commit` or `push` and allowed elsewhere. |
 | `UNMODELLED_OPENERS: tuple[str, ...]` | `("$'", "@'", '@"', "<#", "`'", '`"', "${ ", "${\t", "${\n", "${\|")`: the openers of syntax the pre-pass does not read — an ANSI-C string, a PowerShell here-string, a PowerShell block comment, a backtick-escaped quote, bash 5.3's `${ cmd; }` and `${| cmd; }`. Each is matched as a prefix. Looked for outside quotes, and `` `" `` and the `${` forms inside double quotes too. A command carrying one is what `violation` refuses on `main` when it names `commit` or `push`. |
 | `main() -> None` | Entry point: allow or refuse the command. |
 

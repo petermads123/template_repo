@@ -1,6 +1,6 @@
 # The git guard never takes a quoted word for an operator
 
-<!-- claude-plan step=3 status=active -->
+<!-- claude-plan step=4 status=active -->
 
 | Field | Value |
 |---|---|
@@ -15,8 +15,8 @@
 |---|---|---|---|---|
 | 1 | Conceptualize | `/conceptualize` | with the user | done |
 | 2 | Plan | `/plan` | with the user | done |
-| 3 | Implement | `/implement` | in `/build` | in progress |
-| 4 | Verify | `/verify` | in `/build` | in progress |
+| 3 | Implement | `/implement` | in `/build` | done |
+| 4 | Verify | `/verify` | in `/build` | pending |
 | 5 | Test | `/test` | in `/build` | pending |
 | 6 | Concept check | `/concept-check` | in `/build` | pending |
 | 7 | Ship | `/ship` | in `/build` | pending |
@@ -434,6 +434,53 @@ Existing tests rewritten (the three A4/A5 name, one line each):
 
 After the fix the reproduction is green; the suite is 1162 passed (1161 before, plus the reproduction, the two
 replacement tests (four new cases), minus the three rows moved out of parametrized lists).
+
+### Redo after step 5: the two readings (replaces the soft separator)
+
+Step 5 sent the build back with the user's design revision (section 2, "Revised at step 5").
+The reproduction test stayed as written and stayed green (the red run above is still the red
+run). Built as the revision says, with these notes; the first run's deviations above that
+concern `_SOFT` (2, 3, 4, 6 of that list: the escapes, the `\r` handling and the `;` shown for a
+CRLF break) are superseded and no longer describe the code.
+
+- **`_SOFT`, `_SOFT_ESCAPED` removed**, and with them `_SOFT` in `PUNCTUATION_CHARS`,
+  `SEPARATOR_CHARS`, `_PRIVATE`, `_governs` and `_quoted_done`. `_ESCAPED_OPERATORS`
+  (`;&|(){}<>`) replaces them. `INLINE_WHITESPACE` stays `" \t"` and `_WORD_ENDS` loses `\r`
+  (the PowerShell walk adds it back).
+- **`_prepare(command, powershell=False)`**, `_scan`, `_body_substitutions`, `_segments` and
+  `_judge` take a defaulted `powershell` flag (all private). Bash reading: a backslash before
+  `;&|(){}<>` is the operator's `_QUOTED` stand-in; an unquoted `\r` is copied as a word
+  character (no new command, no comment boundary). PowerShell reading: such a backslash is written
+  as an escaped backslash (`\\`, one literal character for `shlex`) and the operator is then read
+  as any other; `\r` becomes a newline and starts a new command slot. The give-up path returns the
+  command unchanged for bash and with `\r` as `\n` for PowerShell.
+- **`${…}` maps every `_QUOTED` character** except the closing `}` (`; & | ( ) { } < >` and the
+  newline), by one branch ahead of the `(`, `)`, newline and `<<` branches.
+- **`_group_position(words)`** (private): the bash brace rule. A brace-only token is a word in
+  `_segments`' bash reading unless it is exactly `{` or `}` at a reserved-word position: nothing
+  before it, after `_COMMAND_LEADERS` (case-sensitive; a quoted word carries the mark and matches
+  nothing), after `time` and its `-` options, after `coproc NAME` (any one word) and after
+  `function NAME`. `coproc echo {` is therefore read as a group, though bash reads `{` there as
+  an argument; checked in bash, the guard still refuses every `||` form built on it. The
+  PowerShell reading keeps every brace-only token a delimiter, as before the round.
+- **`violation`** returns `_judge(command, branch) or _judge(command, branch, powershell=True)`,
+  inside the one `try`; each reading keeps the old order of reasons. The `_judge` comment that
+  called quoted operators a known miss, the module docstring's "(a soft separator, below)" and its
+  `#`-after-CR sentence, and STRUCTURE.md's soft-separator paragraph are rewritten.
+- **No existing test changed outcome** beyond the two A4/A5 rewrites of the first run; 1162 passed
+  unchanged before any new test (step 5 writes those).
+
+Sanity check against bash 5.2 with `git` shadowed (HEAD in a file, empty checkout argument fails,
+`PATH=/usr/bin:/bin`, stdin closed, timeout 5), shown live first by `git commit -m x` printing
+`COMMIT on main`: scratchpad `r5b_check.py`, 90 rows (the designers' V-cases, the five
+regressions and the A1-A5 rows), **0 rows where bash lands a commit or push on `main` and the
+guard allows it**; the two regressions (`echo a\;git checkout -b x && git commit -m x`,
+`echo x\r git checkout -b x && git commit -m x`) are refused; every A5 row is allowed. A second
+batch (`r5b_check2.py`: 29 brace heads, each after `true || `, `! true | ` and bare) found one
+row bash lands and the guard allows, `true || if { true; }; then echo; fi | git checkout -b x &&
+git commit -m x`, which 8972524 allows too and which has no quoted, escaped or brace-argument
+token in it (an `if` list inside an `||` operand ends the operand at its `;`); left alone, noted
+for step 8.
 
 ---
 
