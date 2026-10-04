@@ -4824,3 +4824,147 @@ def test_violation_refuses_a_switch_after_a_compound_with_an_escaped_closer(
 
     assert violation(command, PROTECTED).startswith(COMMIT_REASON)
     assert violation(command, "feat/y") == ""
+
+
+# --- round 6, step 5: the readers' cases and the edge-case suite ---------------
+
+# The reserved-word rule of bash's parser (`reserved_word_acceptable`): a word is read
+# as `if`, `while`, `fi`, `done` and the rest only as the first word of a command, which
+# a list operator, `(`, `)`, `{`, `}`, a leader or a closer ahead of it allows, and not
+# after an assignment, a redirection or a wrapper program, where it is an ordinary
+# argument or command name. Every row below was run in bash 5.2 (`git` shadowed by a
+# function keeping HEAD in a temp file, an empty checkout argument failing,
+# `PATH=/usr/bin:/bin`, stdin closed, a timeout, the oracle shown live first by a plain
+# commit landing on `main`) and lands the commit on `main`.
+SCOPE_OPENERS = [("true ||", "x"), ("false ||", "x"), ("!", "feat/x")]
+
+
+def assert_switch_untrusted(opener: str, body: str, target: str) -> None:
+    command = f"{opener} {body} | git checkout -b {target} && git commit -m x"
+
+    assert violation(command, PROTECTED).startswith(COMMIT_REASON), command
+    assert violation(command, "feat/y") == "", command
+
+
+# A word that looks like an opener but follows an assignment, a redirection, a wrapper,
+# a backslash or a quote: bash runs it as an ordinary command or argument.
+MISPLACED_OPENER_WORDS = [
+    "\\! while",
+    "\\! if",
+    "x=1 while",
+    "x=1 if",
+    ">/dev/null until",
+    ">/dev/null if",
+    "x=1 case a",
+    "x=1 [[ a",
+    "sudo -n while",
+    "sudo if",
+    "env while",
+    "nohup case",
+    "sudo [[",
+    "time 'if'",
+    "'while' x",
+    "2>&1 until",
+]
+
+MISPLACED_OPENER_BODIES = [
+    *(f"if true; then {word}; fi" for word in MISPLACED_OPENER_WORDS),
+    *(f"while false; do {word}; done" for word in MISPLACED_OPENER_WORDS),
+]
+
+
+@pytest.mark.parametrize("body", MISPLACED_OPENER_BODIES)
+@pytest.mark.parametrize(("opener", "target"), SCOPE_OPENERS)
+def test_violation_refuses_a_switch_after_a_compound_holding_a_misplaced_opener(
+    body: str, opener: str, target: str
+) -> None:
+    assert_switch_untrusted(opener, body, target)
+
+
+# A closing word written straight after `)`, `}` or another closer: bash accepts a
+# reserved word there, with no `;` between.
+CLOSER_RUN_BODIES = [
+    "if true; then (echo) fi",
+    "if true; then { :; } fi",
+    "while false; do (true) done",
+    "until true; do { :; } done",
+    "for i in 1; do (:) done",
+    "select i in; do (:) done",
+    "case a in a) :;; b) (:) esac",
+    "case a in a) { :; } esac",
+    "if true; then if true; then :; fi fi",
+    "while false; do for i in 1; do :; done done",
+    "if true; then while false; do :; done fi",
+    "case a in a) case b in b) :;; esac esac",
+    "if true; then [[ a ]] fi",
+    "if true; then ((1)) fi",
+    "if true; then case a in a) :;; esac fi",
+    "while false; do while false; do :; done done",
+    "if :; then if :; then if :; then :; fi fi fi",
+    "if true; then [[ a && b ]] fi",
+    "while false; do if true; then :; fi done",
+    "case a in a) if true; then :; fi esac",
+    "for i in 1; do while false; do :; done done",
+    "if true; then (echo) fi 2>/dev/null",
+    "if true; then { :; } fi 2>&1",
+]
+
+
+@pytest.mark.parametrize("body", CLOSER_RUN_BODIES)
+@pytest.mark.parametrize(("opener", "target"), SCOPE_OPENERS)
+def test_violation_refuses_a_switch_after_a_closer_that_follows_a_group_or_a_closer(
+    body: str, opener: str, target: str
+) -> None:
+    assert_switch_untrusted(opener, body, target)
+
+
+# `coproc NAME <compound>` opens the compound; `coproc <compound>` and `coproc { }`
+# do too.
+COPROC_BODIES = [
+    "coproc C while false; do :; done",
+    "coproc C if true; then :; fi",
+    "coproc C for i in 1; do :; done",
+    "coproc C select i in; do :; done",
+    "coproc C case a in a) :;; esac",
+    "coproc C [[ a && b ]]",
+    "coproc C until true; do :; done",
+    "coproc if true; then :; fi",
+    "coproc while false; do :; done",
+    "coproc for i in 1; do :; done",
+    "coproc case a in a) :;; esac",
+    "coproc { true; }",
+    "coproc C { true; }",
+]
+
+
+@pytest.mark.parametrize("body", COPROC_BODIES)
+@pytest.mark.parametrize(("opener", "target"), SCOPE_OPENERS)
+def test_violation_refuses_a_switch_after_a_coproc_compound(
+    body: str, opener: str, target: str
+) -> None:
+    assert_switch_untrusted(opener, body, target)
+
+
+# A `case` whose last clause has no body: `esac` follows the pattern's `)`.
+EMPTY_LAST_CLAUSE_BODIES = [
+    "case a in a) esac",
+    "case a in (a) esac",
+    "case a in a) :;; b) esac",
+    "case a in a) case b in b) esac esac",
+]
+
+
+@pytest.mark.parametrize("body", EMPTY_LAST_CLAUSE_BODIES)
+@pytest.mark.parametrize(
+    "wrap", ["{} ", "{{ {}; }}", "( {} )"], ids=["bare", "brace", "subshell"]
+)
+@pytest.mark.parametrize(("opener", "target"), SCOPE_OPENERS)
+def test_violation_refuses_a_switch_after_a_case_with_an_empty_last_clause(
+    body: str, wrap: str, opener: str, target: str
+) -> None:
+    command = wrap.format(
+        f"{opener} {body} | git checkout -b {target} && git commit -m x"
+    )
+
+    assert violation(command, PROTECTED).startswith(COMMIT_REASON), command
+    assert violation(command, "feat/y") == "", command
