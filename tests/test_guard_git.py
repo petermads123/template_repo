@@ -3895,3 +3895,846 @@ def test_violation_refuses_a_commit_after_an_and_and_carriage_return() -> None:
     command = 'git checkout -b feat/y &&\r\ngit commit -m "$(date)"\r\n'
 
     assert violation(command, PROTECTED).startswith(COMMIT_REASON)
+
+
+# --- round 5, step 5: the readers' cases and the edge-case suite ---------------
+#
+# Every bash claim below was run in bash 5.2 with `git` shadowed by a function
+# that keeps HEAD in a file (an empty checkout argument fails, PATH=/usr/bin:/bin,
+# stdin closed, a timeout), the oracle shown live first by a plain `git commit`
+# printing `COMMIT on main`. A row marked "no oracle" is PowerShell-only or
+# needs a real `sudo`/`env`; the guard is asserted to play safe there.
+
+REASONS = {"C": COMMIT_REASON, "P": PUSH_REASON, "U": UNRESOLVED_REASON, "A": ""}
+
+
+def assert_judged(command: str, branch: str, kind: str) -> None:
+    reason = violation(command, branch)
+    if kind == "A":
+        assert reason == "", command
+    else:
+        assert reason.startswith(REASONS[kind]), command
+
+
+QUOTED_OPERATOR_WORDS = [
+    ('";"', ";"),
+    ('"&&"', "&&"),
+    ("'&'", "&"),
+    ("'|'", "|"),
+    ("'||'", "||"),
+    ("'('", "("),
+    ("')'", ")"),
+    ("'{'", "{"),
+    ("'}'", "}"),
+    ("'<'", "<"),
+    ("'>'", ">"),
+    ('";"";"', ";;"),
+    ("a';'", "a;"),
+    ('"a\nb"', "a\nb"),
+    ("'a\nb'", "a\nb"),
+    ('"a\r\nb"', "a\r\nb"),
+    ('"a b;c"', "a b;c"),
+    ('"it\'s ;"', "it's ;"),
+    ("'say \"a|b\"'", 'say "a|b"'),
+    ('a";"b', "a;b"),
+    ('"$(echo ";")"', "_"),
+]
+
+
+@pytest.mark.parametrize(("source", "text"), QUOTED_OPERATOR_WORDS)
+def test_segments_keeps_a_quoted_operator_word_in_one_invocation(
+    source: str, text: str
+) -> None:
+    parsed = segments(f"echo {source} x")
+
+    assert parsed is not None
+    assert [segment.tokens for segment in parsed if segment.depth == 0] == [
+        ("echo", text, "x")
+    ]
+    assert not any(segment.separator == ";" for segment in parsed if segment.depth == 0)
+
+
+# Both shells read an operator character inside an unquoted `${...}` as part of one word.
+PARAMETER_WORDS: list[str] = [
+    "${x:-;}",
+    "${x:-&}",
+    "${x:-|}",
+    "${x:-)}",
+    "${x:-(}",
+    "${x:-<}",
+    "${x:->}",
+    "${x:-{}",
+    "${x:-a\nb}",
+    "${x:-a;b|c&&d}",
+]
+
+
+@pytest.mark.parametrize("word", PARAMETER_WORDS)
+def test_segments_keeps_an_operator_inside_an_unquoted_parameter_in_its_word(
+    word: str,
+) -> None:
+    assert segments(f"echo {word} x") == [Segment(("echo", word, "x"), "")]
+
+
+BASH_WORD_TOKENS = [
+    (r"\;", ";"),
+    (r"\&", "&"),
+    (r"\|", "|"),
+    (r"\(", "("),
+    (r"\)", ")"),
+    (r"\{", "{"),
+    (r"\<", "<"),
+    (r"\>", ">"),
+    (r"a\;b", "a;b"),
+    ("{", "{"),
+    ("}", "}"),
+    ("{}", "{}"),
+    ("}}", "}}"),
+    ("x\ry", "x\ry"),
+    ("x\r", "x\r"),
+]
+
+
+@pytest.mark.parametrize(("source", "text"), BASH_WORD_TOKENS)
+def test_segments_returns_the_bash_reading_of_the_shell_dependent_tokens(
+    source: str, text: str
+) -> None:
+    # The public output is bash's reading: an escaped operator character, a
+    # brace argument and a carriage return are word characters. `violation`
+    # also reads each the way PowerShell does.
+    assert segments(f"echo {source} x") == [Segment(("echo", text, "x"), "")]
+
+
+@pytest.mark.parametrize(
+    ("command", "expected"),
+    [
+        ('echo ";" ; echo x', [("echo", ";"), ("echo", "x")]),
+        ('echo ";";echo x', [("echo", ";"), ("echo", "x")]),
+        ('echo "a" && echo ";"', [("echo", "a"), ("echo", ";")]),
+        ("echo '|' | cat", [("echo", "|"), ("cat",)]),
+        ('echo "";"" x', [("echo", ""), ("", "x")]),
+        ('echo \\"; echo x', [("echo", '"'), ("echo", "x")]),
+        ("echo '\\'; echo x", [("echo", "\\"), ("echo", "x")]),
+        ('echo "\\\\"; echo x', [("echo", "\\"), ("echo", "x")]),
+    ],
+)
+def test_segments_still_splits_on_a_real_operator_next_to_a_quoted_one(
+    command: str, expected: list[tuple[str, ...]]
+) -> None:
+    parsed = segments(command)
+
+    assert parsed is not None
+    assert [segment.tokens for segment in parsed] == expected
+
+
+def test_segments_labels_the_real_separator_next_to_a_quoted_operator() -> None:
+    parsed = segments('echo ";" && echo x')
+
+    assert parsed == [
+        Segment(("echo", ";"), ""),
+        Segment(("echo", "x"), "&&"),
+    ]
+
+
+def test_segments_keeps_the_quote_state_through_a_substitution() -> None:
+    parsed = segments("echo \"$(echo ';' ; echo x)\"")
+
+    assert parsed == [
+        Segment(("echo", ";"), "", 1),
+        Segment(("echo", "x"), ";", 1),
+        Segment(("echo", "_"), SUBSTITUTED, 0),
+    ]
+
+
+def test_segments_still_splits_inside_a_double_quoted_substitution() -> None:
+    parsed = segments('echo "$(a; b)"')
+
+    assert parsed == [
+        Segment(("a",), "", 1),
+        Segment(("b",), ";", 1),
+        Segment(("echo", "_"), SUBSTITUTED, 0),
+    ]
+
+
+@pytest.mark.parametrize("delimiter", ["';'", '";"', r"\;"])
+def test_segments_reads_a_quoted_heredoc_delimiter_as_one_word(delimiter: str) -> None:
+    parsed = segments(f"cat <<{delimiter}\nbody\n;\ngit commit -m x")
+
+    assert parsed == [
+        Segment(("cat", "<<", ";"), ""),
+        Segment(("git", "commit", "-m", "x"), "\n"),
+    ]
+
+
+@pytest.mark.parametrize(
+    "command",
+    [
+        'echo "a;',
+        "echo 'a;",
+        "echo a\\",
+        'echo "a" ";',
+        'true || echo "a;b | git checkout -b x',
+    ],
+)
+def test_segments_is_none_for_an_unbalanced_quote_around_an_operator(
+    command: str,
+) -> None:
+    assert segments(command) is None
+
+
+@pytest.mark.parametrize(
+    ("command", "expected"),
+    [
+        ("{ a; }", [Segment(("a",), "{")]),
+        ("do { a }", [Segment(("do",), ""), Segment(("a", "}"), "{")]),
+        ("! { echo; }", [Segment(("!",), ""), Segment(("echo",), "{")]),
+        ("time { echo; }", [Segment(("time",), ""), Segment(("echo",), "{")]),
+        ("then { a; }", [Segment(("then",), ""), Segment(("a",), "{")]),
+        ("coproc C { a; }", [Segment(("coproc", "C"), ""), Segment(("a",), "{")]),
+        (
+            "function f { a; }",
+            [Segment(("function", "f"), ""), Segment(("a",), "{")],
+        ),
+        ('"do" { a }', [Segment(("do", "{", "a", "}"), "")]),
+        # The `{` is an argument, so the `}` after the `;` closes nothing.
+        ("echo { a; }", [Segment(("echo", "{", "a"), "")]),
+        ("a }}", [Segment(("a", "}}"), "")]),
+        ("a {}; b", [Segment(("a", "{}"), ""), Segment(("b",), ";")]),
+    ],
+)
+def test_segments_reads_a_brace_as_a_group_only_where_bash_does(
+    command: str, expected: list[Segment]
+) -> None:
+    assert segments(command) == expected
+
+
+@pytest.mark.parametrize(
+    ("command", "expected"),
+    [
+        ("a\r\nb", [Segment(("a\r",), ""), Segment(("b",), "\n")]),
+        (
+            "a &&\r\nb",
+            [Segment(("a",), ""), Segment(("\r",), "&&"), Segment(("b",), "\n")],
+        ),
+        ("a && b\r\n", [Segment(("a",), ""), Segment(("b\r",), "&&")]),
+        ("a\rb", [Segment(("a\rb",), "")]),
+        ("\r", [Segment(("\r",), "")]),
+        ("echo x\r y", [Segment(("echo", "x\r", "y"), "")]),
+    ],
+)
+def test_segments_reads_a_carriage_return_as_a_word_character(
+    command: str, expected: list[Segment]
+) -> None:
+    # bash runs `$'\r'` as a word: it neither ends a command nor starts a comment.
+    assert segments(command) == expected
+
+
+PRIVATE_SAMPLES = [
+    "echo ';' x",
+    'echo "&&" "a|b" x',
+    "echo a';'b",
+    "'if' \"git\" x",
+    r"echo \; \& \( x",
+    "echo { } x",
+    "echo ${x:-;} ${y:-a|b}",
+    "echo x\r y",
+    "echo a\r\nb",
+    "echo \"$(echo ';')\" x",
+    "cat <<';'\nbody\n;\nx",
+    'x="a;b" git status',
+    "git commit -m 'a; b'",
+    'git commit -m "a | b"\r\n',
+]
+
+
+@pytest.mark.parametrize("command", PRIVATE_SAMPLES)
+def test_segments_never_shows_a_stand_in_or_a_quote_mark(command: str) -> None:
+    parsed = segments(command)
+
+    assert parsed is not None
+    for segment in parsed:
+        text = segment.separator + "".join(segment.tokens)
+        assert not any(char in text for char in guard_git._PRIVATE), command
+
+
+@pytest.mark.parametrize("char", guard_git._PRIVATE)
+def test_segments_blanks_a_forged_private_character(char: str) -> None:
+    assert segments(f"echo a{char}b") == [Segment(("echo", "a", "b"), "")]
+
+
+@pytest.mark.parametrize("char", guard_git._PRIVATE)
+def test_violation_sees_through_a_forged_private_character(char: str) -> None:
+    assert violation(f"{char}if git commit -m x", PROTECTED).startswith(COMMIT_REASON)
+    assert violation(f"git{char} commit -m x", PROTECTED).startswith(COMMIT_REASON)
+    assert violation(f"git push -o x{char} origin main", OTHER).startswith(PUSH_REASON)
+    assert violation(f"echo{char};{char}git commit -m x", PROTECTED).startswith(
+        COMMIT_REASON
+    )
+
+
+# Words that hold an operator character in quotes, or inside a `${...}`: none of them ends a list.
+QUOTED_OPERATOR_SOURCES: list[str] = [
+    '";"',
+    '"&&"',
+    "'&'",
+    "'|'",
+    "'||'",
+    "'('",
+    "')'",
+    "'{'",
+    "'}'",
+    "'<'",
+    "'>'",
+    '";"";"',
+    "a';'",
+    '"a\nb"',
+    "${x:-;}",
+    "${x:-&}",
+    "${x:-|}",
+    "${x:-)}",
+    "${x:-(}",
+    "${x:-a\nb}",
+    "${x:-<}",
+    "${x:->}",
+    "${x:-{}",
+    '"a b;c"',
+    "'a&&b'",
+    '""";"',
+]
+
+
+@pytest.mark.parametrize("word", QUOTED_OPERATOR_SOURCES)
+def test_violation_refuses_an_or_switch_after_any_quoted_operator_word(
+    word: str,
+) -> None:
+    command = f"true || echo {word} | git checkout -b x && git commit -m x"
+
+    assert violation(command, PROTECTED).startswith(COMMIT_REASON)
+
+
+@pytest.mark.parametrize("word", QUOTED_OPERATOR_SOURCES)
+def test_violation_refuses_a_negated_switch_after_any_quoted_operator_word(
+    word: str,
+) -> None:
+    # `feat/x` exists, so the checkout fails and the commit lands on `main`.
+    command = f"! true | echo {word} | git checkout -b feat/x && git commit -m x"
+
+    assert violation(command, PROTECTED).startswith(COMMIT_REASON)
+
+
+@pytest.mark.parametrize("word", QUOTED_OPERATOR_SOURCES)
+def test_violation_allows_the_same_forms_when_main_is_not_checked_out(
+    word: str,
+) -> None:
+    command = f"true || echo {word} | git checkout -b x && git commit -m x"
+
+    assert violation(command, OTHER) == ""
+
+
+def test_violation_refuses_the_group_form_of_the_reproduction() -> None:
+    command = "{ true || echo } | git checkout -b x && git commit -m x; }"
+
+    assert violation(command, PROTECTED).startswith(COMMIT_REASON)
+
+
+# A real `;` or `&&` ends the `||` operand even when a quoted operator sits beside it: nothing refused that bash does not land.
+REAL_OPERATOR_ENDS_THE_OPERAND: list[tuple[str, str, str]] = [
+    ('true || echo ";"; git checkout -b x && git commit -m x', PROTECTED, "A"),
+    ("true || echo ; git checkout -b x && git commit -m x", PROTECTED, "A"),
+    ('true || echo "a" ; git checkout -b x && git commit -m x', PROTECTED, "A"),
+    ('true || echo ";" ; git checkout -b x && git commit -m x', PROTECTED, "A"),
+    ('true || echo ";" && git checkout -b x && git commit -m x', PROTECTED, "A"),
+]
+
+
+@pytest.mark.parametrize(("command", "branch", "kind"), REAL_OPERATOR_ENDS_THE_OPERAND)
+def test_violation_still_ends_an_or_operand_at_a_real_operator(
+    command: str, branch: str, kind: str
+) -> None:
+    assert_judged(command, branch, kind)
+
+
+# Read one way by bash and another by PowerShell; each reading is judged and a refusal from either stands.
+SHELL_DEPENDENT_TOKENS: list[str] = [
+    "\\;",
+    "\\&",
+    "\\|",
+    "\\(",
+    "\\)",
+    "\\{",
+    "\\<",
+    "{",
+    "}",
+    "{}",
+    "}}",
+    "{ }",
+]
+
+
+@pytest.mark.parametrize("token", SHELL_DEPENDENT_TOKENS)
+def test_violation_distrusts_a_switch_after_a_shell_dependent_token(token: str) -> None:
+    # bash: the token is an argument of `echo`, so the checkout is `echo`'s
+    # neighbour and runs after it; the old tokenizer trusted the `&&` anyway.
+    command = f"echo {token} git checkout -b x && git commit -m x"
+
+    assert violation(command, PROTECTED).startswith(COMMIT_REASON)
+
+
+@pytest.mark.parametrize("token", SHELL_DEPENDENT_TOKENS)
+def test_violation_refuses_an_or_switch_after_a_shell_dependent_token(
+    token: str,
+) -> None:
+    command = f"true || echo {token} | git checkout -b x && git commit -m x"
+
+    assert violation(command, PROTECTED).startswith(COMMIT_REASON)
+
+
+# The readers' cases, each refused on the branch given: a switch hidden behind a shell-dependent token, a split
+# through git's own argument list, a brace after `coproc NAME`, `time -p`, `function NAME` or a cased `DO`.
+HIDDEN_SWITCH_FORMS: list[tuple[str, str, str]] = [
+    ("true || echo ${x:-a\nb} | git checkout -b x && git commit -m x", PROTECTED, "C"),
+    ("true || echo \\; | git checkout -b x && git commit -m x", PROTECTED, "C"),
+    ("true || echo \\& | git checkout -b x && git commit -m x", PROTECTED, "C"),
+    ("true || echo { | git checkout -b x && git commit -m x", PROTECTED, "C"),
+    ("echo a\\;git checkout -b x && git commit -m x", PROTECTED, "C"),
+    ("echo -exec true \\; git checkout -b x && git commit -m x", PROTECTED, "C"),
+    ("echo x\r git checkout -b x && git commit -m x", PROTECTED, "C"),
+    ("true || echo \\; | git checkout -b x && git commit -m x", PROTECTED, "C"),
+    ("true || echo \\& | git checkout -b x && git commit -m x", PROTECTED, "C"),
+    (
+        "true || echo -exec true \\; | git checkout -b x && git commit -m x",
+        PROTECTED,
+        "C",
+    ),
+    ("true || echo { | git checkout -b x && git commit -m x", PROTECTED, "C"),
+    (
+        "true || echo { true || echo } | git checkout -b x && git commit -m x",
+        PROTECTED,
+        "C",
+    ),
+    ("{ true || echo \\; } | git checkout -b x && git commit -m x; }", PROTECTED, "C"),
+    ("true || echo \\; { | git checkout -b x && git commit -m x", PROTECTED, "C"),
+    (
+        "{ true || echo ${x:-)} | git checkout -b x && git commit -m x; }",
+        PROTECTED,
+        "C",
+    ),
+    ("true || echo ${x:-a\nb} | git checkout -b x && git commit -m x", PROTECTED, "C"),
+    (
+        "true || coproc C { true; } | git checkout -b x && git commit -m x",
+        PROTECTED,
+        "C",
+    ),
+    ("! time -p { true; } | git checkout -b feat/x && git commit -m x", PROTECTED, "C"),
+    (
+        "true || time -p { true; } | git checkout -b x && git commit -m x",
+        PROTECTED,
+        "C",
+    ),
+    (
+        "true || function f { true; } | git checkout -b x && git commit -m x",
+        PROTECTED,
+        "C",
+    ),
+    ("true || DO { | git checkout -b x && git commit -m x", PROTECTED, "C"),
+    ("echo { true || echo } | git checkout -b x && git commit -m x", PROTECTED, "C"),
+    ("git -c user.name=a\\;b commit -m x", PROTECTED, "C"),
+    ("git push -o x\\; origin main", OTHER, "P"),
+    ("git push -o { origin main", OTHER, "P"),
+]
+
+
+@pytest.mark.parametrize(("command", "branch", "kind"), HIDDEN_SWITCH_FORMS)
+def test_violation_refuses_what_a_shell_dependent_token_could_hide(
+    command: str, branch: str, kind: str
+) -> None:
+    assert_judged(command, branch, kind)
+
+
+# Pinned on purpose: bash lands nothing here, but PowerShell reads the token differently (or the guard does not
+# model a command that fails), so the command is refused. Changing one of these is a decision.
+BOTH_SHELL_OVER_REFUSALS: list[tuple[str, str, str]] = [
+    ("git checkout -b x \\; && git commit -m x", PROTECTED, "C"),
+    ("git checkout -b x ; \\; && git commit -m x", PROTECTED, "C"),
+    ("'!' git checkout -b x && git commit -m x", PROTECTED, "C"),
+    ("\\! git commit -m x", PROTECTED, "C"),
+    ("x=1 if git commit -m x", PROTECTED, "C"),
+    (">/dev/null ! git commit -m x", PROTECTED, "C"),
+    ("sudo -n ! git commit -m x", PROTECTED, "C"),
+    ('"GIT" commit -m x', PROTECTED, "C"),
+    ('sudo "X=1" git commit -m x', PROTECTED, "C"),
+    ("echo \\; git commit -m x", PROTECTED, "C"),
+    ('true || echo ";" | git checkout main && git commit -m x', OTHER, "C"),
+    ("git checkout -b feat/x2 && echo \\; && git commit -m x", PROTECTED, "C"),
+    ("git checkout -b feat/x2 && echo { && git commit -m x", PROTECTED, "C"),
+]
+
+
+@pytest.mark.parametrize(("command", "branch", "kind"), BOTH_SHELL_OVER_REFUSALS)
+def test_violation_pins_the_both_shell_over_refusals(
+    command: str, branch: str, kind: str
+) -> None:
+    assert_judged(command, branch, kind)
+
+
+# bash runs the `\r` after an `&&` as a command named `\r` that fails; PowerShell ends the line there.
+# "A" rows: a quoted `\r`, a `\r` after the last command, nothing hidden.
+CARRIAGE_RETURN_FORMS: list[tuple[str, str, str]] = [
+    ("git checkout -b feat/x &&\r\ngit commit -m x", PROTECTED, "C"),
+    ("git checkout -b feat/x &&\r\n\r\ngit commit -m x", PROTECTED, "C"),
+    ("git checkout -b feat/x && \r\ngit commit -m x", PROTECTED, "C"),
+    ("git checkout -b feat/y &&\r\ngit commit -m x", PROTECTED, "C"),
+    ("git commit\r\n", PROTECTED, "C"),
+    ("git push\r\n", PROTECTED, "P"),
+    ("git push origin main\r\n", OTHER, "P"),
+    ("git commit -m x\r\n", PROTECTED, "C"),
+    ("git checkout -b feat/x && \\\r\ngit commit -m x", PROTECTED, "C"),
+    ("git checkout -b feat/x &&\\\r\ngit commit -m x", PROTECTED, "C"),
+]
+CARRIAGE_RETURN_ALLOWED: list[tuple[str, str, str]] = [
+    ("git checkout -b feat/x && git commit -m x\r\n", PROTECTED, "A"),
+    ("git checkout -b feat/x && git commit -m 'x\r'", PROTECTED, "A"),
+    ('git checkout -b feat/x && git commit -m "x\r"', PROTECTED, "A"),
+    ('git checkout -b feat/x && git commit -m "a\r\nb"', PROTECTED, "A"),
+]
+
+
+@pytest.mark.parametrize(("command", "branch", "kind"), CARRIAGE_RETURN_FORMS)
+def test_violation_does_not_trust_an_and_and_before_a_carriage_return(
+    command: str, branch: str, kind: str
+) -> None:
+    assert_judged(command, branch, kind)
+
+
+@pytest.mark.parametrize(("command", "branch", "kind"), CARRIAGE_RETURN_ALLOWED)
+def test_violation_allows_a_quoted_carriage_return_and_one_after_the_last_command(
+    command: str, branch: str, kind: str
+) -> None:
+    assert_judged(command, branch, kind)
+
+
+@pytest.mark.parametrize("suffix", ["\r\n", "\r", "\n\r\n", " \r\n"])
+@pytest.mark.parametrize(
+    ("command", "branch", "reason"),
+    [
+        ("git commit -m x", PROTECTED, COMMIT_REASON),
+        ("git push", PROTECTED, PUSH_REASON),
+        ("git push origin main", OTHER, PUSH_REASON),
+    ],
+)
+def test_violation_refuses_a_commit_or_push_ended_by_a_carriage_return(
+    command: str, branch: str, reason: str, suffix: str
+) -> None:
+    assert violation(command + suffix, branch).startswith(reason)
+
+
+def test_violation_refuses_a_commit_after_a_carriage_return_inside_a_word() -> None:
+    assert violation(
+        "echo x\r git checkout -b x && git commit -m x", PROTECTED
+    ).startswith(COMMIT_REASON)
+
+
+# A quoted word is not a leader, an assignment or a redirection: bash runs no git in any of these.
+QUOTED_WORD_AT_COMMAND_POSITION: list[tuple[str, str, str]] = [
+    ("'if' git commit -m x", PROTECTED, "A"),
+    ("'!' git commit -m x", PROTECTED, "A"),
+    ('"!" git commit -m x', PROTECTED, "A"),
+    ('"X=1" git commit -m x', PROTECTED, "A"),
+    ("'>' x git commit -m x", PROTECTED, "A"),
+    ('echo ";" git commit -m x', PROTECTED, "A"),
+    ('git checkout feat/y ";" git commit -m x', PROTECTED, "A"),
+    ("''if git commit -m x", PROTECTED, "A"),
+]
+# A quoted program name, subcommand, option or ref is the word it spells; the escaped and unquoted leaders of
+# round 3 stay refused. Rows needing a real `sudo`/`env` have no oracle; `'!' git checkout -b x && ...` is an
+# accepted over-refusal (bash is safe only because a command named `!` fails).
+QUOTED_NAMES_THAT_STILL_COUNT: list[tuple[str, str, str]] = [
+    ("'!' git checkout -b x && git commit -m x", PROTECTED, "C"),
+    ("\\! git commit -m x", PROTECTED, "C"),
+    ("x=1 if git commit -m x", PROTECTED, "C"),
+    (">/dev/null ! git commit -m x", PROTECTED, "C"),
+    ("sudo -n ! git commit -m x", PROTECTED, "C"),
+    ('"git" commit -m x', PROTECTED, "C"),
+    ("''git commit -m x", PROTECTED, "C"),
+    ('"GIT" commit -m x', PROTECTED, "C"),
+    ('git "commit" -m x', PROTECTED, "C"),
+    ('"sudo" git commit -m x', PROTECTED, "C"),
+    ('"time" git commit -m x', PROTECTED, "C"),
+    ('sudo "-E" git commit -m x', PROTECTED, "C"),
+    ('sudo "-n" git commit -m x', PROTECTED, "C"),
+    ('time "-p" git commit -m x', PROTECTED, "C"),
+    ('env "X=1" git commit -m x', PROTECTED, "C"),
+    ('sudo "X=1" git commit -m x', PROTECTED, "C"),
+    ('git "--no-pager" commit -m x', PROTECTED, "C"),
+    ('git "-c" a=b commit -m x', PROTECTED, "C"),
+    ('git checkout "main"; git commit -m x', OTHER, "C"),
+    ('git push origin "refs/heads/main"', OTHER, "P"),
+    ('git checkout "refs/heads/main" && git commit -m x', OTHER, "C"),
+    ("git push origin 'HEAD:main'", PROTECTED, "P"),
+    ('git push "origin" "HEAD:main"', OTHER, "P"),
+    ('git push origin "+refs/heads/main"', OTHER, "P"),
+    ('git checkout "-" && git commit -m x', OTHER, "U"),
+    ("git checkout '@{-1}' && git commit -m x", OTHER, "U"),
+    ('"/usr/bin/git" commit -m x', PROTECTED, "C"),
+]
+
+
+@pytest.mark.parametrize(("command", "branch", "kind"), QUOTED_WORD_AT_COMMAND_POSITION)
+def test_violation_allows_a_quoted_word_at_command_position(
+    command: str, branch: str, kind: str
+) -> None:
+    assert_judged(command, branch, kind)
+
+
+@pytest.mark.parametrize(("command", "branch", "kind"), QUOTED_NAMES_THAT_STILL_COUNT)
+def test_violation_still_reads_a_quoted_name_as_the_name_it_spells(
+    command: str, branch: str, kind: str
+) -> None:
+    assert_judged(command, branch, kind)
+
+
+@pytest.mark.parametrize(
+    "command",
+    [
+        'git checkout -b "feat/x2" && git commit -m x',
+        'git "checkout" "-b" "feat/x2" && git "commit" -m x',
+        "git 'checkout' -b 'feat/x2' && git 'commit' -m 'x'",
+        'git checkout -b feat/x2 && git commit -m "x"',
+    ],
+)
+def test_violation_trusts_a_switch_written_with_quoted_words(command: str) -> None:
+    assert violation(command, PROTECTED) == ""
+
+
+MARK = guard_git._QUOTE_MARK
+
+
+@pytest.mark.parametrize(
+    "tokens",
+    [
+        (MARK + "if", "git", "commit"),
+        (MARK + "!", "git", "commit"),
+        (MARK + "X=1", "git", "commit"),
+        (MARK + ">", "x", "git", "commit"),
+        (MARK + "2", ">", "x", "git", "commit"),
+        ("git", MARK),
+        ("DO", "git", "commit"),
+    ],
+)
+def test_git_subcommand_finds_no_git_behind_a_quoted_word_in_command_position(
+    tokens: tuple[str, ...],
+) -> None:
+    assert git_subcommand(tokens) == ("", ())
+
+
+@pytest.mark.parametrize(
+    ("tokens", "expected"),
+    [
+        (("!", "git", "commit", "-m", "x"), ("commit", ("-m", "x"))),
+        (("if", "git", "commit"), ("commit", ())),
+        (("X=1", "git", "commit"), ("commit", ())),
+        ((">", "x", "git", "commit"), ("commit", ())),
+        (("2", ">", "x", "git", "commit"), ("commit", ())),
+        (("do", "git", "commit"), ("commit", ())),
+        ((MARK + "git", "commit", "-m", "x"), ("commit", ("-m", "x"))),
+        ((MARK + "/usr/bin/git", "commit"), ("commit", ())),
+        (
+            (
+                MARK + "git",
+                MARK + "-c",
+                "a=b",
+                MARK + "commit",
+                MARK + "-m",
+                MARK + "x",
+            ),
+            ("commit", ("-m", "x")),
+        ),
+        (("git", MARK + "--no-pager", "commit"), ("commit", ())),
+        (("git", MARK + "-c", "a=b", "commit"), ("commit", ())),
+        (("git", MARK + "-C", "d", "commit"), ("commit", ())),
+        (("sudo", MARK + "-E", "git", "commit"), ("commit", ())),
+        (("sudo", MARK + "-n", "!", "git", "commit"), ("commit", ())),
+        ((MARK + "sudo", MARK + "-E", "git", "commit"), ("commit", ())),
+        (("env", MARK + "X=1", "git", "commit"), ("commit", ())),
+        ((MARK + "time", "git", "commit"), ("commit", ())),
+        ((MARK + "time", MARK + "-p", "git", "commit"), ("commit", ())),
+        (("git", "checkout", MARK + "main"), ("checkout", ("main",))),
+    ],
+)
+def test_git_subcommand_returns_the_text_without_the_quote_mark(
+    tokens: tuple[str, ...], expected: tuple[str, tuple[str, ...]]
+) -> None:
+    subcommand, args = git_subcommand(tokens)
+
+    assert (subcommand, args) == expected
+    assert MARK not in subcommand
+    assert all(MARK not in arg for arg in args)
+
+
+def test_git_subcommand_does_not_change_its_tokens() -> None:
+    tokens = (MARK + "git", MARK + "-c", "a=b", "commit")
+
+    git_subcommand(tokens)
+
+    assert tokens == (MARK + "git", MARK + "-c", "a=b", "commit")
+
+
+def test_git_subcommand_reads_the_quoted_leader_through_segments_as_plain_text() -> (
+    None
+):
+    # `segments` strips the mark for display, so its tokens say nothing about
+    # quoting; `violation` reads the marked tokens and allows this.
+    parsed = segments("'if' git commit -m x")
+
+    assert parsed is not None
+    assert git_subcommand(parsed[0].tokens) == ("commit", ("-m", "x"))
+    assert violation("'if' git commit -m x", PROTECTED) == ""
+
+
+# Quote and escape state around an operator: an escaped quote, a backslash in single quotes, nesting through
+# `$( )`, backticks and `${ }`, a quoted operator beside a refspec or a switch.
+QUOTE_STATE_CASES: list[tuple[str, str, str]] = [
+    ('echo \\"; git commit -m x', PROTECTED, "C"),
+    ("echo '\\'; git commit -m x", PROTECTED, "C"),
+    ('echo "\\\\"; git commit -m x', PROTECTED, "C"),
+    ('echo "\\";" git commit -m x', PROTECTED, "A"),
+    ("echo \\'; git commit -m x", PROTECTED, "C"),
+    ('echo "it\'s ;" git commit -m x', PROTECTED, "A"),
+    ("echo 'say \"a|b\"' git commit -m x", PROTECTED, "A"),
+    ('echo "a" ";" "b" git commit -m x', PROTECTED, "A"),
+    ('echo a";"b git commit -m x', PROTECTED, "A"),
+    ('echo "$(echo ";")" git commit -m x', PROTECTED, "A"),
+    ('echo "$(echo ";"; git commit -m x)"', PROTECTED, "C"),
+    ('echo "`echo ";"`" git commit -m x', PROTECTED, "A"),
+    ('echo "${x:-";"}" git commit -m x', PROTECTED, "A"),
+    ('echo "${x:-a;b}" git commit -m x', PROTECTED, "A"),
+    ('echo ${x:-";"} git commit -m x', PROTECTED, "A"),
+    ("echo ${x:-\\;} git commit -m x", PROTECTED, "A"),
+    ('echo $"a;b" git commit -m x', PROTECTED, "A"),
+    ('true || echo $"a;b" | git checkout -b x && git commit -m x', PROTECTED, "C"),
+    ('true || echo "a;" ";" | git checkout -b x && git commit -m x', PROTECTED, "C"),
+    ("true || echo ';'';' | git checkout -b x && git commit -m x", PROTECTED, "C"),
+    ("true || echo \\;\\; | git checkout -b x && git commit -m x", PROTECTED, "C"),
+    ('true || echo ";"; git checkout -b x && git commit -m x', PROTECTED, "A"),
+    ("true || echo ; git checkout -b x && git commit -m x", PROTECTED, "A"),
+    ('true || echo "a" ; git checkout -b x && git commit -m x', PROTECTED, "A"),
+    ('true || echo ";" ; git checkout -b x && git commit -m x', PROTECTED, "A"),
+    ('true || echo ";" && git checkout -b x && git commit -m x', PROTECTED, "A"),
+    ('true || echo ";" | git checkout -b x && git commit -m x', OTHER, "A"),
+    ("true || echo \\; | git checkout -b x && git commit -m x", OTHER, "A"),
+    ("true || echo { | git checkout -b x && git commit -m x", OTHER, "A"),
+    ("git checkout -b feat/x &&\r\ngit commit -m x", OTHER, "A"),
+    ("true || echo '(' | git checkout -b x && git commit -m x", OTHER, "A"),
+    ('true || echo ";" | git checkout main && git commit -m x', OTHER, "C"),
+    ('echo ";" | git checkout main && git commit -m x', OTHER, "C"),
+    ('git checkout main ";" git commit -m x', OTHER, "A"),
+    ('git checkout main; echo ";"; git commit -m x', OTHER, "C"),
+    ('git checkout main && echo ";" && git commit -m x', OTHER, "C"),
+    ("git checkout main || echo ';' && git commit -m x", OTHER, "C"),
+    ('git checkout -b feat/x2 && echo ";" && git commit -m x', PROTECTED, "A"),
+    ("git checkout -b feat/x2 && echo \\; && git commit -m x", PROTECTED, "C"),
+    ("git checkout -b feat/x2 && echo { && git commit -m x", PROTECTED, "C"),
+    ("git checkout -b feat/x2 && echo x\\r && git commit -m x", PROTECTED, "A"),
+    ('git push origin ";" main', OTHER, "P"),
+    ('git push origin ";"; git push origin main', OTHER, "P"),
+    ('git push origin main ";"', OTHER, "P"),
+    ('git push origin "main;"', OTHER, "A"),
+    ('git push -o ";" origin main', OTHER, "P"),
+    ('git commit -m ";"', PROTECTED, "C"),
+    ('git commit -m ";" && git push', PROTECTED, "C"),
+    ("git commit -m \\; ", PROTECTED, "C"),
+]
+
+
+@pytest.mark.parametrize(("command", "branch", "kind"), QUOTE_STATE_CASES)
+def test_violation_tracks_quoting_around_an_operator(
+    command: str, branch: str, kind: str
+) -> None:
+    assert_judged(command, branch, kind)
+
+
+# PowerShell only (no oracle): a bare `{` after a command word opens a scriptblock that runs. Refused today
+# because the brace splits the command; round 5 must keep that.
+POWERSHELL_SCRIPTBLOCKS: list[tuple[str, str, str]] = [
+    ("Get-Item . | ForEach-Object { git commit -m x }", PROTECTED, "C"),
+    ("Invoke-Command -ScriptBlock { git commit -m x }", PROTECTED, "C"),
+    ("Start-Job { git push origin main }", OTHER, "P"),
+    ("gci | % { git commit -m x }", PROTECTED, "C"),
+    ("try { git commit -m x } catch { }", PROTECTED, "C"),
+    ("Do { git checkout main } While ($x); git commit -m x", OTHER, "C"),
+]
+
+
+@pytest.mark.parametrize(("command", "branch", "kind"), POWERSHELL_SCRIPTBLOCKS)
+def test_violation_refuses_a_git_command_inside_a_powershell_scriptblock(
+    command: str, branch: str, kind: str
+) -> None:
+    assert_judged(command, branch, kind)
+
+
+@pytest.mark.parametrize(
+    "command",
+    [
+        "Get-Item . | ForEach-Object { git checkout main }; git commit -m x",
+        "Do { git checkout main } While ($x); git commit -m x",
+        "DO { git checkout main } WHILE ($x)\ngit commit -m x",
+        "foreach ($i in 1..2) { git checkout main }; git commit -m x",
+    ],
+)
+def test_violation_counts_a_switch_inside_a_powershell_block(command: str) -> None:
+    assert violation(command, OTHER).startswith(COMMIT_REASON)
+
+
+@pytest.mark.parametrize(
+    "command",
+    [
+        'true || echo ";" | git checkout -b x && git commit -m x',
+        "echo x\r git checkout -b x && git commit -m x",
+        r"echo \; git checkout -b x && git commit -m x",
+        "'if' git commit -m x",
+        "git checkout -b feat/x2 &&\r\ngit commit -m x",
+    ],
+)
+def test_violation_is_idempotent_for_the_round_5_forms(command: str) -> None:
+    first = violation(command, PROTECTED)
+
+    assert violation(command, PROTECTED) == first
+    assert segments(command) == segments(command)
+
+
+def test_violation_reads_a_long_run_of_quoted_operators_quickly() -> None:
+    command = "echo " + '";" ' * 4000 + "&& git status"
+
+    parsed = segments(command)
+
+    assert parsed is not None
+    assert len(parsed) == 2
+    assert len(parsed[0].tokens) == 4001
+    assert violation(command, PROTECTED) == ""
+
+
+def test_violation_reads_a_long_run_of_escaped_operators_quickly() -> None:
+    command = "echo " + r"\; " * 4000 + "&& git commit -m x"
+
+    assert violation(command, PROTECTED).startswith(COMMIT_REASON)
+
+
+def test_violation_reads_a_long_or_chain_of_quoted_operators_quickly() -> None:
+    command = "true" + ' || echo ";"' * 2000 + " | git checkout -b x && git commit -m x"
+
+    assert violation(command, PROTECTED).startswith(COMMIT_REASON)
+
+
+def test_violation_plays_safe_when_a_command_is_too_tangled_to_read(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    def give_up(*_args: object, **_kwargs: object) -> object:
+        raise guard_git._TooComplexError
+
+    monkeypatch.setattr(guard_git, "_scan", give_up)
+    command = 'true || echo ";" | git checkout -b x && git commit -m x'
+
+    assert violation(command, PROTECTED).startswith(UNMODELLED_REASON)
+    assert violation('echo ";" x', PROTECTED) == ""
+    assert violation("git commit -m x\r\n", PROTECTED).startswith(UNMODELLED_REASON)
+    assert violation(command, OTHER) == ""
