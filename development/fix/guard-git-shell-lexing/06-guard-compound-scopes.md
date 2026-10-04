@@ -69,7 +69,7 @@ Critique — the `diagnosis-critic`'s findings and what was done with each (verd
 
 1. **The class is wider: a later pipeline stage, `\|&`, a leader, a redirection after the closer, newline-written forms, inside `$( )`, `( case … )`, and the `!` form in a group.** Applied: Class row and A2/A3.
 2. **Two pins constrain the fix (`:3778`, the `RUN_PINS` case row); round 3's compound over-refusals come from `_judge`, not `_walk_run`.** Applied: Blast radius and A4.
-3. **`_loop_ranges` is a pattern, not a range to reuse; `if a && b; then` conditions do not bypass; PowerShell needs no change; `coproc <C> \| …` lands on the switch target in bash.** Applied: Class row and A4.
+3. **`_loop_ranges` is a pattern, not a range to reuse; `if a && b; then` conditions do not bypass; PowerShell needs no change; `coproc <C> \| …` lands on the switch target in bash.** Applied: Class row and A4 (A4's `coproc` row later changed at step 2 — see section 2's Critique).
 
 ### What this is
 
@@ -115,7 +115,7 @@ Recorded in the plan file, not in `DEVELOPMENT.md` (the user's instruction):
 | A1 | Given `true \|\| if true; then echo; fi \| git checkout -b x && git commit -m x` with `main` checked out, `violation` refuses with the commit reason rather than returning `""`. |
 | A2 | Every reserved-word compound and `[[ && ]]` inside an `\|\|` operand is refused on `main` in every position: first, a later pipeline stage, after `time`, with a redirection after the closer, before `\|&`, written across lines, and inside `$( )` — covering `if … fi` (also `if { true; }; then`), `case … esac` with `a)` and `(a)` patterns, `while`, `until`, `for` and `select … done`, and `[[ a && b ]]`. |
 | A3 | The same compounds after `!` (`! <C> \| git checkout -b feat/x && git commit -m x`, feat/x existing) are refused on `main`; `{ case a in a) :;; esac; } \| …` and `( case a in a) :;; esac ) \| …` after `\|\|` or `!` are refused. |
-| A4 | These keep their outcome: create-or-switch allowed; `true \|\| { git checkout -b x && git commit -m x; }` allowed; `;;`, `;&`, `;;&` still end an `\|\|` or `!` scope opened inside a clause body (`:3778`); round 3's compound `&&` over-refusals (`git checkout -b feat/x && if true; then :; fi && git commit -m x`, `&& for … done &&`) still refused; the `coproc <C> \| …` forms unchanged; `(( 1 && 1 ))`, `{ true; }`, `(true; true)` and function definitions still refused. |
+| A4 | These keep their outcome: create-or-switch allowed; `true \|\| { git checkout -b x && git commit -m x; }` allowed; `;;`, `;&`, `;;&` still end an `\|\|` or `!` scope opened inside a clause body (`:3778`); round 3's compound `&&` over-refusals (`git checkout -b feat/x && if true; then :; fi && git commit -m x`, `&& for … done &&`) still refused; the `coproc <C> \| …` forms become refused, as `coproc { …; } \| …` already is (changed at step 2, the user's choice: today they are allowed only through the bug this round fixes; bash commits on the switch target there, so this is a play-safe over-refusal); `(( 1 && 1 ))`, `{ true; }`, `(true; true)` and function definitions still refused. |
 | A5 | A committed test, pure Python with no bash, crosses each scope opener (`true \|\|`, `false \|\|`, `!`) with each construct that holds a list terminator — `{ ; }`, `( ; )`, `$( ; )`, backticks, `if … fi`, `case … esac` with `a)` and `(a)` patterns, `while`/`until`/`for`/`select … done`, `[[ && ]]`, `(( && ))`, `f() { ; }` — bare and wrapped in `{ }`, and asserts `<opener> <construct> \| git checkout -b x && git commit -m x` is refused on `main` and allowed from another branch. |
 | A6 | Nothing else changed: the existing 1613 tests pass unmodified and rounds 1–5's criteria still hold; a differential against the guard at 6f05520 over the suite's commands with compounds inserted sends every differing row to bash with `git` shadowed — the oracle first shown live by a plain commit landing on `main` — and every difference involves a reserved-word compound or `[[ ]]`, with the oracle agreeing or the new refusal play-safe, and zero rows where the new guard allows a commit or push that bash lands on `main`. |
 
@@ -133,25 +133,31 @@ None.
 with `done`, and let each paired compound raise the same per-level group count that `{` and `(`
 raise; read a `case` pattern's parentheses in the run walk.**
 
-1. **Pairing pass.** A new private `_compound_spans(parsed)` walks the invocations with one stack
-   per substitution depth and returns, for each invocation index, how many compounds open after it
-   and how many close after it. Openers are the reserved words a shell reads as the start of a
+1. **Pairing pass.** A new private `_compound_spans(parsed, runs)` walks the invocations with one
+   stack per substitution depth and returns, for each invocation index, the compound kinds that open
+   there in order (`dict[int, tuple[str, ...]]`, e.g. `("if", "case")`) and how many close there
+   (`dict[int, int]`). Openers are the reserved words a shell reads as the start of a
    compound at command position: `if`, `while` and `until` among an invocation's leading words
    (they are leaders, so several can chain: `if while false; do :; done; then`), and `case`, `for`,
    `select` or `[[` as its command word (the word after leaders, `!`, `time` and its options,
    `coproc`, assignments and redirections, exactly where `_walk_prefix` stops). Closers are an
-   invocation whose first token is `fi`, `esac` or `done` (with `_loop_ranges`' rule that a `done`
-   after `|`, or ahead of a case pattern's `)`, is not one), and an invocation that holds a `]]`
-   token while a `[[` is open at its depth. Each closer pops the innermost open compound of its
+   invocation whose first token is `fi`, `esac` or `done` (a `done` closes when the last operator of its raw run at its own depth is `;`, a newline,
+   `&` or the `;;` family — so `do (true); done` and `do { :; }; done` pair — and not when the next
+   segment's separator is `)`, a case pattern), and an invocation that holds a `]]`
+   token while a `[[` is open at its depth. A `[[` whose `]]` is in the same invocation (`[[ a ]]`,
+   `if [[ a ]]; then`) is not reported at all — nothing inside it can split the run. Each closer pops the innermost open compound of its
    kind's family (`fi`↔`if`, `esac`↔`case`, `done`↔`while`/`until`/`for`/`select`, `]]`↔`[[`). An
    opener with no closer at its depth, or a closer that does not match, is ignored — bash rejects
    that command as a syntax error, so it runs nothing, and ignoring it leaves today's reading. A
    quoted keyword carries round 5's quote mark and matches nothing.
-2. **The walk.** `_judge` already walks each invocation's run through `_walk_run` with the shared
-   `nest`. After an invocation's run is walked, it raises `nest[segment.depth]` once per compound
-   opening there; after a closer's run is walked, it ends every `||` operand and `!` scope keyed
-   above the outer group (`ok |= base` for each, as a group close does) and lowers the count once
-   per compound closing. So `true || if true; then echo; fi | git checkout -b x && git commit` reads
+2. **The walk.** `_walk_run` stays the only place that touches `nest` and the case keys. `_judge`
+   passes it two new private run markers, like round 4's `_CLOSED`, appended to an invocation's run
+   after its own operators: `_COMPOUND_OPEN` (one per kind opening there, carrying the kind) and
+   `_COMPOUND_CLOSE` (one per compound closing there). `_walk_run` handles both before any
+   case-pattern logic: an open raises `nest[level]` (and, for `case`, records the new key as
+   expecting a pattern); a close ends every `||` operand and `!` scope keyed above the outer group
+   (`ok |= base` for each, exactly as a `)`/`}` close does), drops the case key, and lowers the
+   level. So `true || if true; then echo; fi | git checkout -b x && git commit` reads
    its two `;` one level deep, the `fi` closes that level, the `|` and the `&&` are back at the
    operand's key, and the `&&` unions `main` back in.
 3. **`case` patterns.** `_walk_run` keeps, for each key that a `case` opened, whether a pattern is
@@ -171,9 +177,10 @@ that holds a list, not only for brackets.
   keeps.
 - **Keep every operand open to the end of the command once a compound appears.** It fixes nothing:
   an operand that never closes never unions `main` back in, so the commit is still trusted.
-- **Count compounds in the PowerShell reading.** PowerShell's `if`, `while`, `foreach` take braces,
-  which are already groups; its keywords have no `fi`/`done`/`esac`, so the pairing pass ignores
-  them as unmatched there, which is the intended result.
+- **A separate pairing for PowerShell.** The pairing runs in both readings on the same tokens, so a
+  bash compound pairs in the PowerShell reading too (only refusing more); PowerShell's own `if`,
+  `while`, `foreach` take braces, which are already groups, and never meet a `fi`/`done`/`esac`, so
+  they go unpaired.
 
 ### Modules
 
@@ -199,20 +206,29 @@ keep their signatures; `segments` output is unchanged.
    starts with the commit reason, under a new heading "round 6: compounds keep an `||` or `!` scope"
    at the end of the file. Run it red, paste the run into section 3, commit before any production
    change. If it is already green, halt.
-2. **`_compound_spans(parsed: list[Segment]) -> tuple[dict[int, int], dict[int, int]]`.** Opens and
-   closes per invocation index, as approach item 1. Reuse `_walk_prefix` for the leading words and
-   the command word, and reuse `_loop_ranges`' `done` rule (factor it into a small private helper
-   both call rather than copying it).
-3. **`_judge`.** Compute the spans once per reading, next to `loops`. In the segment loop, after
-   `_walk_run` returns: for a closer, call the same close-and-union path a `)`/`}` takes for the
-   current level (so operands and `!` keys inside the compound end, `ok |= base`), then lower
-   `nest[segment.depth]`; for an opener, raise it. Openers and closers on one invocation (`[[ a ]]`)
-   net out. Never lower below 0.
-4. **`_walk_run` case state.** Add a private parameter for the set of case keys expecting a pattern
-   (or a small dict), passed from `_judge`; `_judge` adds the key `(depth, nest after raising)` when
-   a `case` opens and drops it when `esac` closes. In `_walk_run`: a `(` at a key expecting a pattern
-   is skipped; the first `)` at such a key clears the expectation and is skipped; `;;`, `;&`, `;;&`
-   at a case key set it again (after their usual close).
+2. **`_compound_spans(parsed: list[Segment], runs: list[_Run]) -> tuple[dict[int, tuple[str, ...]], dict[int, int]]`.**
+   Opens (kinds, in order) and closes per invocation index, as approach item 1. Reuse `_walk_prefix`
+   for the leading words and the command word. The `done` rule reads the raw run (approach item 1);
+   `_loop_ranges` keeps its own rule unchanged. When a substitution at depth d ends (`_CLOSED`, or
+   the depth dropping), the pairing stacks for depth d and deeper are cleared, as `nest` is.
+3. **`_judge`.** Compute the spans once per reading, next to `loops`. Append the closes and then
+   the opens as markers to each invocation's run before calling `_walk_run` (closes first: a `fi`
+   never opens on the same invocation, and a closer's own operators belong inside the compound).
+   **Where a `!`/`coproc` scope is keyed:** today line ~2053 adds `(depth, nest[depth])` after the
+   walk; with the opens applied, that would key `! if …` inside the `if`. Key it instead at
+   `(depth, nest_before + k)`, where `nest_before` is the level before this invocation's opens and
+   `k` is the number of `if`/`while`/`until` leaders that come before the first `!` or `coproc` in
+   the leader chain (command-word openers — `case`, `for`, `select`, `[[` — come after every leader
+   and never count). So `! if true; then …; fi | git checkout …` keys the negation outside the `if`,
+   while `if ! git diff --quiet; then git checkout -b feat/x && git commit -m x; fi` keys it inside,
+   and the `;` before `then` ends it there as today.
+4. **`_walk_run` case state.** Add a private parameter, a dict from case key to "expecting a
+   pattern", owned by `_judge` and passed on every call. `_COMPOUND_OPEN` for `case` adds the new
+   key, expecting; `_COMPOUND_CLOSE` drops it (it is handled before the pattern logic, so the close
+   that follows an `esac` directly after `;;` is never swallowed as a pattern's `)`). Otherwise: a
+   `(` at a key expecting a pattern is skipped; the first `)` at such a key clears the expectation
+   and is skipped; `;;`, `;&`, `;;&` at a case key set it again (after their usual close). Case keys
+   at depth d and deeper are cleared when a substitution at depth d ends.
 5. **Docs.** Module docstring and STRUCTURE.md guard section: compounds and `[[ ]]` are groups for
    `||` operands and `!` scopes; a `case` pattern's parentheses are not. The tests entry gets a
    round 6 paragraph.
@@ -222,9 +238,9 @@ keep their signatures; `segments` output is unchanged.
 | # | Must prove | Covers |
 |---|---|---|
 | T1 | `true \|\| if true; then echo; fi \| git checkout -b x && git commit -m x` on `main` refused with the commit reason: red before, green after | A1 |
-| T2 | Every A2 compound in every A2 position after `true \|\|` and `git status \|\|` refused on `main` (each checked in bash with the oracle); the same commands from another branch allowed; a push of `HEAD` in that shape refused | A2 |
-| T3 | The A3 `!` forms (feat/x existing) refused on `main`; `{ case a in a) :;; esac; } \| …` and `( case a in a) :;; esac ) \| …` after `\|\|` and `!` refused; `case a in (a) …` patterns; a real subshell inside a clause body still a group | A3 |
-| T4 | The A4 list keeps its outcome, including `:3778`'s terminator test and the `RUN_PINS` case row unchanged; an unmatched opener or closer (`true \|\| if true; then echo \| …`, a stray `fi`) leaves today's reading | A4 |
+| T2 | Every A2 compound in every A2 position after `true \|\|` and `git status \|\|` refused on `main` (each checked in bash with the oracle); the same commands from another branch allowed; a push of `HEAD` in that shape refused; `[[ a ]]`, `if [[ a ]]; then :; fi` and `while [[ a ]]; do :; done` after `true \|\|` still refused (a one-invocation `[[ ]]` leaves the level balanced); loop bodies ending in `( )` and `{ }` (`while false; do (true); done`, `do { :; }; done`) refused; `true \|\| case a in a) :;; esac \| git checkout -b x && git commit -m x` refused with `esac` directly after `;;` | A2 |
+| T3 | The A3 `!` forms (feat/x existing) refused on `main`, including `! if …` and `! [[ a && b ]] …`; `{ case a in a) :;; esac; } \| …` and `( case a in a) :;; esac ) \| …` after `\|\|` and `!` refused; `case a in (a) …` patterns; a real subshell inside a clause body still a group | A3 |
+| T4 | The A4 list keeps its outcome, including `:3778`'s terminator test and the `RUN_PINS` case row unchanged; `if ! git diff --quiet; then git checkout -b feat/x && git commit -m x; fi` stays allowed on `main` (the `!` keyed inside the `if`); the `coproc <C> \| git checkout -b x && git commit -m x` forms pinned as refused (A4's step 2 change), next to `coproc { true; } \| …`; an unmatched opener or closer (`true \|\| if true; then echo \| …`, a stray `fi`) leaves today's reading | A4 |
 | T5 | The container matrix of A5: openers `true \|\|`, `false \|\|`, `!` × constructs `{ ; }`, `( ; )`, `$( ; )`, backticks, `if … fi`, `case … esac` (`a)` and `(a)`), `while`/`until`/`for`/`select … done`, `[[ && ]]`, `(( && ))`, `f() { ; }`, bare and wrapped in `{ }`: `<opener> <construct> \| git checkout -b x && git commit -m x` refused on `main` and allowed from `feat/y`, as one parametrized test with readable ids | A5 |
 | T6 | See below. | A6 |
 
@@ -249,7 +265,12 @@ differential runs at step 6:
   the command-position and quote-mark rules decide; if a test shows a word read as a closer where
   bash does not, fix inside the build. An unmatched closer is ignored, so the error direction is
   "today's reading", never a new hole.
-- **An existing test changes outcome.** Halt — unless it is a refusal that stays a refusal.
+- **A level left raised.** Any path that raises without a matching lower leaves later operators one
+  level too deep, so an `&&` misses the operand it should close — that is a new bypass, not a safe
+  error. The pairing only reports matched compounds and the closes are applied before the opens; if
+  a test shows the level unbalanced after a compound, fix inside the build.
+- **An existing test changes outcome.** Halt — unless it is a refusal that stays a refusal, or the
+  `coproc <C> \| …` change A4 now names.
 - **PowerShell.** If a PowerShell test changes outcome, halt.
 - **The cause is elsewhere.** If an A1–A3 form stays allowed once compounds raise the level, for a
   reason other than the Root cause row, halt.
@@ -259,6 +280,31 @@ differential runs at step 6:
 - **Every criterion has a Public API entry:** A1–A6 through `violation`.
 - **Every criterion has a test intent:** A1→T1, A2→T2, A3→T3, A4→T4, A5→T5, A6→T6.
 - **Nothing in the Public API lacks a criterion.** No new public surface.
+
+Re-checked after the critique: the Public API is unchanged; A4 changed at the user's choice and T2,
+T3 and T4 gained rows, all still covered.
+
+### Critique
+
+`plan-critic` verdict: accept with changes. Every finding applied:
+
+1. **Where a `!`/`coproc` scope is keyed relative to the raise was undecided; both simple choices
+   break something (`! if …` stays a bypass, or `if ! …; then … fi` becomes refused).** Applied:
+   guide 3 keys the scope at the level before the opens plus the `if`/`while`/`until` leaders ahead
+   of the `!`; T3 and T4 rows.
+2. **Done right, the fix refuses the `coproc <C> \| …` forms that A4 said stay unchanged.** Put to
+   the user, who accepted the change: A4 amended, T4 pins it, Risks updated.
+3. **Counts per index lose the order, so `[[ a ]]` on one invocation could leave the level raised —
+   a new bypass.** Applied: the pairing returns kinds in order and skips a one-invocation `[[ ]]`;
+   closes apply before opens; T2 rows; a Risks row on unbalanced levels.
+4. **The close path is a closure inside `_walk_run`, and a spliced `)` would be swallowed as a case
+   pattern after `;;`.** Applied: two private run markers handled before the pattern logic, with
+   `_walk_run` the only place that touches `nest` and the case keys (approach item 2, guides 3–4);
+   T2 row for `esac` after `;;`.
+5. **`_loop_ranges`' `done` rule misses a `done` after a group or subshell, leaving those loops a
+   bypass.** Applied: the pairing reads the raw run's last operator; T2 rows.
+6. **Clean-up when a substitution ends was unspecified.** Applied: guides 2 and 4.
+7. **The PowerShell note in Rejected was inaccurate.** Applied: reworded.
 
 ---
 
