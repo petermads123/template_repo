@@ -4836,7 +4836,8 @@ def test_violation_refuses_a_switch_after_a_compound_with_an_escaped_closer(
 # function keeping HEAD in a temp file, an empty checkout argument failing,
 # `PATH=/usr/bin:/bin`, stdin closed, a timeout, the oracle shown live first by a plain
 # commit landing on `main`) and lands the commit on `main`.
-SCOPE_OPENERS = [("true ||", "x"), ("false ||", "x"), ("!", "feat/x")]
+SCOPE_OPENERS = [("true ||", "x"), ("git status ||", "x"), ("!", "feat/x")]
+MATRIX_OPENERS = [("true ||", "x"), ("false ||", "x"), ("!", "feat/x")]
 
 
 def assert_switch_untrusted(opener: str, body: str, target: str) -> None:
@@ -4968,3 +4969,369 @@ def test_violation_refuses_a_switch_after_a_case_with_an_empty_last_clause(
 
     assert violation(command, PROTECTED).startswith(COMMIT_REASON), command
     assert violation(command, "feat/y") == "", command
+
+
+# Compounds the scope pairing already handled: pinned so a later change to it cannot
+# reopen them. Each is a keyword-led compound after `||` or `!` and bash lands the
+# commit on `main`.
+
+# A `}` straight after a closer. Bash accepts it; the guard reads it as a group close
+# in the PowerShell reading only, which is what keeps these refused.
+BRACE_CLOSED_COMPOUND_BODIES = [
+    "{ if true; then :; fi }",
+    "{ case a in a) :;; esac }",
+    "{ while false; do :; done }",
+    "{ for i in 1; do :; done }",
+]
+
+
+@pytest.mark.parametrize("body", BRACE_CLOSED_COMPOUND_BODIES)
+@pytest.mark.parametrize(("opener", "target"), SCOPE_OPENERS)
+def test_violation_refuses_a_switch_after_a_compound_closed_by_a_brace(
+    body: str, opener: str, target: str
+) -> None:
+    assert_switch_untrusted(opener, body, target)
+
+
+DOUBLE_BRACKET_BODIES = [
+    "if [[ a && b ]]; then :; fi",
+    "while [[ a && b ]] && false; do :; done",
+    "until [[ a && b ]]; do :; done",
+    "if ! [[ a && b ]]; then :; fi",
+    "if [[ a || b ]]; then :; fi",
+]
+
+
+@pytest.mark.parametrize("body", DOUBLE_BRACKET_BODIES)
+@pytest.mark.parametrize(("opener", "target"), SCOPE_OPENERS)
+def test_violation_refuses_a_switch_after_a_double_bracket_test(
+    body: str, opener: str, target: str
+) -> None:
+    assert_switch_untrusted(opener, body, target)
+
+
+# A `case` pattern's parentheses belong to the pattern: the optional `(`, the first `)`
+# after each terminator, nested cases, and a pattern spelled like a closing word.
+CASE_PATTERN_BODIES = [
+    "{ case a in (a) :;; (b) :;& (c) :;;& esac; }",
+    "( case a in (a) :;; (b) :;& (c) :;;& esac )",
+    "case a in (a) :;; (b) :;; esac",
+    "{ case a in a) (cd /; :) ;; b) :;; esac; }",
+    "{ case a in a|b) :;; esac; }",
+    "{ case a in a) case b in b) :;; esac;; esac; }",
+    "case a in a) case b in b) :;; esac;; esac",
+    "while false; do case a in\ndone) :;;\nesac; done",
+    "while false; do case a in\n(done) :;;\nesac; done",
+    "while false; do case a in\nx|done) :;;\nesac; done",
+    "if true; then case a in\nfi) :;;\nesac; fi",
+    "if true; then case a in\n(esac) :;;\nesac; fi",
+]
+
+
+@pytest.mark.parametrize("body", CASE_PATTERN_BODIES)
+@pytest.mark.parametrize(("opener", "target"), SCOPE_OPENERS)
+def test_violation_reads_a_case_patterns_parentheses_as_the_patterns(
+    body: str, opener: str, target: str
+) -> None:
+    assert_switch_untrusted(opener, body, target)
+
+
+# Leaders that chain (`if while …`), the arithmetic `for`, and `time` with its options.
+LOOP_AND_PREFIX_BODIES = [
+    "if while false; do :; done; then :; fi",
+    "while if false; then :; fi && false; do :; done",
+    "if if true; then :; fi; then :; fi",
+    "for ((i=0; i<1; i++)); do :; done",
+    "{ for ((i=0; i<1; i++)); do :; done; }",
+    "for ((;;)); do break; done",
+    "time -p while false; do :; done 2>/dev/null",
+    "time -p if true; then :; fi",
+    "time while false; do :; done",
+    "time -p case a in a) :;; esac",
+]
+
+
+@pytest.mark.parametrize("body", LOOP_AND_PREFIX_BODIES)
+@pytest.mark.parametrize(("opener", "target"), SCOPE_OPENERS)
+def test_violation_refuses_a_switch_after_chained_leaders_and_a_timed_loop(
+    body: str, opener: str, target: str
+) -> None:
+    assert_switch_untrusted(opener, body, target)
+
+
+@pytest.mark.parametrize("pipe", ["|", "|&"])
+@pytest.mark.parametrize(
+    "body",
+    [
+        "time -p while false; do :; done 2>/dev/null",
+        "time -p if true; then :; fi 2>/dev/null",
+    ],
+)
+def test_violation_refuses_a_switch_after_a_timed_compound_before_either_pipe(
+    body: str, pipe: str
+) -> None:
+    command = f"true || {body} {pipe} git checkout -b x && git commit -m x"
+
+    assert violation(command, PROTECTED).startswith(COMMIT_REASON)
+    assert violation(command, "feat/y") == ""
+
+
+# --- the whole command, refused or allowed -------------------------------------
+# Each row was run in bash 5.2 as above. A row marked "lands" commits on `main`; the
+# others fail in bash (a syntax error, or a commit that runs on the branch it made)
+# and are refused only because the guard plays safe.
+
+SCOPE_REFUSED_COMMANDS = [
+    'true || echo "$(if true; then :)"; if true; then :; fi | git checkout -b x && git commit -m x',
+    "true || echo `if true; then :`; if true; then :; fi | git checkout -b x && git commit -m x",
+    "echo `true || if :; then :; fi | git checkout -b x && git commit -m x`",
+    'echo "$(true || if :; then :; fi | git checkout -b x && git commit -m x)"',
+    "cat <<EOF\n$(true || case a in a) :;; esac | git checkout -b x && git commit -m x)\nEOF",
+    "git checkout -b feat/x && if true; then :; fi && git commit -m x",
+    "git checkout -b feat/x && for i in 1; do :; done && git commit -m x",
+    "! if while false; do :; done; then :; fi | git checkout -b feat/x && git commit -m x",
+    "true || if true; then echo | git checkout -b x && git commit -m x",
+    "true || fi; git checkout -b x && git commit -m x",
+    "true || if true; then echo; done | git checkout -b x && git commit -m x",
+    "coproc if true; then :; fi | git checkout -b x && git commit -m x",
+    "coproc { true; } | git checkout -b x && git commit -m x",
+    "true || (( 1 && 1 )) | git checkout -b x && git commit -m x",
+    "true || { true; } | git checkout -b x && git commit -m x",
+    "true || (true; true) | git checkout -b x && git commit -m x",
+    "true || f() { :; } | git checkout -b x && git commit -m x",
+    "fi; git checkout -b feat/x && git commit -m x",
+    "done; git checkout -b feat/x && git commit -m x",
+    "esac; git checkout -b feat/x && git commit -m x",
+]
+
+
+@pytest.mark.parametrize("command", SCOPE_REFUSED_COMMANDS)
+def test_violation_refuses_these_scope_commands_on_main_and_not_elsewhere(
+    command: str,
+) -> None:
+    assert violation(command, PROTECTED).startswith(COMMIT_REASON)
+    assert violation(command, "feat/y") == ""
+
+
+SCOPE_ALLOWED_COMMANDS = [
+    "if ! git diff --quiet; then git checkout -b feat/x && git commit -m x; fi",
+    "until ! git diff --quiet; do git checkout -b feat/x && git commit -m x; done",
+    "if ! [[ a && b ]]; then git checkout -b feat/x && git commit -m x; fi",
+    "while ! git diff --quiet; do git checkout -b feat/x && git commit -m x; done",
+    "true || { git checkout -b x && git commit -m x; }",
+    "git checkout -b x || git checkout x && git commit -m x",
+    "if true; then case $v in a) true || git checkout -b y ;; b) git checkout -b x && git commit -m x ;; esac; fi",
+    "case $v in a) true || git checkout -b y ;& b) git checkout -b x && git commit -m x ;;& c) :;; esac",
+    "true || \\[[ a && b ]] | git checkout -b x && git commit -m x",
+    "true || i\\f true && b fi | git checkout -b x && git commit -m x",
+    "(( 1 && 1 )) | git checkout -b x && git commit -m x",
+    "while false; do :; done; git checkout -b feat/x && git commit -m x",
+    "if true; then git checkout -b feat/x && git commit -m x; fi",
+    "for i in 1; do git checkout -b feat/x && git commit -m x; done",
+    "git checkout -b feat/x && git commit -m x; if true; then :; fi",
+]
+
+
+@pytest.mark.parametrize("command", SCOPE_ALLOWED_COMMANDS)
+def test_violation_still_allows_these_scope_commands(command: str) -> None:
+    assert violation(command, PROTECTED) == ""
+    assert violation(command, "feat/y") == ""
+
+
+# --- the pairing, and what it does when it fails --------------------------------
+
+
+def pairs_every_compound(command: str) -> bool:
+    runs: list[guard_git._Run] = []
+    parsed = guard_git._segments(command, runs=runs)
+
+    assert parsed is not None
+    return guard_git._compound_spans(parsed, runs)[3]
+
+
+PAIRING_BODIES = [
+    *MISPLACED_OPENER_BODIES,
+    *CLOSER_RUN_BODIES,
+    *COPROC_BODIES,
+    *EMPTY_LAST_CLAUSE_BODIES,
+    *BRACE_CLOSED_COMPOUND_BODIES,
+    *DOUBLE_BRACKET_BODIES,
+    *CASE_PATTERN_BODIES,
+    *LOOP_AND_PREFIX_BODIES,
+]
+
+
+@pytest.mark.parametrize("body", PAIRING_BODIES)
+def test_pairing_finds_a_partner_for_every_opener_and_closer_in_a_valid_compound(
+    body: str,
+) -> None:
+    assert pairs_every_compound(body)
+
+
+# Shapes bash rejects as a syntax error, or reads in a way the pairing does not: an
+# opener with no closer, a closer with no opener or the wrong one, one inside a
+# substitution that ends first, and a closing word where none can stand.
+UNPAIRED_COMMANDS = [
+    "if true; then :",
+    "fi",
+    "done",
+    "esac",
+    "echo; fi",
+    "while false; do :",
+    "case a in a) :;;",
+    "[[ a && b",
+    "if true; then :; done",
+    "while false; do :; fi",
+    "case a in a) :;; fi",
+    "for i in 1; do :; esac",
+    "if true; then :; fi fi",
+    "if true; then :; fi; fi",
+    "if true; then : | fi",
+    "if true; then : && fi",
+    'echo "$(if true; then :)"',
+    "echo `if true; then :`",
+    "echo $(if true; then :) ; if true; then :; fi",
+    "true || if true; then echo",
+]
+
+
+@pytest.mark.parametrize("command", UNPAIRED_COMMANDS)
+def test_pairing_reports_a_command_it_could_not_pair(command: str) -> None:
+    assert not pairs_every_compound(command)
+
+
+@pytest.mark.parametrize("command", UNPAIRED_COMMANDS)
+def test_violation_trusts_no_switch_in_a_command_whose_compounds_do_not_pair(
+    command: str,
+) -> None:
+    unpaired = f"{command}; git checkout -b feat/x && git commit -m x"
+
+    assert violation(unpaired, PROTECTED).startswith(COMMIT_REASON)
+    assert violation(unpaired, "feat/y") == ""
+
+
+def test_violation_trusts_the_same_switch_when_the_compounds_do_pair() -> None:
+    paired = "if true; then :; fi; git checkout -b feat/x && git commit -m x"
+
+    assert violation(paired, PROTECTED) == ""
+    assert pairs_every_compound(paired)
+
+
+def test_violation_does_not_apply_the_pairing_net_to_the_powershell_reading() -> None:
+    command = "if ($?) { git checkout -b feat/x && git commit -m x }"
+
+    assert guard_git._judge(command, PROTECTED, powershell=True) == ""
+
+
+def test_segments_shows_an_escaped_bang_as_a_bang_without_its_mark() -> None:
+    assert segments(r"\! git status") == [Segment(("!", "git", "status"), "")]
+    assert segments(r"a\!b") == [Segment(("a!b",), "")]
+
+
+@pytest.mark.parametrize("command", [r"\! while", r"\! if", r"\! [[ a", r"\! case a"])
+def test_pairing_does_not_open_a_compound_after_an_escaped_bang(command: str) -> None:
+    runs: list[guard_git._Run] = []
+    parsed = guard_git._segments(command, runs=runs)
+
+    assert parsed is not None
+    assert guard_git._compound_spans(parsed, runs)[3]
+
+
+def test_a_forged_bang_mark_is_blanked_before_it_can_make_a_leader() -> None:
+    forged = guard_git._BANG_MARK + "! git checkout -b x && git commit -m x"
+    plain = "! git checkout -b x && git commit -m x"
+
+    assert violation(forged, PROTECTED) == violation(plain, PROTECTED)
+
+
+def test_violation_still_steps_over_an_escaped_bang_as_a_leader() -> None:
+    command = r"\! git checkout -b x && git commit -m x"
+
+    assert violation(command, PROTECTED).startswith(COMMIT_REASON)
+
+
+# --- the container matrix --------------------------------------------------------
+# Every scope opener against every construct that can hold a list terminator, bare,
+# with the construct in braces, and with the whole command in braces. Pure Python: no
+# row needs bash, so the matrix also runs where there is none. A bash run of every
+# row (git shadowed as above) lands the commit on `main` in each except the `false ||`
+# column, where the operand runs and the switch is real: the guard cannot know what the
+# left side returns, so it refuses those too.
+MATRIX_CONSTRUCTS = {
+    "brace": "{ true; true; }",
+    "subshell": "( true; true )",
+    "dollar-paren": "echo $(true; true)",
+    "backticks": "echo `true; true`",
+    "if": "if true; then :; fi",
+    "if-brace-condition": "if { true; }; then :; fi",
+    "case-bare-pattern": "case a in a) :;; esac",
+    "case-paren-pattern": "case a in (a) :;; esac",
+    "case-two-clauses": "case a in a) :;; b) :;; esac",
+    "while": "while false; do :; done",
+    "until": "until true; do :; done",
+    "for": "for i in 1; do :; done",
+    "select": "select i in; do :; done",
+    "double-bracket": "[[ a && b ]]",
+    "arithmetic": "(( 1 && 1 ))",
+    "function": "f() { :; }",
+    "case-in-brace": "{ case a in a) :;; esac; }",
+    "case-in-subshell": "( case a in a) :;; esac )",
+    "if-in-brace": "{ if true; then :; fi; }",
+    "loop-in-subshell": "( while false; do :; done )",
+    "nested-if": "if true; then if true; then :; fi; fi",
+    "closers-run-together": "if true; then (true) fi",
+}
+MATRIX_SHAPES = {
+    "bare": "{opener} {construct} | git checkout -b {target} && git commit -m x",
+    "braced-construct": "{opener} {{ {construct}; }} | git checkout -b {target} && git commit -m x",
+    "braced-command": "{{ {opener} {construct} | git checkout -b {target} && git commit -m x; }}",
+}
+
+
+@pytest.mark.parametrize("shape", MATRIX_SHAPES)
+@pytest.mark.parametrize("construct", MATRIX_CONSTRUCTS)
+@pytest.mark.parametrize(("opener", "target"), MATRIX_OPENERS)
+def test_violation_refuses_a_scope_opener_before_every_container_construct(
+    opener: str, target: str, construct: str, shape: str
+) -> None:
+    command = MATRIX_SHAPES[shape].format(
+        opener=opener, construct=MATRIX_CONSTRUCTS[construct], target=target
+    )
+
+    assert violation(command, PROTECTED).startswith(COMMIT_REASON), command
+    assert violation(command, "feat/y") == "", command
+
+
+# --- depth ---------------------------------------------------------------------------
+
+
+@pytest.mark.parametrize(
+    "command",
+    [
+        "true || " + "case a in a) " * 2000 + ":" + ";; esac" * 2000,
+        "true || " + "if :; then " * 2000 + ":" + "; fi" * 2000,
+        "true || " + "if :; then " * 2000 + ":" + " fi" * 2000,
+        "true || " + "[[ a && " * 3000,
+        "true || " + "if true; then (" * 1000 + ":" + ") fi" * 1000,
+        "true || if :; then :; " + "fi " * 5000,
+    ],
+    ids=[
+        "nested-case",
+        "nested-if",
+        "nested-if-closers-together",
+        "unclosed-double-brackets",
+        "if-paren-closers",
+        "many-stray-closers",
+    ],
+)
+def test_violation_judges_deeply_nested_compounds_quickly(command: str) -> None:
+    import time
+
+    full = command + " | git checkout -b x && git commit -m x"
+    started = time.monotonic()
+
+    reason = violation(full, PROTECTED)
+
+    assert time.monotonic() - started < 5
+    assert reason.startswith(COMMIT_REASON)
+    assert violation(full, "feat/y") == ""
