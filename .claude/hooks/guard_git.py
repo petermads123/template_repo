@@ -93,16 +93,28 @@ reserved-word compound -- `if` to `fi`, `case` to `esac`, `while`, `until`, `for
 `{ }` and `( )` are, so a `;` or `&&` written inside one does not end an operand or
 a `!` scope opened outside it; the parentheses of a `case` pattern (the optional
 `(` and the first `)` after `in` or after a `;;`, `;&` or `;;&`) are the pattern's,
-not a group's. `if`, `while` and `until` open one as leaders, chained or not, and
-`case`, `for`, `select` and `[[` as the command word; a `[[` whose `]]` is in the
-same invocation opens nothing. `fi`, `esac` and `done` close one only as the first
-word of an invocation that follows `;`, a newline, `&` or a `case` clause terminator
-and is not itself a case pattern, and a `]]` token closes an open `[[`. Each
+not a group's. Bash reads a reserved word only as the first word of a command, so
+`if`, `while` and `until` open a compound as leaders, chained or not, and `case`,
+`for`, `select` and `[[` as the command word, where the walk from the start of the
+invocation meets only reserved words that take a command next -- `then`, `do`,
+`else`, `elif`, `!`, `time` and its options, and `coproc` with or without a name
+(`coproc C while ...`). After an assignment, a redirection, a wrapper program or
+any ordinary word, and when the word is written with a quote or a backslash, it is
+an ordinary word and opens nothing (`x=1 while`, `>/dev/null if`, `sudo case`,
+`\! while`). A `[[` whose `]]` is in the same invocation opens nothing. `fi`,
+`esac` and `done` close one as the first word of an invocation that follows `;`, a
+newline, `&`, a `case` clause terminator, a `)` or a `}`, as each further closing
+word written after one (`fi fi`, `done done`) and as the closing word after a `]]`
+that closed a `[[` (`[[ a ]] fi`); a closing word that is a case pattern, ahead of
+the pattern's `)`, closes nothing. A `]]` token closes an open `[[`. Each
 substitution depth pairs its own, and a substitution's end drops what was open
-inside it. An opener with no closer, and a closer that matches no opener, are a
-syntax error to bash and are left out, and so is a reserved word written with a
-quote or a backslash anywhere in it (`\done`, `d\one`, `do''ne`), which bash reads as
-an ordinary word. A `!` or `coproc` scope is keyed between the compounds its
+inside it. A command in which some opener or closer finds no partner -- an
+opener left open, a closer that matches nothing or the wrong kind, a closing word
+where none can stand -- is a syntax error to bash, or a shape this pairing does
+not read, so in the bash reading no branch switch in it is trusted: each leaves
+`main` among the branches HEAD could be on, as a `!` does, and the unpaired
+command can only be refused more, never less. (The PowerShell reading has no `fi`,
+so it is exempt.) A `!` or `coproc` scope is keyed between the compounds its
 invocation opens: outside an `if`, `while` or `until` written before the `!`, and
 inside one written after it or opened by the command word, so `! if true; then
 echo; fi | git checkout -b feat/x && git commit -m x` keeps the scope past the `fi`
@@ -128,8 +140,9 @@ invocation and no quoted text reaches an `||` operand or a `!` scope. A word
 that holds a quote or a backslash escape anywhere in it carries a private mark in
 front of the first one, so `'if'`, `"!"`, `"X=1"`, `'>'`, `d\one` and `do''ne` are
 words, not a reserved word, a compound's closer, an assignment or a redirection
-(`'!' git commit -m x` is allowed on `main`; `\!` alone is left unmarked, a round 3
-over-refusal), while `"git" commit` is still git: every comparison of a token's text strips the mark. Three tokens
+(`'!' git commit -m x` is allowed on `main`; `\!` has a mark of its own, which keeps
+the round 3 over-refusal of stepping over it as a leader but lets it open no
+compound), while `"git" commit` is still git: every comparison of a token's text strips the mark. Three tokens
 mean different things to the two shells this hook serves, so the command is read
 twice, once as each, and refused if either reading refuses it (bash's first). A
 backslash before an operator character is part of a word in bash (`\;` is the
@@ -178,9 +191,12 @@ branch switch anywhere in one counts for all of it: bash loops run from `for`,
 and a loop's condition counts with its body. A `done` closes a loop only where
 bash reads one: not after `|`, not ahead of a case pattern's `)`, and not at all
 when the command writes a quoted `done`, which a tokenizer cannot tell from the
-word, so every loop then runs on. A `do {` inside a bash loop is bash's. Known
+word, so every loop then runs on; one written straight after a `)`, a `}` or another
+`done` closes nothing here either, which only widens the loop to the end of the
+command. A `do {` inside a bash loop is bash's. Known
 over-refusals, kept: a misplaced or backslash-escaped leader (`x=1 if
-git commit`, `\!`) is stepped over, a compound command ends an `&&` chain's trust,
+git commit`, `\!`) is stepped over when finding the command's name (it opens no
+compound), a compound command ends an `&&` chain's trust,
 a loop in a subshell, `(for ...; done); cmd`, runs on, a backslash-escaped operator or bare
 brace argument that PowerShell reads as an operator is refused although bash lands nothing
 (`echo \; git commit -m x`, `git checkout -b x \; && git commit -m x`), `'!' git checkout -b x &&
@@ -1552,9 +1568,10 @@ def _group_position(words: list[str]) -> bool:
 
     The braces are reserved words, so only where a command could start: as the
     first word, after the reserved words that take a command next, after `time`
-    and its options, after `coproc NAME` and after `function NAME`. Anywhere
-    else, `echo {`, they are arguments. Matched case-sensitively, as bash does;
-    a quoted word carries the quote mark and matches nothing.
+    and its options, after `coproc NAME`, after `function NAME` and after a run
+    of closing words (`fi`, `esac`, `done`). Anywhere else, `echo {`, they are
+    arguments. Matched case-sensitively, as bash does; a quoted word carries the
+    quote mark and matches nothing.
 
     Args:
         words: The words of the invocation so far.
@@ -1562,6 +1579,8 @@ def _group_position(words: list[str]) -> bool:
     Returns:
         True if a brace written next is a group delimiter in bash.
     """
+    if words and all(word in _CLOSING_WORDS for word in words):
+        return True  # `{ if :; then :; fi }`: bash reads a brace after a closer
     index = 0
     while index < len(words):
         word = words[index]

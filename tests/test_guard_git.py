@@ -4975,8 +4975,8 @@ def test_violation_refuses_a_switch_after_a_case_with_an_empty_last_clause(
 # reopen them. Each is a keyword-led compound after `||` or `!` and bash lands the
 # commit on `main`.
 
-# A `}` straight after a closer. Bash accepts it; the guard reads it as a group close
-# in the PowerShell reading only, which is what keeps these refused.
+# A `}` straight after a closer. Bash accepts it, and both readings take it as the
+# group's close.
 BRACE_CLOSED_COMPOUND_BODIES = [
     "{ if true; then :; fi }",
     "{ case a in a) :;; esac }",
@@ -5000,6 +5000,35 @@ DOUBLE_BRACKET_BODIES = [
     "if ! [[ a && b ]]; then :; fi",
     "if [[ a || b ]]; then :; fi",
 ]
+
+
+@pytest.mark.parametrize("body", BRACE_CLOSED_COMPOUND_BODIES)
+@pytest.mark.parametrize(("opener", "target"), SCOPE_OPENERS)
+def test_violation_reads_a_brace_after_a_closer_as_a_group_in_the_bash_reading(
+    body: str, opener: str, target: str
+) -> None:
+    command = f"{opener} {body} | git checkout -b {target} && git commit -m x"
+
+    assert guard_git._judge(command, PROTECTED).startswith(COMMIT_REASON)
+    assert guard_git._judge(command, PROTECTED, powershell=True).startswith(
+        COMMIT_REASON
+    )
+
+
+@pytest.mark.parametrize("words", [["fi"], ["done"], ["esac"], ["fi", "fi"]])
+def test_group_position_reads_a_brace_after_closing_words_as_a_group(
+    words: list[str],
+) -> None:
+    assert guard_git._group_position(words)
+
+
+@pytest.mark.parametrize(
+    "words", [["echo", "fi"], ["fi", "echo"], [MARK + "fi"], ["x=1", "done"]]
+)
+def test_group_position_reads_a_brace_after_an_argument_as_a_word(
+    words: list[str],
+) -> None:
+    assert not guard_git._group_position(words)
 
 
 @pytest.mark.parametrize("body", DOUBLE_BRACKET_BODIES)
