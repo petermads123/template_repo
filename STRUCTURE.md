@@ -191,7 +191,7 @@ bash with `git` shadowed where bash can run it:
   `! (git checkout ...)&&`, `coproc { }`); `&&` trust kept where no `!` leads the switch, a
   negation ended by `;`, and `ok | {target}` rather than `possible | {target}`; the order of the
   reasons; the accepted cost of a switch in a condition pinned (refused on `main`, allowed from a
-  branch) with the compound-command and quoted or misplaced leader over-refusals.
+  branch) with the compound-command and escaped or misplaced leader over-refusals (`\!`, `x=1 if`, `>/dev/null !`, `sudo -n !`; the quoted `'if'` and `"!"` rows moved to round 5 as allowed).
 - **Leaders as arguments** — `echo if case; git commit` inside a substitution refused (a leader
   that is an argument opens no `case`), while a `case` after a real leader still opens one.
 - **Words that are not commands** — `echo if`, `for git in`, `select`, `case git in`, `IF` and
@@ -244,7 +244,7 @@ against bash 5.2 with `git` shadowed by a function keeping HEAD in a file:
 
 Round 5 (`development/fix/guard-git-shell-lexing/05-...`) adds the reproduction for quoted
 operators, under its own heading at the end of the file: `true || echo ";" | git checkout -b x && git commit -m x`
-refused on `main` instead of allowed. Three existing tests changed outcome as the concept agreed:
+refused on `main` instead of allowed. Three rows of two existing tests changed outcome as the concept agreed:
 round 3's quoted `'if'` and `"!"` pins are now allowed on `main`
 (`test_violation_allows_a_quoted_leader_on_main`) and the `&&\r\n` row of the substitution-trust test is
 now refused (`test_violation_refuses_a_commit_after_an_and_and_carriage_return`).
@@ -383,8 +383,8 @@ Stdlib only.
 ### `.claude/hooks/guard_git.py`
 
 `PreToolUse` hook on `Bash` and `PowerShell`. Refuses a `git commit` or `git push` that
-would land on `main`. Reads the command the way a shell does — `shlex` resolves quoting, so a `;` or `|`
-inside a commit message stays part of the message — then splits it on the real separators
+would land on `main`. Reads the command the way a shell does — a pre-pass marks every quoted operator character and `shlex` then resolves quoting, so a `;` or `|`
+inside a commit message stays part of the message (below) — then splits it on the real separators
 into one invocation per segment. The grouping delimiters `(`, `)`, `{` and `}` split too, so
 a command hidden inside `(git commit -m "x")` is seen rather than left with `(` sitting
 where its name should be.
@@ -435,7 +435,7 @@ switch anywhere in a loop counts for all of it — bash loops from `for`, `selec
 (keywords in any case) to the end of the command, a loop's condition included. A `done` closes a
 loop only where bash reads one — not after `|`, not ahead of a case pattern's `)`, and not at all
 when the command writes a quoted `done` — and a `do {` inside a bash loop is bash's. Known
-over-refusals: a misplaced leader is stepped over, a compound command ends an `&&`
+over-refusals: a misplaced or backslash-escaped leader (`x=1 if`, `\!`) is stepped over, a compound command ends an `&&`
 chain's trust, a loop in a subshell runs on. Known misses: a function is judged where it is
 defined, not where it is called; a switch target that is a variable; a redirection on a compound
 command, which bash runs before its body; PowerShell's glued braces and `ForEach-Object` pipelines.
@@ -513,7 +513,7 @@ meets an unknown branch is refused with a message saying so rather than the one 
 |---|---|
 | `Segment` | Frozen dataclass: `tokens`, the `separator` that preceded them — one of `SEPARATORS`, a newline, a grouping delimiter (`""` for the first) or `SUBSTITUTED` — and `depth: int = 0`, the number of command substitutions the invocation sits inside. |
 | `SUBSTITUTED: str` | `"$("`, the separator of an invocation whose command substitutions ran immediately before it. |
-| `segments(command: str) -> list[Segment] \| None` | Split a command into invocations after comments, continuations and heredoc bodies are removed, or None if it cannot be read: an unbalanced quote or a trailing backslash. A heredoc whose delimiter never arrives takes the rest of the input as its body. Every command substitution — in a word, in backticks, in `<( )`/`>( )`, in an arithmetic expansion or in an unquoted heredoc body — becomes invocations of its own, one depth deeper, immediately before the invocation that contains it, which is marked `SUBSTITUTED`; the first of them inherits the separator that preceded the containing invocation, and a substitution that runs nothing leaves no trace. A word that held one reads `_`. |
+| `segments(command: str) -> list[Segment] \| None` | Split a command into invocations after comments, continuations and heredoc bodies are removed, or None if it cannot be read: an unbalanced quote or a trailing backslash. A heredoc whose delimiter never arrives takes the rest of the input as its body. Every command substitution — in a word, in backticks, in `<( )`/`>( )`, in an arithmetic expansion or in an unquoted heredoc body — becomes invocations of its own, one depth deeper, immediately before the invocation that contains it, which is marked `SUBSTITUTED`; the first of them inherits the separator that preceded the containing invocation, and a substitution that runs nothing leaves no trace. A word that held one reads `_`. A quoted operator character stays in its word (`echo ";" x` is one invocation), a soft separator — an escaped operator character, a bare brace argument or a carriage return — splits and shows as `;`, and no private stand-in or quote mark appears in the output. |
 | `git_subcommand(tokens: tuple[str, ...]) -> tuple[str, tuple[str, ...]]` | Identify the git subcommand and its arguments. |
 | `push_targets_main(args: tuple[str, ...], branch: str) -> bool` | Whether a push would update `main`. |
 | `switch_target(subcommand: str, args: tuple[str, ...]) -> str` | The branch a `checkout`/`switch` moves to, `""` when it moves none, or the sentinel `UNRESOLVED` (`"?"`) for a target only the running shell can resolve — `-`, `@{-1}`, or a word a command substitution made (for `-B` and `-C`, the name they take). |

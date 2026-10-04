@@ -5,9 +5,10 @@ a rejected push happens after the mistake, and a local commit on `main` has to
 be unpicked by hand. This hook refuses the command instead, and says what to do
 instead of just saying no.
 
-It reads the command the way a shell does. `shlex` resolves quoting, so a `;` or
-`|` inside a commit message stays part of the message instead of being mistaken
-for a separator, and emits the real separators as tokens of their own even when
+It reads the command the way a shell does. A pre-pass marks every quoted operator
+character and `shlex` then resolves quoting, so a `;` or `|` inside a commit
+message stays part of the message instead of being mistaken for a separator (see
+below), and `shlex` emits the real separators as tokens of their own even when
 they are glued to a word. The command is then split on those separators into one
 invocation per segment.
 
@@ -152,8 +153,8 @@ and a loop's condition counts with its body. A `done` closes a loop only where
 bash reads one: not after `|`, not ahead of a case pattern's `)`, and not at all
 when the command writes a quoted `done`, which a tokenizer cannot tell from the
 word, so every loop then runs on. A `do {` inside a bash loop is bash's. Known
-over-refusals, kept: a misplaced leader (`x=1 if
-git commit`) is stepped over, a compound command ends an `&&` chain's trust, and
+over-refusals, kept: a misplaced or backslash-escaped leader (`x=1 if
+git commit`, `\!`) is stepped over, a compound command ends an `&&` chain's trust, and
 a loop in a subshell, `(for ...; done); cmd`, runs on. Known misses: a switch
 target that is a variable, a redirection on a compound command, which bash runs
 before its body, and PowerShell's glued braces and `ForEach-Object` pipelines.

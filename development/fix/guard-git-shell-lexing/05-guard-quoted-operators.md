@@ -1,6 +1,6 @@
 # The git guard never takes a quoted word for an operator
 
-<!-- claude-plan step=4 status=active -->
+<!-- claude-plan step=5 status=active -->
 
 | Field | Value |
 |---|---|
@@ -16,7 +16,7 @@
 | 1 | Conceptualize | `/conceptualize` | with the user | done |
 | 2 | Plan | `/plan` | with the user | done |
 | 3 | Implement | `/implement` | in `/build` | done |
-| 4 | Verify | `/verify` | in `/build` | pending |
+| 4 | Verify | `/verify` | in `/build` | done |
 | 5 | Test | `/test` | in `/build` | pending |
 | 6 | Concept check | `/concept-check` | in `/build` | pending |
 | 7 | Ship | `/ship` | in `/build` | pending |
@@ -399,6 +399,32 @@ replacement tests (four new cases), minus the three rows moved out of parametriz
 
 | Check | Result |
 |---|---|
+| `ruff check .` | `All checks passed!` |
+| `ruff format --check .` | `42 files already formatted` |
+| `mypy` | `Success: no issues found in 11 source files` |
+| `pytest -q` | `1162 passed` (run before and after the docs edits) |
+| Plan completeness | no public signature or constant changed (`segments`, `git_subcommand`, `violation` unchanged, as planned); no unplanned public surface |
+| `STRUCTURE.md` | in sync after the auditor's edits |
+| `python .claude/hooks/guard_git.py` | entry point (hook, no showcase); runs with empty stdin, exit 0 |
+
+Structure-auditor (before this step): no signature drift; four edits plus one optional, each verified against the code and applied: (1) tests entry's round 3 Trust bullet now names the escaped leaders and says the quoted `'if'`/`"!"` rows moved to round 5; (2) `\!` added to the known over-refusals in STRUCTURE.md and in the module docstring (the gap the auditor flagged); (3) the guard's opening paragraph in STRUCTURE.md and the module docstring no longer credit `shlex` alone with keeping a quoted `;`; (4) the `segments` table row states the round 5 contract; optional: "Three rows of two existing tests".
+
+Section 3's deviations against section 1:
+
+| # | Deviation | Invalidates a criterion? |
+|---|---|---|
+| 1 | Brace leaders compared in lower case | No. Implements A3's "do { } while" and keeps PowerShell loops; marked words never match. |
+| 2 | Escapes in heredoc delimiter and unquoted `${ }` become stand-ins, not `_SOFT` | No. Inside one word, as A2 requires for `${x:-;}`; unquoted escapes elsewhere stay soft (A3). |
+| 3 | `fresh()` after an unquoted `\r` | No. Keeps substitution order (A4, round 2 criteria). |
+| 4 | `_prepare` give-up path turns `\r` into `_SOFT` | No. Play-safe, in line with A4 and the play-safe-on-`main` rule. |
+| 5 | `_quoted_done` strips the mark and excludes `_SOFT` | No. Preserves round 3's `done` meaning (A6). |
+| 6 | A piece holding `_SOFT` governs as `;`, so `segments` shows `;` for a CRLF break (was `\n`) | No. See below. |
+
+Note: section 3 lists six bullets; the brief's "five" counts the `\r` heading differently, all six are classified here. Deviation 6 (the brief's deviation 5, `segments` output): `grep` finds no test that calls `segments` on a command with `\r`, and the suite is green, so nothing pins the old separator. Checked live: `segments('a &&\r\nb')` and `segments('a\r\nb')` both give separator `;`. This matches A4 (`&&\r\n` is not trusted) and A6/the soft-separator rule that a soft separator is never trusted; `;` is the widest-set separator, so it can only refuse more. Judgment: consistent, not a criterion change; the public output change is within "a soft separator splits and shows as `;`" now in STRUCTURE.md.
+
+No criterion invalidated; no halt.
+
+---|---|
 | `ruff check .` | |
 | `ruff format --check .` | |
 | `mypy` | |
