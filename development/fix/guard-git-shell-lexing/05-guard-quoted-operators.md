@@ -708,10 +708,23 @@ Ship review: gates on the whole tree: `ruff check .` clean, `ruff format --check
 
 | # | Recommendation | Why it is critical | Effort | Decision |
 |---|---|---|---|---|
-| R1 | | | | |
+| R1 | Count reserved-word compounds (`if…fi`, `case…esac`, `while`/`until`/`for`/`select…done`) and `[[ … ]]` as levels in the key that `\|\|` operands and `!`/`coproc` scopes use, and keep a `case` pattern's `)` out of the group count | A terminator inside such a compound ends a scope opened outside it, so the switch piped after it is trusted. Confirmed in bash 5.2 with `git` shadowed, guard allows and bash prints `COMMIT on main`: `true \|\| if true; then echo; fi \| git checkout -b x && git commit -m x`, and the same with `case a in a) :;; esac`, `while false; do :; done`, `until true; do :; done`, `for i in 1; do :; done`, `if { true; }; then echo; fi` (`{ true; }`, `(true; true)` and `f() { :; }` there are refused). Traced by the `defect-class` reader: `true \|\| [[ a && b ]] \| …`, `true \|\| { case a in a) :;; esac; } \| …`, and the `!` forms. Round 4's own operand rule (`_walk_run` raises the nest only on `(`/`{`); 8972524 allows them too, so not a round 5 regression and outside round 5's class | large | pending |
 
 Decisions: `deferred`, `rejected`, or `next round` — a new numbered file in this folder,
 taken back through steps 1 to 7 on the same branch.
+
+Notes, not critical (kept here rather than in `DEVELOPMENT.md` at the user's instruction):
+
+- `defect-class` reader R2: a committed pure-Python container matrix (each scope opener `a ||`, `!`,
+  `coproc` × each construct holding a list terminator — `{ ; }`, `( ; )`, `$( ; )`, backticks,
+  `if…fi`, `case…esac` with `(a)` patterns, the four loops, `[[ && ]]`, `(( && ))`, `f() { ; }` —
+  bare and in `{ }`, asserting `<opener> <construct> \| git checkout -b x && git commit -m x` is
+  refused on `main`) needs no bash, so it runs on the Windows targets; it would have caught R1.
+  Small effort; a natural part of R1's round.
+- Collateral, safe direction: `[[ a \|\| b ]] \| git checkout -b x && git commit -m x` opens a false
+  operand and over-refuses.
+- The recorded misses of rounds 1–4 are not newly critical: section 6's allowed-rows pass found
+  only the four already recorded.
 
 ---
 
