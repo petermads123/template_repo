@@ -124,7 +124,7 @@ message; and the commands that must stay allowed — `echo git commit`, `grep pu
 One test asserts a documented miss rather than a fix: `sudo -u me git push` is allowed,
 because only options are skipped after a wrapper and never a bare word.
 
-The shell-lexing cases follow, ahead of the round 2, round 3, round 4 and round 5 sections. The reproduction for the defect `fix/guard-git-shell-lexing` fixes comes first: a heredoc whose body carries a stray quote (`python3 - <<'EOF'` ... `EOF`), allowed on `main` rather than refused as unreadable. Then, each checked against real bash with `git` shadowed by an echo function:
+The shell-lexing cases follow, ahead of the round 2, round 3, round 4, round 5 and round 6 sections. The reproduction for the defect `fix/guard-git-shell-lexing` fixes comes first: a heredoc whose body carries a stray quote (`python3 - <<'EOF'` ... `EOF`), allowed on `main` rather than refused as unreadable. Then, each checked against real bash with `git` shadowed by an echo function:
 
 - **Heredocs** — a body with no substitution in it is data in every delimiter form (`<<`, `<<'`, `<<"`, `<<\`, `<<-` with tabs); a command after it, on its opener line, after two heredocs on one line or after a comment on the opener is still judged; `git commit -F - <<'EOF'` is refused as a commit and the pipeline's `"$(cat <<'EOF' ...)"` form keeps its outcome; an unquoted delimiter lets a backslash-newline join the closing line and a quoted one does not; a CRLF script closes on `EOF` plus the return; an unterminated heredoc takes the rest as body while an earlier push is still refused; `<<<` is a here-string; a shift in `$((1<<2))`, `(( x <<= 1 ))` and `let` is arithmetic, and `((echo a); ...)` stays two subshells.
 - **Substitutions in an unquoted heredoc body** — the halt-table commands refused (`$(git commit)` on `main`, the backtick push also from a branch), each form bash runs (quoted inside the body, a stray apostrophe, continuation, nested parentheses, `${x:-$(...)}`, inside arithmetic, an escaped backslash before the `$(`) refused, and text bash does not run (`\$(`, `$((1<<2))`, `${x}`, an unclosed substitution) allowed; every quoted-delimiter form left as data; harmless substitutions such as `$(date)` allowed on `main`; a stray quote in a substitution not breaking the pairing for a later commit; the second of two heredocs; a body substitution of a double-quoted `$( )` whose heredoc closes on the `)` (nested double-quote frames, a backtick holder, single quotes around and inside, a double quote opened after the heredoc operator, two heredocs with the last one closing, a PowerShell backtick before the substitution; the harmless and quoted-delimiter counterparts allowed, an unbalanced quote with no heredoc left unreadable, and an unterminated heredoc in a substitution — a bash syntax error — read as unreadable); `segments` token expectations for the extracted commands.
@@ -301,8 +301,8 @@ quote (`true || while false; do :; \done; :; done | git checkout -b x && git com
 to land the commit on `main`. Step 5 adds the rest of the round's suite, each row run in bash 5.2 with `git`
 shadowed by a function keeping HEAD in a file (an empty checkout argument failing, `PATH=/usr/bin:/bin`, stdin
 closed, a timeout, the oracle shown live first by a plain commit landing on `main`) and, except where noted, landing the
-commit on `main`. The scope openers are `true ||`, `git status ||` and `!` (the matrix adds `false ||`, whose operand
-runs, so those rows are refused as play-safe); each body is also asserted allowed from another branch:
+commit on `main`. The scope openers are `true ||`, `git status ||` and `!` (the matrix uses `true ||`, `false ||` and `!`
+instead; the `false ||` operand runs, so those rows are refused as play-safe); each body is also asserted allowed from another branch:
 
 - **Misplaced openers** -- sixteen words that look like an opener but follow an assignment, a redirection, a wrapper,
   a backslash or a quote (`x=1 while`, `>/dev/null until`, `sudo if`, `env while`, `nohup case`, `time 'if'`,
@@ -310,23 +310,27 @@ runs, so those rows are refused as play-safe); each body is also asserted allowe
 - **Closer runs** -- a closing word written straight after `)`, `}` or another closer (`(echo) fi`, `{ :; } fi`,
   `fi fi`, `done done`, `[[ a ]] fi`, `((1)) fi`, `case ... b) (:) esac`), twenty-three bodies; a `}` after a closer is a group
   in both readings; `coproc NAME <compound>` and `coproc <compound>` (thirteen bodies); `case` with an empty last
-  clause bare, in `{ }` and in `( )`; a brace after a closing word in `_group_position`.
+  clause bare, in `{ }` and in `( )`; the brace-position check behind `segments` reading a brace after a run of closing
+  words as a group, and after an argument (`echo fi`, `fi echo`, a quoted `fi`, `x=1 done`) as a word.
 - **The rest of the class** -- `[[ ]]` forms, a `case` pattern's parentheses after each terminator, nested cases and
   patterns spelled like a closing word, chained leaders, the arithmetic `for`, `time -p` before `|` and `|&`, and a push
-  of `HEAD` in those shapes refused with the push reason.
+  after six compound shapes, as `git push origin HEAD` and as a bare `git push`, refused with the push reason.
 - **Whole commands** -- a compound inside a substitution, backticks and an unquoted heredoc body; the negation inside
   a leading `if` and the clause-terminator scopes still allowed; the compound `&&` over-refusals, `coproc` forms,
-  `(( ))`, `{ }`, `( )` and function definitions kept refused; fifteen rows allowed.
-- **The pairing** -- `_compound_spans` reports every valid body above as paired and twenty unpaired shapes as not (an
-  opener left open, a closer with no opener or the wrong one, one inside a substitution that ends first); a command that
-  does not pair is refused with the commit reason after a switch the bash reading would otherwise trust, and allowed
-  from another branch; the PowerShell reading is exempt; `\!` shows as `!` in `segments`, opens no compound, and a forged
-  mark is blanked.
+  `(( ))`, `{ }`, `( )`, function definitions, a stray `fi`, `done` or `esac` and a compound left open or closed by the
+  wrong word kept refused (twenty rows); fifteen rows allowed, among them an escaped `\[[` or `i\f` and a switch after a
+  closed loop or inside a compound.
+- **The pairing** -- the private compound pairing behind `violation` reports every valid body above as paired and twenty
+  unpaired shapes as not (an opener left open, a closer with no opener or the wrong one, one inside a substitution that
+  ends first, a closing word where none can stand); a command that does not pair is refused with the commit reason after
+  a switch the bash reading would otherwise trust, and allowed from another branch, while the same switch after a paired
+  `if` is trusted; the PowerShell reading is exempt; `\!` shows as `!` in `segments`, opens no compound but is still
+  stepped over as a leader, and a forged mark is blanked.
 - **The container matrix** -- three openers by twenty-two constructs that hold a list terminator (`{ ; }`, `( ; )`,
   `$( ; )`, backticks, `if`, `case` with `a)` and `(a)` patterns, the loops, `[[ && ]]`, `(( && ))`, a function, and
   nests of them) bare, in braces and with the whole command in braces: 198 rows, pure Python.
-- **Depth** -- two thousand nested `case`, two thousand nested `if` (closed with `;` and with a run of closers), three
-  thousand unclosed `[[` and five thousand stray closers finish in seconds.
+- **Depth** -- two thousand nested `case`, two thousand nested `if` (closed with `;` and with a run of closers), a thousand nested `if` holding a subshell closed
+  by `) fi`, three thousand unclosed `[[` and five thousand stray closers finish in seconds.
 
 ### `tests/test_plan_state.py`
 
@@ -535,7 +539,8 @@ switch anywhere in a loop counts for all of it — bash loops from `for`, `selec
 `until` to the matching `done`, PowerShell's `foreach`, `for`, `while` and `do { } while ()`
 (keywords in any case) to the end of the command, a loop's condition included. A `done` closes a
 loop only where bash reads one — not after `|`, not ahead of a case pattern's `)`, and not at all
-when the command writes a quoted `done` — and a `do {` inside a bash loop is bash's. Known
+when the command writes a quoted `done` — and one written straight after a `)`, a `}` or another `done`
+closes no loop here either, which only widens the loop to the end of the command; a `do {` inside a bash loop is bash's. Known
 over-refusals: a misplaced or backslash-escaped leader (`x=1 if`, `\!`) is stepped over when finding the command's name
 (it opens no compound), a compound command ends an `&&`
 chain's trust, a loop in a subshell runs on; a backslash-escaped operator or bare brace argument that

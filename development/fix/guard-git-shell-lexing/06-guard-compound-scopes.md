@@ -1,6 +1,6 @@
 # The git guard keeps an `||` or `!` scope across a compound command
 
-<!-- claude-plan step=6 status=active -->
+<!-- claude-plan step=7 status=active -->
 
 | Field | Value |
 |---|---|
@@ -18,7 +18,7 @@
 | 3 | Implement | `/implement` | in `/build` | done |
 | 4 | Verify | `/verify` | in `/build` | done |
 | 5 | Test | `/test` | in `/build` | done |
-| 6 | Concept check | `/concept-check` | in `/build` | pending |
+| 6 | Concept check | `/concept-check` | in `/build` | done |
 | 7 | Ship | `/ship` | in `/build` | pending |
 | 8 | Recommend | `/recommend` | with the user | pending |
 | 9 | Pull request | `/create-pr` | with the user | pending |
@@ -393,7 +393,7 @@ Oracle evidence after the fix (scratchpad `r6b/`): `esc.py`, 84 rows (7 `done` s
 | T4 (A4) | `test_violation_still_allows_these_scope_commands` (15), `test_violation_refuses_a_switch_after_a_coproc_compound` (39), `test_pairing_reports_a_command_it_could_not_pair` (20), `test_violation_trusts_no_switch_in_a_command_whose_compounds_do_not_pair` (20), `test_violation_trusts_the_same_switch_when_the_compounds_do_pair`, `test_violation_does_not_apply_the_pairing_net_to_the_powershell_reading`; the 1613 earlier tests unmodified (`:3778` and `RUN_PINS` among them) | pass |
 | T5 (A5) | `test_violation_refuses_a_scope_opener_before_every_container_construct` (198 rows, pure Python); `test_violation_judges_deeply_nested_compounds_quickly` (6) | pass |
 | Reader findings (thirteen confirmed bypasses) | `test_violation_refuses_a_switch_after_a_compound_holding_a_misplaced_opener` (96), `..._after_a_closer_that_follows_a_group_or_a_closer` (69), `..._after_a_case_with_an_empty_last_clause` (36), `test_pairing_finds_a_partner_for_every_opener_and_closer_in_a_valid_compound` (107), `test_group_position_reads_a_brace_after_closing_words_as_a_group` / `..._after_an_argument_as_a_word` (4 each), `test_violation_reads_a_brace_after_a_closer_as_a_group_in_the_bash_reading` (12), the escaped-bang tests (`test_segments_shows_an_escaped_bang_as_a_bang_without_its_mark`, `test_pairing_does_not_open_a_compound_after_an_escaped_bang`, `test_a_forged_bang_mark_is_blanked_before_it_can_make_a_leader`, `test_violation_still_steps_over_an_escaped_bang_as_a_leader`), `test_violation_keeps_the_answers_of_rounds_1_to_4` (19) | pass |
-| T6 (A6) | Existing suite unmodified (no removed line in `tests/test_guard_git.py` against dc1e629); the differential against 6f05520 is step 6's | pass; differential pending |
+| T6 (A6) | Existing suite unmodified (no removed line in `tests/test_guard_git.py` against dc1e629); the differential against 6f05520 ran in step 6 (section 6) | pass; differential in section 6 |
 
 Run: `ruff check .` clean, `ruff format --check .` clean, `mypy` clean, `pytest -q` 2476 passed (1674 after step 4, plus 802 in step 5).
 
@@ -419,9 +419,21 @@ Edge cases considered and deliberately skipped, with reasons:
 
 | # | Criterion | Met | Evidence |
 |---|---|---|---|
-| A1 | | | |
+| A1 | `true \|\| if true; then echo; fi \| git checkout -b x && git commit -m x` refused on `main` with the commit reason | yes | Red: section 3's run of `test_violation_refuses_an_or_switch_after_an_if_compound` (`violation` returned `""`, 1 failed, commit 2f14f81, before any production change). Green: the same test passes at HEAD (`1 passed`, re-run in step 6). Bash 5.2 with the oracle shown live (a plain `git commit -m x` on `main` printed `COMMIT@main`, from `feat/x` it did not): the same command lands on `main`. Root cause row against the diff: the fix is in `_walk_run` (`guard_git.py:2191-2212`, `_COMPOUND_OPEN`/`_COMPOUND_CLOSE` raise and lower `nest`, fed by `_judge` at `:2318-2322`), not at the `ok = {target}` site. |
+| A2 | Every reserved-word compound and `[[ && ]]` in an `\|\|` operand refused on `main` in every position | yes | `crit_check.py` (scratchpad `r6c/`), the criteria rows of A2 in bash: first, later stage (`true \|\| git status \| case a in (a) :;; esac \| ...`), after `time`, redirection after the closer, `\|&`, across lines, inside `echo $( )`, `if { true; }; then`, `select`, `[[ a && b ]]`: all refused, each lands on `main` in bash. Tests: `test_violation_refuses_these_scope_commands_on_main_and_not_elsewhere` (20), `..._after_a_double_bracket_test` (27), `..._after_chained_leaders_and_a_timed_loop` (30), `..._after_a_timed_compound_before_either_pipe` (4), `..._after_a_compound_with_an_escaped_closer` (60). Differential, section 6: 8,279 differing rows land on `main` in bash and none is allowed by the new guard (0 bypass in 19,552 oracle-run rows). |
+| A3 | The same compounds after `!`; `{ case ... esac; }` and `( case ... )` after `\|\|` or `!` | yes | `crit_check.py` rows `! if true; then :; fi \| git checkout -b feat/x && git commit -m x`, `true \|\| { case a in a) :;; esac; } \| ...`, `! ( case a in a) :;; esac ) \| ...` refused, each lands on `main`. `test_violation_reads_a_case_patterns_parentheses_as_the_patterns` (36), `..._after_a_compound_closed_by_a_brace` (12). The `bang0`-`bang9` variants of the differential: 614 differing rows each, 0 bypass. |
+| A4 | Keeps: create-or-switch, `true \|\| { ...; }`, `;;`/`;&`/`;;&` terminating a scope inside a clause, round 3's compound `&&` over-refusals, `coproc <C> \| ...` now refused, `(( && ))`, `{ true; }`, `(true; true)`, function definitions still refused | yes | `crit_check.py` rows of A4 (create-or-switch and `true \|\| { git checkout -b x && git commit -m x; }` allowed; `git checkout -b feat/x && if true; then :; fi && git commit -m x` and the `for` form refused; `coproc if true; then :; fi \|` and `coproc { true; } \|` refused; `(( 1 && 1 ))`, `{ true; }`, `(true; true)`, `f() { :; }` refused; `if ! git diff --quiet; then git checkout -b feat/x && git commit -m x; fi` allowed): 0 mismatches. `:3778` and the `RUN_PINS` case row are in the suite unmodified (`git diff 6f05520 -- tests/test_guard_git.py` has no removed line). `test_violation_refuses_a_switch_after_a_coproc_compound` (39), `test_violation_still_allows_these_scope_commands` (15). The step 2 `coproc` change: `coproc <C> \| ...` was allowed at 6f05520 and is refused now; the plain differential shows it as `new refuses` only, and the `coproc` forms in the sweep are bash-committing on the switch target (play-safe over-refusal as recorded). |
+| A5 | A committed pure-Python matrix: 3 openers x the constructs, bare and in `{ }`, refused on `main`, allowed from another branch | yes | `test_violation_refuses_a_scope_opener_before_every_container_construct`, `tests/test_guard_git.py:5349`: `MATRIX_OPENERS` (`true \|\|`, `false \|\|`, `!`) x 22 `MATRIX_CONSTRUCTS` (all the A5 constructs plus nests) x 3 shapes (bare, braced construct, braced command) = 198 rows, asserting `COMMIT_REASON` on `PROTECTED` and `""` on `feat/y`; no bash is called in it. |
+| A6 | Nothing else changed; differential against 6f05520 | yes, with one explained exception | Suite: `2476 passed`; no existing test changed (no removed line in the test file against 6f05520). Differential (scratchpad `r6c/`, baseline `git show 6f05520:.claude/hooks/guard_git.py`): corpus 2,745 `(command, branch)` pairs / 1,811 commands captured by a `-p` plugin; 34 variants (plain; `true \|\| <C> \|`, `! <C> \|`, `true \|\| git status \| <C> \|` for ten compounds covering if/case(a)/case((a))/while/until/for/select/`[[ ]]`/`{ case }`/`( case )`; `if true; then ...; fi` in two spellings) x `main`/`feat/x` = 117,966 rows; 19,657 differ, all new-refuse/base-allow (0 rows where the new guard allows what the old refused); oracle-run 19,552 (99 PowerShell-only rows listed in `skipped_ps.json`, not run; 6 hostile skipped): bash lands on `main` in 8,279 (the bug), lands nothing in 5,925, is a syntax error in 5,338, 10 time out (`until ! git diff --quiet; do git checkout -b feat/x && git commit ...`: the shadowed `git diff` makes it loop; the body switches to `feat/x` before it commits, so nothing lands on `main`; the new refusal is play-safe). Bypass rows (new allows, bash lands on `main`) among the differing rows: 0. Every difference involves a compound word or `[[ ]]` except two plain rows, below. |
 
-Drift found, and what was done about it:
+Differential detail, as asked in the brief:
+
+- **Plain commands, the realistic cost.** The suite's plain commands: 3,622 rows (corpus x `main`/`feat/x`), 531 outcome changes between 6f05520 and HEAD. 528 of them are commands only round 6's own tests pass (compounds, stray closers, the pairing shapes); over the 913 plain rows from the suite as it stood at 6f05520 (the old test file run against HEAD, 1,361 pairs) **3 changed, all refusals that stay refusals**: `echo;git commit -m x` and `git commit -m x` and `if git commit -m x` on `main`. U+E00B is the new `_BANG_MARK` (step 5, told apart from `!` so `\!` opens no compound); a forged private character is blanked, as round 5 already does for the others, so the text reads as the plain commit it hides. Bash lands nothing on the literal text (`echo\ue00b` and `\ue00bgit` are not commands), so these are play-safe refusals of input no real command line carries. The first two contain neither a compound word nor `[[ ]]`, so A6's "every difference involves a reserved-word compound" holds literally for 19,655 of the 19,657 differing rows and for these two by way of the new mark that the compound fix introduced: recorded here, not a halt, since it only refuses more and no real command contains the character.
+- **The pairing net (step 5, decision B).** Rerun with the net disabled (`nonet_guard_git.py`, the `or not (paired or powershell)` term removed): it changes 0 of the 913 old-suite plain rows, 28 plain rows of round 6's own tests and 795 variants of those (all `refuses more`, none `allows more`). Run in bash: 779 are syntax errors, 43 run nothing on `main` (an unterminated backtick compound), 1 lands on `main` (the 1,000-deep `if true; then (` test: the net refusing it is right). No existing test changed outcome, because the net only turns an unsure switch into a refusal and the suite passed unmodified.
+- **Every row the new guard allows, through bash.** 56,090 allowed rows; 55,205 run (862 PowerShell-only rows not run, 23 hostile skipped): 44,359 land nothing, 10,759 are syntax errors, 16 time out (the `until ! git diff --quiet` loop above, which switches to `feat/x` first), **71 land on `main`**, all on `main` and all allowed by 6f05520 too, and all three recorded misses of rounds 1-5: `git $'\x63ommit' -m x` (a hex-escaped subcommand, 13 rows), `echo $'it\'s'; git co""mmit -m x # '` (a split-quote subcommand, 32) and `echo "${x:-'$(git commit -m x)'}"` / `echo "${x:-'}" "$(git commit -m x)" "'}"` (a lone `'` inside a quoted `${ }`, 26): all variants of four plain commands. None is new and none involves a compound word.
+- **Criteria rows.** `crit_check.py` runs 133 literal examples from the acceptance criteria of rounds 1-6 through the new guard and, where bash can run them, the oracle: 0 mismatches against the stated outcome, 0 rows allowed that bash lands on `main`.
+
+Drift found, and what was done about it: none to the code. Noted: (1) the two forged-private-character plain rows above, which A6's wording does not name; (2) the `\!` exception to the quote mark that step 4 left (the round 3 over-refusal pins) is still in place and still a user decision to drop; (3) `STRUCTURE.md` brought in line with the `structure-auditor`'s eight edits, each checked against the code first (all eight applied: a stale `done` rule sentence, two private names, the matrix opener set, the push-shape, whole-commands and depth counts, and the round 6 mention in the shell-lexing intro).
 
 ### Earlier rounds still hold
 
@@ -432,6 +444,34 @@ Drift found, and what was done about it:
 
 | Round | # | Criterion | Still met | Evidence |
 |---|---|---|---|---|
+| 1 | A1 | The reported heredoc-with-a-stray-quote allowed on `main` | yes | `crit_check.py` row, bash lands nothing; guard allows. |
+| 1 | A2 | Heredoc bodies are data; unquoted-delimiter substitutions judged; `git commit -F - <<'EOF'` refused as a commit | yes | Seven rows (`cat <<'EOF'`, `<<-` with a tab, `$(git commit)` and backtick `git push` bodies, the command after the heredoc, `-F -`, allowed on `feat/x`), all as stated. |
+| 1 | A3 | `#` read as bash does | yes | Three rows (`# it's fine` newline commit refused, `echo ok # git commit` allowed, `echo ok#1 && git commit` refused). |
+| 1 | A4 | Backslash-newline joins | yes | `git \\\ncommit` refused on `main`, `git \\\npush origin main` refused on `feat/y`. |
+| 1 | A5 | Plays safe on the unmodelled forms | yes | The `$'it\'s'` and `cat <<EOF >/dev/null` reproductions refused on `main`, allowed on `feat/x`. |
+| 1 | A6 | Nothing else changed; the one accepted cost | yes | The suite passes unmodified; round 1's differential is unchanged by this round (the 913 old-suite plain rows differ in 3, section 6). |
+| 2 | A1-A3 | Substitutions in words, quotes and backticks judged in every position | yes | 13 rows of `crit_check.py` (the `"$( )"`, `${x:-$( )}`, `[[ -n "$( )" ]]`, `declare`, `<<<`, nested `$( ( ) )`, backtick forms, and `EOF)` closing lines) refused as stated, bash lands each on `main`. |
+| 2 | A4 | Process substitution judged | yes | `diff <(git commit -m x) /dev/null` refused on `main`, `diff <(git push origin main) f` refused from a branch. |
+| 2 | A5 | A substitution runs before its command; `&&` carries into it | yes | `git commit -m "$(git checkout -q main)x"` refused from a branch; `git checkout -b feat/y && out="$(git commit -m y)"` allowed on `main`. |
+| 2 | A6 | `main` as any branch it could land on | yes | Five rows as stated (`; `, newline, `\|\| true;`, `(git checkout main) &&`), `git checkout feat/y; git commit` allowed, `git checkout -b feat/x; git commit` refused on `main`. |
+| 2 | A7 | Funsub plays safe | yes | `echo ${ git commit -m x; }` refused on `main`, allowed from a branch. |
+| 2 | A8 | Harmless substitutions allowed; the pipeline's own commit form | yes | `$(git status)` and `` `date` `` allowed; the `$(cat <<'EOF' ... )` commit refused on `main`, allowed on a branch. |
+| 2 | A9 | Nothing else changed | yes | Suite unmodified and green; no test of rounds 1-5 removed or edited. |
+| 3 | A1-A3 | Reserved words stepped over; a switch after one counted | yes | Seventeen rows of `crit_check.py` (`if`, `elif`, `while`, `until`, `! !`, `coproc`, arithmetic `for`, `ls \| if`, `x=$(if ...)`, push from a branch, three switches after a leader), as stated. |
+| 3 | A4 | Trust: `!`-led switch only widens; the accepted cost | yes | `! git checkout -b feat/x && git commit`, `if ! git checkout -b feat/x; then`, `if git checkout -b feat/x; then`, `while git checkout -b ...` refused; `git checkout -b feat/x && git commit` allowed. |
+| 3 | A5 | A switch anywhere in a loop counts for the whole loop | yes | Both loop rows refused from `feat/y`. |
+| 3 | A6 | Words that are not commands stay words | yes | `echo if git commit`, `for git in commit`, `git commit -m then`, the `-C` switch after `then` allowed; `{ }`, `time`, `case`: refused. |
+| 3 | A7 | Nothing else changed | yes | Suite unmodified and green. |
+| 4 | A1-A3 | The `\|\|` operand and the `!` scope | yes | Nine rows of `crit_check.py` incl. `git status \|\| git checkout -b x && git commit`, later stage `\|`/`\|&`, `time`, chained `\|\|`, push of `HEAD`, the named switch from `feat/y`, and the `"$(true && true)"` leak: all refused. Round 6 changes the key those scopes use; the terminator and group pins are in the suite, unmodified. |
+| 4 | A4 | The five allowed forms stay allowed | yes | All five allowed on `main` (create-or-switch, `git fetch \|\| true && ...`, `true \|\| false && ...`, `true \|\| { ...; }`, `&& ! git diff --cached --quiet &&`). |
+| 4 | A5 | Nothing else changed | yes | Suite unmodified and green. |
+| 5 | A1, A2 | Quoted operators are never operators | yes | `true \|\| echo ";" \|` and `${x:-;}` and `! true \| echo ';' \|` refused on `main`; `segments('echo ";" x')` one invocation (suite, unmodified). |
+| 5 | A3 | Shell-dependent tokens play safe | yes | `\;`, bare `{`, `ForEach-Object { }`, `Invoke-Command -ScriptBlock { }`, `Start-Job { }` refused. |
+| 5 | A4 | Carriage return | yes | `&&\r\n` and the `git commit\r\n` / `git push origin main\r\n` rows refused. |
+| 5 | A5 | A quoted word at command position is not syntax | yes | `'if'`, `'!'`, `"!"`, `"X=1"`, `'>'`, `echo ";" git commit` allowed on `main`; `\!`, `x=1 if`, `>/dev/null !`, `sudo -n !`, `'!' git checkout -b x && git commit`, `"git" commit` refused. |
+| 5 | A6 | Nothing else changed | yes | Suite unmodified; round 5's rows in this round's differential agree (3 plain differences, section 6). |
+
+Regression result: all rounds 1-5 criteria hold. 2,476 tests pass, none of rounds 1-5's edited or removed.
 
 ---
 
