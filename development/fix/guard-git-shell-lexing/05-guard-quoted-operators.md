@@ -1,6 +1,6 @@
 # The git guard never takes a quoted word for an operator
 
-<!-- claude-plan step=8 status=active -->
+<!-- claude-plan step=8 status=done -->
 
 | Field | Value |
 |---|---|
@@ -20,7 +20,7 @@
 | 5 | Test | `/test` | in `/build` | done |
 | 6 | Concept check | `/concept-check` | in `/build` | done |
 | 7 | Ship | `/ship` | in `/build` | done |
-| 8 | Recommend | `/recommend` | with the user | pending |
+| 8 | Recommend | `/recommend` | with the user | done |
 | 9 | Pull request | `/create-pr` | with the user | pending |
 | 10 | Review | `/watch-pr` | on the pull request | pending |
 
@@ -708,7 +708,7 @@ Ship review: gates on the whole tree: `ruff check .` clean, `ruff format --check
 
 | # | Recommendation | Why it is critical | Effort | Decision |
 |---|---|---|---|---|
-| R1 | Count reserved-word compounds (`if…fi`, `case…esac`, `while`/`until`/`for`/`select…done`) and `[[ … ]]` as levels in the key that `\|\|` operands and `!`/`coproc` scopes use, and keep a `case` pattern's `)` out of the group count | A terminator inside such a compound ends a scope opened outside it, so the switch piped after it is trusted. Confirmed in bash 5.2 with `git` shadowed, guard allows and bash prints `COMMIT on main`: `true \|\| if true; then echo; fi \| git checkout -b x && git commit -m x`, and the same with `case a in a) :;; esac`, `while false; do :; done`, `until true; do :; done`, `for i in 1; do :; done`, `if { true; }; then echo; fi` (`{ true; }`, `(true; true)` and `f() { :; }` there are refused). Traced by the `defect-class` reader: `true \|\| [[ a && b ]] \| …`, `true \|\| { case a in a) :;; esac; } \| …`, and the `!` forms. Round 4's own operand rule (`_walk_run` raises the nest only on `(`/`{`); 8972524 allows them too, so not a round 5 regression and outside round 5's class | large | pending |
+| R1 | Count reserved-word compounds (`if…fi`, `case…esac`, `while`/`until`/`for`/`select…done`) and `[[ … ]]` as levels in the key that `\|\|` operands and `!`/`coproc` scopes use, and keep a `case` pattern's `)` out of the group count | A terminator inside such a compound ends a scope opened outside it, so the switch piped after it is trusted. Confirmed in bash 5.2 with `git` shadowed, guard allows and bash prints `COMMIT on main`: `true \|\| if true; then echo; fi \| git checkout -b x && git commit -m x`, and the same with `case a in a) :;; esac`, `while false; do :; done`, `until true; do :; done`, `for i in 1; do :; done`, `if { true; }; then echo; fi` (`{ true; }`, `(true; true)` and `f() { :; }` there are refused). Traced by the `defect-class` reader: `true \|\| [[ a && b ]] \| …`, `true \|\| { case a in a) :;; esac; } \| …`, and the `!` forms. Round 4's own operand rule (`_walk_run` raises the nest only on `(`/`{`); 8972524 allows them too, so not a round 5 regression and outside round 5's class | large | next round — `06-guard-compound-scopes.md` (the user's choice) |
 
 Decisions: `deferred`, `rejected`, or `next round` — a new numbered file in this folder,
 taken back through steps 1 to 7 on the same branch.
