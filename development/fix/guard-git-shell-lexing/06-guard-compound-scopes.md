@@ -1,6 +1,6 @@
 # The git guard keeps an `||` or `!` scope across a compound command
 
-<!-- claude-plan step=8 status=active -->
+<!-- claude-plan step=9 status=active -->
 
 | Field | Value |
 |---|---|
@@ -20,7 +20,7 @@
 | 5 | Test | `/test` | in `/build` | done |
 | 6 | Concept check | `/concept-check` | in `/build` | done |
 | 7 | Ship | `/ship` | in `/build` | done |
-| 8 | Recommend | `/recommend` | with the user | pending |
+| 8 | Recommend | `/recommend` | with the user | done |
 | 9 | Pull request | `/create-pr` | with the user | pending |
 | 10 | Review | `/watch-pr` | on the pull request | pending |
 
@@ -495,9 +495,21 @@ Gates on the whole tree: ruff check clean, ruff format 43 files formatted, mypy 
 > section 1 promised, such as a class member it put out of scope, is a recommendation here,
 > and its round opens through `/fix`.
 
-| # | Recommendation | Why it is critical | Effort | Decision |
-|---|---|---|---|---|
-| R1 | | | | |
+None.
+
+Notes, not critical (kept here rather than in `DEVELOPMENT.md` at the user's instruction):
+
+- `defect-class` reader: nothing critical, no bugs against section 1. `_loop_ranges` still pairs loops
+  with its own `done` rule (it rejects a `done` after `)`/`}`, ignores `fi done` runs, opens on a
+  misplaced `x=1 while`); every difference only lengthens a loop, so it only refuses more. Taking its
+  pairs from `_compound_spans` would remove the second rule before a later change reverses that.
+  Medium effort.
+- The pure-Python container matrix could take the sweep's other openers (`true || git status |`,
+  `{ true ||`, `true || time`, `true || !`) and tails (newline then `|`, `|&`), which were swept
+  only in scratch code. Small effort.
+- Nearest out-of-scope member: the recorded miss "a redirection on a compound command, which bash
+  runs before its body" (`{ git commit -m x; } > "$(git checkout main)"` from a branch); unchanged,
+  out of scope by section 1, contrived.
 
 Decisions: `deferred`, `rejected`, or `next round` — a new numbered file in this folder,
 taken back through steps 1 to 7 on the same branch.
