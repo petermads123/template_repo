@@ -1,6 +1,6 @@
 # The git guard keeps an `||` or `!` scope across a compound command
 
-<!-- claude-plan step=4 status=active -->
+<!-- claude-plan step=5 status=active -->
 
 | Field | Value |
 |---|---|
@@ -16,7 +16,7 @@
 | 1 | Conceptualize | `/conceptualize` | with the user | done |
 | 2 | Plan | `/plan` | with the user | done |
 | 3 | Implement | `/implement` | in `/build` | done |
-| 4 | Verify | `/verify` | in `/build` | pending |
+| 4 | Verify | `/verify` | in `/build` | done |
 | 5 | Test | `/test` | in `/build` | pending |
 | 6 | Concept check | `/concept-check` | in `/build` | pending |
 | 7 | Ship | `/ship` | in `/build` | pending |
@@ -336,7 +336,7 @@ Deviations from the plan, none of which touch section 1:
 - A private helper `_openers(tokens)` finds the kinds an invocation opens and the leader count, and `_own_operators(segment, run)` lists a run's operators at the invocation's own depth. Neither is public.
 - `_judge` passes the markers to `_walk_run` as one extra call per invocation (two when a `!`/`coproc` scope has to be keyed between the leaders and the command word) rather than appending them to the invocation's run. The result is the same sequence of operators; a separate call keeps the newline-only test of the invocation's own run untouched and lets `_judge` read the level in between. `_walk_run` still ignores markers in that test and handles them before the case-pattern logic.
 - A closing word `fi`, `esac` or `done` is a pattern, not a closer, when the next invocation's own run opens with `)` and carries only `(` or `{` after it; a plain `next separator is )` test (as `_loop_ranges` uses) would also reject `( while x; do :; done ); y`.
-- Known residual, same as `_loop_ranges`' `_quoted_done` note: a closer written `\done` as the first word of an invocation reads as `done` (a backslash does not set the quote mark), so `true || while x; do \done; :; done | ...` pairs the loop at the wrong word. `_quoted_done` is deliberately not used here: any `echo "done"` in a command would otherwise switch the fix off.
+- Resolved at step 4 (was a known residual): a closer written `\done` as the first word of an invocation read as `done`, so `true || while false; do :; \done; :; done | git checkout -b x && git commit -m x` paired the loop at the wrong word and was allowed while bash lands the commit on `main`. Classified at step 4 as a code deviation that broke A2 (not a note to carry forward) and fixed there; see section 4, Escaped closer bypass.
 
 Sanity check against bash 5.2 (git shadowed by a function keeping HEAD in a temp file, an empty checkout argument failing, `PATH=/usr/bin:/bin`, stdin closed, a timeout; shown live first by a plain `git commit -m x` landing `COMMIT on main`): the 45 rows of scratchpad `r6_class.py` (15 constructs x `true ||`, `!`, `coproc`), the 26 rows of `dc6_rows.txt` and 20 extra rows (`r6/extra.py`) all agree: every row where bash lands on `main` is refused, none allowed. Allowed rows land on `x` or run nothing in bash (`true || if true; then git checkout -b x && git commit; fi`, `if ! git diff --quiet; then git checkout -b feat/x && git commit -m x; fi`, create-or-switch). Perf: 3,000 nested `if` openers with closers finish in 0.4 s, 5,000 in 1.2 s.
 
@@ -348,12 +348,27 @@ Sanity check against bash 5.2 (git shadowed by a function keeping HEAD in a temp
 
 | Check | Result |
 |---|---|
-| `ruff check .` | |
-| `ruff format --check .` | |
-| `mypy` | |
-| Plan completeness | every signature in the Public API table exists as written |
-| `STRUCTURE.md` | in sync |
-| `python -m <package>.<module>` | |
+| `ruff check .` | `All checks passed!` |
+| `ruff format --check .` | `43 files already formatted` |
+| `mypy` | `Success: no issues found in 11 source files` |
+| `pytest -q` | `1674 passed` (1614 after step 3, plus the 60 rows of the escaped-closer test); no existing test changed outcome |
+| Plan completeness | every signature in the Public API table exists as written: `violation(command: str, branch: str) -> str` unchanged; `segments`, `git_subcommand`, `push_targets_main`, `switch_target`, `UNMODELLED_OPENERS`, `SUBSTITUTED`, `Segment` unchanged. No Missing, no Unplanned public surface; the deviations are the five in section 3, all private. |
+| `STRUCTURE.md` | in sync. The `structure-auditor` report (before step 4) found the signature table correct and three prose gaps; edits 1 and 2 applied after checking each against the code (`_BEFORE_CLOSER`, `_openers`, `_compound_spans`, `_UNCERTAIN_LEADERS`), with the module docstring's matching gaps; edit 3 (record `\done` as a known miss) was not applied, the bypass was fixed instead. |
+| `python -m <package>.<module>` | no new module; `guard_git.py` is a hook entry point (`main()` reads stdin, exit 0). `template_repo.hello_world` does not resolve because the package is not installed in this environment, unchanged by this round. |
+
+### Escaped closer bypass (deviation 5), fixed in this step
+
+Classification: a **code deviation that breaks A2**. A2 requires every compound inside an `||` operand to be refused in every position; a compound whose closer-looking word is escaped or quoted mid-word (`\done`, `d\one`, `do''ne`, `d"o"ne`, `f\i`, `es\ac`, `[[ x == \]] && b ]]`) was paired at the wrong word, so the level fell back to the operand's key and the switch was trusted. Not a change to section 1, so no halt: it is the A2 promise, unmet.
+
+Cause, at the same site the Defect block names (`_walk_run`'s level moving only for paired compounds), reached through the pre-pass: `_scan` wrote the quote mark only in front of a word that *starts* with a quote, so a backslash, or a quote in the middle of a word, left `\done` reading as `done`.
+
+Red first: `test_violation_refuses_a_switch_after_a_compound_with_an_escaped_closer`, 60 rows (30 bodies x `true ||` and `!`), each row first run in bash 5.2 (git shadowed by a function keeping HEAD in a temp file, an empty checkout argument failing, `PATH=/usr/bin:/bin`, stdin closed, a 10 s timeout, the oracle shown live first by a plain `git commit -m x` printing `COMMIT on main`): all 60 land the commit on `main`. Pre-fix run: `60 failed` (commits c89651e, bed1b0d).
+
+Fix (`_scan`, `guard_git.py`): a `mark()` closure writes the quote mark in front of the first quote or backslash escape of a word, wherever it sits (single quote, double quote, an escaped operator character, any other escape outside double quotes and outside `${ }`), once per word. It replaces the `starts_word` test. The mark only reaches the syntax checks (leaders, assignments, redirections, compound openers and closers, the `done` test); every text comparison already strips it through `_plain`. One exception: `\!` stays unmarked, because marking it flips the recorded round 3 over-refusal `\! git commit -m x` (three existing tests: `test_violation_pins_a_quoted_or_misplaced_leader_as_an_over_refusal`, `test_violation_pins_the_both_shell_over_refusals`, `test_violation_still_reads_a_quoted_name_as_the_name_it_spells`) to allowed. Bash does run a command named `!` there, so allowing would be right, but the pin says changing it is a decision, and the brief says halt on any changed test; the exception keeps all 1613 + 1 earlier tests unmodified. Dropping the exception is a one-line change plus those three rows, for the user to decide.
+
+After the fix: the 60 rows pass; `1674 passed`.
+
+Oracle evidence after the fix (scratchpad `r6b/`): `esc.py`, 84 rows (7 `done` spellings x 4 loop kinds, 5 `fi`, 4 `esac`, 5 `]]` spellings, after `true ||` and `!`): 0 bypass (56 before the fix). `esc2.py`, 756 rows: escaped and quoted forms of every opener (`\if`, `i\f`, `'if'`, `"if"`, `\case`, `ca''se`, `\while`, `\for`, `\until`, `\select`, `\[[`, `[\[`, `'[['`, `"[["`) as commands and arguments, and of every closer (`\fi`, `\esac`, `\done`, `\]]`, `']]'`, `d''one`) inside `if`, `while`, `{ }`, `( )`, `$( )` and `case` bodies, nested, after `true ||`, `false ||`, `!` and `true || git status |`: 0 rows where the guard allows and bash lands on `main`; 180 rows refused where bash lands nothing (syntax errors, play-safe). Differential of the previous guard (353e2fa) and the new one over the 511-command suite corpus on `main` and `feat/x`: 1185 rows, 0 differences.
 
 ---
 
