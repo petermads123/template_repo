@@ -269,7 +269,7 @@ guard is asserted to play safe there:
   ends the operand (five allowed forms).
 - **Shell-dependent tokens, both readings** -- twelve tokens (`\;`, `\&`, `\|`, `\(`, `\)`, `\{`, `\<`, `{`, `}`,
   `{}`, `}}`, `{ }`) after `echo` ahead of a switch and after an `||`; the readers' regressions (an escaped
-  `;` glued to a word, `-exec true \;`, a carriage return in a word, a brace after a soft split, `coproc C {`,
+  `;` glued to a word, `-exec true \;`, a carriage return in a word, a brace after an escaped operator, `coproc C {`,
   `time -p {`, `function f {`, a cased `DO {`, `${x:-)}` and `${x:-a\nb}`, a split through `git -c user.name=a\;b commit` and
   `push -o x\; origin main`); the thirteen over-refusals pinned on purpose (bash lands nothing; PowerShell reads the
   token as an operator, or the guard does not model a command that fails); and the PowerShell scriptblocks (`ForEach-Object { }`, `Invoke-Command`, `Start-Job`,

@@ -1,6 +1,6 @@
 # The git guard never takes a quoted word for an operator
 
-<!-- claude-plan step=7 status=active -->
+<!-- claude-plan step=8 status=active -->
 
 | Field | Value |
 |---|---|
@@ -19,7 +19,7 @@
 | 4 | Verify | `/verify` | in `/build` | done |
 | 5 | Test | `/test` | in `/build` | done |
 | 6 | Concept check | `/concept-check` | in `/build` | done |
-| 7 | Ship | `/ship` | in `/build` | pending |
+| 7 | Ship | `/ship` | in `/build` | done |
 | 8 | Recommend | `/recommend` | with the user | pending |
 | 9 | Pull request | `/create-pr` | with the user | pending |
 | 10 | Review | `/watch-pr` | on the pull request | pending |
@@ -541,14 +541,6 @@ The redo's three deviations (section 3, "Redo after step 5") against section 1:
 
 No criterion invalidated; no halt. No test changed outcome in the redo beyond the two rewrites of the first run (A4, A5).
 
----|---|
-| `ruff check .` | |
-| `ruff format --check .` | |
-| `mypy` | |
-| Plan completeness | every signature in the Public API table exists as written |
-| `STRUCTURE.md` | in sync |
-| `python -m <package>.<module>` | |
-
 ---
 
 ## 5. Test log
@@ -698,8 +690,10 @@ Drift found, and what was done about it: none. One observation, not drift: `copr
 
 | Field | Value |
 |---|---|
-| Commits | |
-| Pushed to | |
+| Commits | Round 5, oldest first (baseline 8972524): `c0191cb` Concept; `d425fc4` Plan (draft); `e505ada` Plan; `e11b3dc` Plan accepted; `0db4f6e` WIP step 3 reproduction red; `e895bea` Read quoted operators and soft separators (superseded); `d434b77` Verify (superseded); `abb4d48` Plan revised at step 5; `b1a42d2` WIP step 3 two readings; `3a1ea9b` Read the git guard's command as bash and as PowerShell; `7ed30e4` Verify; `09a8421` WIP step 5 suite; `0e98224` WIP step 5 regression rows; `43eefe6` Test; `ca47f22` Test log counts; `5e9dd08` WIP step 6 doc edits; `a1729a5` Concept check; then the `Ship` commit that closes the round. Every step left a commit. |
+| Pushed to | `origin/fix/guard-git-shell-lexing` |
+
+Ship review: gates on the whole tree: `ruff check .` clean, `ruff format --check .` 42 files formatted, `mypy` no issues in 11 files, `pytest -q` 1613 passed. No scratch files, debug output, TODO/FIXME or `_SOFT` leftovers in the diff; every new private name in `guard_git.py` is used. Fixed in review: the stale term "soft split" in STRUCTURE.md's round 5 tests paragraph (now "an escaped operator"), and a stray fragment of the blank verification table left in section 4. Section 3's and section 4's first-run (soft separator) rows are marked superseded in their own redo sections.
 
 ---
 
