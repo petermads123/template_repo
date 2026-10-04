@@ -4738,3 +4738,50 @@ def test_violation_plays_safe_when_a_command_is_too_tangled_to_read(
     assert violation('echo ";" x', PROTECTED) == ""
     assert violation("git commit -m x\r\n", PROTECTED).startswith(UNMODELLED_REASON)
     assert violation(command, OTHER) == ""
+
+
+# Cases the round did not set out to change, run through the same oracle: the
+# commit-message, heredoc, substitution and `||` rules of rounds 1 to 4 and the
+# `!` forms with a quoted operator, unchanged. `echo `;` and the `\r` before a push
+# option have no oracle (PowerShell reads a backtick as an escape, and the
+# shadow splits its output on `\r`).
+REGRESSION_CASES: list[tuple[str, str, str]] = [
+    ('! true | echo ";" | git checkout -b feat/x && git commit -m x', PROTECTED, "C"),
+    ("! true | echo '|' | git checkout -b feat/x && git commit -m x", PROTECTED, "C"),
+    (
+        "! true | echo ${x:-;} | git checkout -b feat/x && git commit -m x",
+        PROTECTED,
+        "C",
+    ),
+    ("git push -o x\r origin main", OTHER, "P"),
+    (
+        'git checkout -b feat/x2 && git commit -m "a; b | c && d (e) {f}"',
+        PROTECTED,
+        "A",
+    ),
+    ('git commit -m "fix; done"', PROTECTED, "C"),
+    ('echo "$(git commit -m x)"', PROTECTED, "C"),
+    (
+        "git checkout -b feat/x2 && git commit -m \"$(cat <<'EOF'\nTitle\n\nBody\nEOF\n)\"",
+        PROTECTED,
+        "A",
+    ),
+    ("cat <<';'\nbody\n;\ngit commit -m x", PROTECTED, "C"),
+    ('cat <<";"\nbody\n;\ngit commit -m x', PROTECTED, "C"),
+    ("cat <<\\;\nbody\n;\ngit commit -m x", PROTECTED, "C"),
+    ("echo ${x:-\\}; git commit -m x}", PROTECTED, "A"),
+    ("echo ${x:-a; git commit -m x; }", PROTECTED, "A"),
+    ("echo ${x:-a; git commit -m x; }", OTHER, "A"),
+    ("git status || git checkout -b x && git commit -m x", PROTECTED, "C"),
+    ("git checkout -b x || git checkout feat/x && git commit -m x", PROTECTED, "A"),
+    ("true || echo x | git checkout -b y && git commit -m x", PROTECTED, "C"),
+    ("{ git commit -m x; }", PROTECTED, "C"),
+    ("echo `;", PROTECTED, "A"),
+]
+
+
+@pytest.mark.parametrize(("command", "branch", "kind"), REGRESSION_CASES)
+def test_violation_keeps_the_answers_of_rounds_1_to_4(
+    command: str, branch: str, kind: str
+) -> None:
+    assert_judged(command, branch, kind)

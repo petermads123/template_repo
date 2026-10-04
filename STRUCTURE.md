@@ -247,7 +247,51 @@ operators, under its own heading at the end of the file: `true || echo ";" | git
 refused on `main` instead of allowed. Three rows of two existing tests changed outcome as the concept agreed:
 round 3's quoted `'if'` and `"!"` pins are now allowed on `main`
 (`test_violation_allows_a_quoted_leader_on_main`) and the `&&\r\n` row of the substitution-trust test is
-now refused (`test_violation_refuses_a_commit_after_an_and_and_carriage_return`).
+now refused (`test_violation_refuses_a_commit_after_an_and_and_carriage_return`). The rest of the round's
+suite follows the reproduction, each bash claim run in bash 5.2 with `git` shadowed (HEAD in a file, an empty
+checkout argument failing, `PATH=/usr/bin:/bin`, stdin closed, a timeout, the oracle shown live first by a
+plain commit landing on `main`); a row with no oracle is PowerShell-only or needs a real `sudo`/`env`, and the
+guard is asserted to play safe there:
+
+- **`segments`, quoted operators** -- twenty-one quoted words (`";"`, `"&&"`, `'&'`, `'|'`, `'||'`, `'('`, `')'`,
+  `'{'`, `'}'`, `'<'`, `'>'`, `";"";"`, `a';'`, a quoted newline or CRLF, a quote inside the other kind) and ten
+  operator characters inside an unquoted `${...}` each stay in one invocation; a real operator beside a quoted
+  one, a quote state carried through `"$( )"`, a quoted heredoc delimiter (three spellings) and an unbalanced
+  quote around an operator (`None`).
+- **`segments`, the bash reading** -- fifteen shell-dependent tokens (an escaped operator character, a brace
+  argument, a carriage return inside a word) are word characters; a brace is a group only after nothing, a
+  leader, `time`, `coproc NAME` or `function NAME`, never when quoted; `a\r\nb` and `a &&\r\nb` keep the
+  `\r` in a word; no stand-in or quote mark appears in any token or separator, and every private character in
+  the input is blanked, in `segments` and in `violation` (a forged `if`, a split `git`, a split push option).
+- **The `||` operand and the `!` scope** -- the reproduction row's twenty-six quoted or `${...}` words refused
+  after `true || echo W | git checkout -b x && git commit -m x`, six after `! true | echo W | ...`, allowed from
+  another branch, plus the group form `{ true || echo } | ...; }`; a real `;` or `&&` beside a quoted one still
+  ends the operand (five allowed forms).
+- **Shell-dependent tokens, both readings** -- twelve tokens (`\;`, `\&`, `\|`, `\(`, `\)`, `\{`, `\<`, `{`, `}`,
+  `{}`, `}}`, `{ }`) after `echo` ahead of a switch and after an `||`; the readers' regressions (an escaped
+  `;` glued to a word, `-exec true \;`, a carriage return in a word, a brace after a soft split, `coproc C {`,
+  `time -p {`, `function f {`, a cased `DO {`, `${x:-)}` and `${x:-a\nb}`, a split through `git -c a=b\;c` and
+  `push -o x\; origin main`); the over-refusals pinned on purpose (bash lands nothing, PowerShell reads the
+  token as an operator); and the PowerShell scriptblocks (`ForEach-Object { }`, `Invoke-Command`, `Start-Job`,
+  `% { }`, `try { }`, `{ git commit; }`, a `Do { } While` and `foreach` block counting a switch), asserted
+  refused with no oracle.
+- **Carriage return** -- `&&\r\n`, `&&\r\n\r\n`, `&& \r\n` and a backslash-CR continuation refused on `main`; a
+  commit or push ended by `\r`, `\r\n` or ` \r\n` refused; a quoted `\r` and one after the last command
+  allowed.
+- **Quoted words at command position** -- `'if'`, `'!'`, `"!"`, `"X=1"`, `'>'`, `echo ";"` and `''if`
+  followed by a commit allowed on `main`; a quoted program, wrapper, option, subcommand or ref still the word
+  it spells (twenty-seven refused rows, `'!' git checkout -b x && git commit -m x` pinned as an over-refusal);
+  a switch written with quoted words still trusted; `git_subcommand` over tokens carrying the quote mark
+  (never a leader, assignment or redirection; marker-free output; its own tokens not mutated).
+- **Quote and escape state** -- forty-nine rows around an operator: an escaped quote, a backslash in single
+  quotes, `"\\"`, nesting through `"$( )"`, backticks and `${...}`, `$"..."`, a quoted operator beside a
+  refspec, a push option or a switch.
+- **Rounds 1 to 4 unchanged** -- nineteen rows run through the same oracle: a commit message holding `;`, `|`,
+  `&&`, `(` and `{`, `"$(git commit -m x)"`, the pipeline's own heredoc commit, quoted and escaped heredoc
+  delimiters, `${x:-a; git commit -m x; }`, the `||` rules and three `!` forms with a quoted operator.
+- **Limits** -- four thousand quoted or escaped operators in one command and a two-thousand-link `||` chain
+  finish quickly; a command too tangled to read (`_scan` forced to give up) is refused on `main` when it names
+  `commit` or `push` and allowed otherwise; the round 5 forms give the same answer twice.
 
 ### `tests/test_plan_state.py`
 
