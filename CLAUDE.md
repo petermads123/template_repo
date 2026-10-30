@@ -24,15 +24,15 @@ accepted at step 8 opens the next round on the same branch.
 
 | # | Step | Skill | Produces | Waits for |
 |---|---|---|---|---|
-| 1 | Conceptualize | `/conceptualize` | Agreed concept, acceptance criteria, the branch | the user |
-| 2 | Plan | `/plan` | Modules, signatures, implementation guide, test intents | the user |
+| 1 | Conceptualize | `/conceptualize` | Agreed concept, acceptance criteria, the branch, the version bump | the user |
+| 2 | Plan | `/plan` | Modules, signatures, implementation guide, test intents | the user, only if the critic leaves something open |
 | 3 | Implement | `/build` → `/implement` | Working code | — |
 | 4 | Verify | `/build` → `/verify` | ruff, mypy, plan completeness, STRUCTURE.md | — |
 | 5 | Test | `/build` → `/test` | Edge-case suite, pytest green | — |
 | 6 | Concept check | `/build` → `/concept-check` | Audit against step 1, not step 2 | — |
 | 7 | Ship | `/build` → `/ship` | Round closed, whole tree green | — |
 | 8 | Recommend | `/recommend` | Critical follow-ups only, usually none; lesser ideas noted in `DEVELOPMENT.md` | the user, only if there is one |
-| 9 | Pull request | `/create-pr` | Whole-branch re-verification, then a PR to `main` | the user, before publishing |
+| 9 | Pull request | `/create-pr` | Whole-branch re-verification, the version bump written, then a PR to `main` | the user, before publishing |
 | 10 | Review | `/watch-pr` | Hourly check until the PR merges or closes | — |
 
 `/feature <what to build>` starts the pipeline by opening step 1. In a session that is
@@ -66,9 +66,12 @@ says a build is in flight and no commit exists only to tidy up afterwards.
 ### Three gates, one unattended block
 
 The user decides at most three times: they confirm the concept (step 1), accept the plan
-(step 2), and decide any critical follow-up (step 8), plus a yes before step 9 publishes.
-Most rounds have no critical follow-up, and then step 8 records `None.` and hands straight
-to step 9. Everything between the plan and step 8 — **steps 3 to 7** — is `/build`: one
+(step 2) when its critic leaves something open, and decide any critical follow-up (step 8),
+plus a yes before step 9 publishes. A plan the `plan-critic` passes clean — every finding
+applied, none rebutted, nothing put to the user — is accepted on that strength and goes
+straight to the build; `/plan` holds the exact rule. Most rounds have no critical
+follow-up, and then step 8 records `None.` and hands straight to step 9. Everything
+between the plan and step 8 — **steps 3 to 7** — is `/build`: one
 skill that runs the five steps in order without asking, each in its own subagent on the
 model that step pins, committing and pushing after each.
 
@@ -157,16 +160,20 @@ and handles bot findings lives in that skill.
 
 ### The gates are the point
 
-**Steps 1 and 2 end on a question, and so does step 8 when it has a critical follow-up;
-each waits for the answer.** Step 8 with nothing critical asks nothing and hands on to step
-9, whose question before publishing still waits. Never take a user's gate for them: not
-because the answer looks obvious, not because they seem to want speed. The user's
-confirmation at step 1 opens step 2 in the same turn, and their acceptance at step 2 opens
-the build — those are the user passing a gate, not Claude skipping one.
+**Step 1 ends on a question, and so do step 2 when its critic leaves something open and
+step 8 when it has a critical follow-up; each waits for the answer.** Step 2 with a clean
+critique hands on to the build, and step 8 with nothing critical to step 9, whose question
+before publishing still waits. Never take a user's gate for them: not because the answer
+looks obvious, not because they seem to want speed. A clean critique is not "looks
+obvious" — it is `/plan`'s rule applied literally, and a plan that falls short of it in
+any way waits. The user's confirmation at step 1 opens step 2 in the same turn, and their
+acceptance at step 2, or a clean critique, opens the build — those are a gate passed, not
+Claude skipping one.
 
 The gates are where the work is cheap to redirect: a concept costs a conversation to
 change, a plan a revision, and a build that halts costs whatever it built. A build that
-runs on a plan the user had not accepted has skipped the only decision that mattered.
+runs on a plan with a critic's finding still open has skipped the only decision that
+mattered.
 
 Going *backwards* needs no permission. A failing test that reveals an unsettled concept
 belongs back at step 1, and saying so — as a halt, from inside the build — is always right.
@@ -277,6 +284,28 @@ on — `claude/<random-words>` — is a placeholder named before the scope exist
 committed to it, and step 1 branches the agreed name off `main` and pushes there instead.
 Only if the environment refuses that push does the work fall back to the session's branch;
 the folder then keeps the conventional name and the plan's Branch row records the real one.
+
+## Versions
+
+`version` in `pyproject.toml` is the package's version, `MAJOR.MINOR.PATCH`, and the
+pipeline is what moves it. Step 1 decides each branch's bump alongside its name and records
+it in the plan's Version row; step 9 writes it, counted from `main`'s version at that
+moment, so two branches open side by side never both claim the same number from a stale
+base.
+
+| Bump | Moves | For |
+|---|---|---|
+| `patch` | x.y.**Z** | a fix; a refactor that changes no behaviour; a dependency change |
+| `minor` | x.**Y**.0 | a change to something that exists; a small addition to it |
+| `major` | **X**.0.0 | a large new feature — a new endpoint, model, subpackage or capability |
+| `none` | — | nothing that ships changes: tests, docs, plan files, `.claude/`, tooling |
+
+A branch that does several of these takes the largest. The scale measures size, not
+compatibility: unlike strict SemVer, a change that breaks an existing caller is a `minor`
+unless it is also large. A later round may raise its branch's bump, never lower it.
+`/small-change` never bumps.
+The procedure lives in `/conceptualize` and `/create-pr`, and `/watch-pr` re-counts the
+bump if `main`'s version moves while the pull request is open.
 
 ## Commands
 

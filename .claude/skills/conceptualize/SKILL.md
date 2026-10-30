@@ -1,6 +1,6 @@
 ---
 name: conceptualize
-description: Step 1 of the feature pipeline. Discuss and agree what a feature is, what it connects to, and the observable criteria that define it as done; then name the branch, create its plan folder and first round file, and commit. Use at the start of a feature, or to revise a concept before planning.
+description: Step 1 of the feature pipeline. Discuss and agree what a feature is, what it connects to, and the observable criteria that define it as done; then name the branch and choose the version bump, create its plan folder and first round file, and commit. Use at the start of a feature, or to revise a concept before planning.
 argument-hint: [what to build]
 model: opus
 effort: high
@@ -12,8 +12,9 @@ This step produces agreement, not code and not a design. It ends when the user s
 concept is right — and only then does it create anything on disk.
 
 **Write no code. Choose no module names.** Those are step 2 and step 3. Deciding them here
-quietly settles questions the concept has not asked yet. The one thing this step does
-choose is the branch, because the scope it settles is what the branch is named for.
+quietly settles questions the concept has not asked yet. The two things this step does
+choose are the branch and the version bump, because both follow from the scope it
+settles: the branch is named for it, and the bump measures it.
 
 **On a fix round the code is the subject, and reading it is required rather than
 forbidden.** A fix round is one whose section 1 carries a filled **Defect** block, and
@@ -152,10 +153,34 @@ Whatever branch the session happens to be on is not a proposal. A hosted session
 a branch the environment named before the scope existed; it is a placeholder, and the name
 chosen here replaces it when the round file is created below.
 
+## 6. Choose the version bump
+
+With the scope settled, propose how far this branch moves `version` in `pyproject.toml`, on
+the scale in `CLAUDE.md` (*Versions*): `patch`, `minor`, `major` or `none`. Judge the branch
+by what it delivers, not by its prefix — though the prefix is a fair first guess: `fix/` is
+a `patch`, `feat/` a `minor` or a `major`, and `refactor/`, `docs/`, `test/` and `chore/` a
+`patch` or `none`. A round 1 opened by `/fix` is a `patch`.
+
+Say in a few words why, and quote what the number would be today. After
+`git fetch origin main`, read `version` from `git show origin/main:pyproject.toml`, and
+write it as `minor: 1.1.0 → 1.2.0 (from main today)`. Put it in the confirmation message
+beside the branch name, so the user reacts to both at once. Between two levels, propose the
+one you believe and name the other in the same line; it does not need a question of its own.
+
+**Do not edit `pyproject.toml` here.** Step 9 writes the bump, counted from `main`'s version
+at that moment, because another branch may merge its own bump first. This step decides the
+level and nothing else.
+
+**A later round** inherits the branch's bump in its Version row and re-judges it: if this
+round takes the branch past it — a follow-up that adds a new capability to a `minor`
+branch — raise it in this round's Version row and say so in the confirmation. Never lower
+it; what earlier rounds delivered is still on the branch.
+
 ## Stop here, then create
 
-Ask the user to confirm the concept, quoting the acceptance criteria and the branch name in
-your message so they can react without opening a file. Nothing exists on disk yet.
+Ask the user to confirm the concept, quoting the acceptance criteria, the branch name and
+the version bump in your message so they can react without opening a file. Nothing
+exists on disk yet.
 
 **If they want changes**, make them and ask again. Stay on step 1. This is the cheapest
 place in the pipeline to change your mind and the most expensive one to rush.
@@ -208,7 +233,7 @@ place in the pipeline to change your mind and the most expensive one to rush.
    cp development/TEMPLATE.md development/<type>/<topic>/01-<topic>.md
    ```
 
-   Set the title, fill the Feature, Round, Branch and Started rows, write "Nothing — this
+   Set the title, fill the Feature, Round, Branch, Version and Started rows, write "Nothing — this
    is the first round." under **Builds on**, delete the quoted instructions, and write
    everything from the conversation into section 1 — the Defect block from the diagnosis
    and the conversation on a fix round, or deleted whole on a feature round. On a round
@@ -236,5 +261,5 @@ place in the pipeline to change your mind and the most expensive one to rush.
    error.
 
 5. **Invoke `/plan`** in the same turn. The user's confirmation is the gate between the two
-   steps, and they have just passed it; the plan is what they see next, and it ends on its
-   own confirmation before anything is built.
+   steps, and they have just passed it; the plan is what they see next, and it asks for their
+   acceptance before anything is built only if its critic leaves something open.

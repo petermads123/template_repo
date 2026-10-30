@@ -1,6 +1,6 @@
 ---
 name: create-pr
-description: Step 9 of the feature pipeline. Verify the whole branch in one pass — clean tree, current base, the full test suite, every module showcase and every round's plan — then confirm with the user, mark the plan done, and open a pull request to main, ready for review. Use when step 8 is done and the branch is ready for review; step 8 invokes it itself unless it opened a next round or sent a bug back to the build.
+description: Step 9 of the feature pipeline. Verify the whole branch in one pass — clean tree, current base, the version bump step 1 decided, the full test suite, every module showcase and every round's plan — then confirm with the user, mark the plan done, and open a pull request to main, ready for review. Use when step 8 is done and the branch is ready for review; step 8 invokes it itself unless it opened a next round or sent a bug back to the build.
 argument-hint: [slug, if more than one plan exists]
 model: sonnet
 effort: high
@@ -54,7 +54,7 @@ no match, not an error.
 
 Plan files under `development/` are a historical record; leave them as written.
 
-### 2b. Catch up with the base
+### 2b. Catch up with the base, then write the version
 
 ```bash
 git fetch origin main
@@ -64,6 +64,28 @@ git log --oneline HEAD..origin/main
 If `main` has moved since the branch started, green here is not green merged. Merge it in,
 resolve anything it conflicts with, and **start section 2 again from the top** — a merge
 can break the suite as easily as a commit can.
+
+Then write the version. The bump step 1 decided is in the newest round's Version row — a
+later round may have raised round 1's, so the newest row is the branch's. Count it from
+`main`'s version, never from the branch's: read `version` from
+`git show origin/main:pyproject.toml`.
+
+`patch` adds one to the third number; `minor` adds one to the second and zeroes the third;
+`major` adds one to the first and zeroes the other two; `none` writes nothing — skip to 2c.
+The target is `main`'s version moved by that level. If the branch's `pyproject.toml`
+already says the target — an earlier pass of this step — there is nothing to do. Otherwise
+replace the branch's current version with the target in `pyproject.toml` and everywhere else
+that states it as the package's current version:
+
+```bash
+git grep -n -F '<branch version>' -- . ':(exclude)development'
+```
+
+A test that pins the version, a README line or a `__version__` moves with it. Prose about
+what an earlier version did — *a 1.0.0 snapshot is refused* — is history and stays. Fill the
+numbers into the Version row (`minor — 1.1.0 → 1.2.0`) and commit both, subject
+`Version: <old> → <new> (<level>)`. The gates below run on the bumped tree, so a test that
+pins the version proves nothing was missed.
 
 ### 2c. The four gates, whole suite
 
@@ -125,6 +147,7 @@ Show the user, and wait for an explicit yes:
 
 - the branch name, and whether it matches `type/kebab-case` (mention a mismatch, do not
   block on it),
+- the version: `<old> → <new>` (`<level>`), or unchanged for `none`,
 - `git log main..HEAD --oneline` — the commits that become the pull request,
 - the result of every check in section 2, including the pass count,
 - the proposed title and the full body.
@@ -220,7 +243,8 @@ One paragraph from round 1's section 1: what this adds and why. For a fix round,
 round carries the Defect block, add the Defect block's Observed, Root cause and Scope rows
 in a line each, so the reviewer sees the cause and not only the change. For a multi-round
 branch, one line per round after it: what that round added and which recommendation it
-came from.
+came from. Then the version on a line of its own: `Version: 1.1.0 → 1.2.0 (minor)`, or
+`Version: unchanged (none)`.
 
 ## Acceptance criteria
 The table from section 6 of each round — criterion, met, evidence.

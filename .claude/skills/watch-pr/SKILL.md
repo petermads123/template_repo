@@ -42,12 +42,19 @@ Every check-in, on the current head — not just the thing that woke you:
 - merge state: is it conflicted with the base?
 - CI on the latest commit, where the repo has any,
 - open review threads and reviews,
+- the version: whether `main`'s version is still the one the branch's bump was counted
+  from (the newest round's Version row says which),
 - whether it has merged or closed since last time.
 
 ## 3. Act, in this order
 
 **Merge conflict** — merge the base branch in and resolve it. Never rebase or force-push a
 branch someone else may have checked out. Then re-run the gates and push.
+
+**Version stale** — `main`'s version moved, because another pull request merged its own
+bump. Merge the base branch in as for a conflict — a conflict on the `version` line is the
+usual sign, but two identical bumps merge cleanly and hide it — then re-count the bump from
+`main`'s new version exactly as `/create-pr` §2b does, re-run the gates and push.
 
 **CI red** — where the repo has CI at all: fix it. A failure in code this branch touched is
 this branch's to fix. A failure that reproduces on the base branch too is not, and standing
@@ -119,7 +126,8 @@ recommendation does:
 cp development/TEMPLATE.md development/<branch>/0<N>-<round-slug>.md
 ```
 
-Set the new file to `<!-- claude-plan step=1 status=active -->`, fill its **Builds on**
+Set the new file to `<!-- claude-plan step=1 status=active -->`, copy the Version row from
+the round before it, fill its **Builds on**
 section — naming the review comment and quoting it — commit, and invoke `/conceptualize`.
 The round runs steps 1 to 9 on the same branch: its step 9 re-verifies the whole branch,
 marks the round `done` and pushes into the same pull request, and its `/watch-pr` resumes
@@ -177,7 +185,7 @@ message and the cost of being wrong is an unwanted commit on `main`.
 
 ### Once told, check before doing it
 
-An instruction authorises the merge; it does not waive the gates. All four must hold, and
+An instruction authorises the merge; it does not waive the gates. All five must hold, and
 none may be bypassed to honour the instruction:
 
 1. **The instruction is not stale.** It referred to the code as it stood. If anything has
@@ -186,6 +194,9 @@ none may be bypassed to honour the instruction:
 3. **No merge conflict** with the base.
 4. **Every review thread is resolved**, where the ruleset requires it — and resolved because
    it was dealt with, not to clear the gate.
+5. **The version bump is counted from `main` as it is now.** Another pull request that
+   merged its own bump first leaves this one claiming a number that is taken; re-count it
+   as *Version stale* above, which is a push, so item 1 applies again.
 
 If one fails, say which, fix what is fixable, and wait. "You told me to merge" is not a
 reason to merge something broken; they told you to merge the thing they last saw working.

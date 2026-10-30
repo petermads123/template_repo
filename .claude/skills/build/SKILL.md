@@ -1,6 +1,6 @@
 ---
 name: build
-description: Steps 3 to 7 of the feature pipeline, run as one unattended block once the user has accepted the plan — implement, verify, test, concept-check and ship, each as a subagent on its pinned model, committing and pushing after every step. Halts only for something that would change the agreed concept, or a gate that fails twice for the same reason. Use after the plan is accepted, or to resume a halted build.
+description: Steps 3 to 7 of the feature pipeline, run as one unattended block once the plan is accepted, by the user or by a clean critique at step 2 — implement, verify, test, concept-check and ship, each as a subagent on its pinned model, committing and pushing after every step. Halts only for something that would change the agreed concept, or a gate that fails twice for the same reason. Use after the plan is accepted, or to resume a halted build.
 argument-hint: [slug, if more than one plan exists]
 model: opus
 effort: medium
@@ -8,7 +8,8 @@ effort: medium
 
 # Steps 3 to 7 — Build
 
-The user has agreed what to build (step 1) and how (step 2). Everything from here to a
+The user has agreed what to build (step 1), and how was settled at step 2 — by their
+acceptance, or by a critique that left nothing open. Everything from here to a
 pushed, verified, tested, concept-checked branch is transcription and checking, and none of
 it needs a decision from them — so none of it waits for one. This skill runs the five steps
 in order and stops only when the pipeline reaches step 8, or when something turns up that

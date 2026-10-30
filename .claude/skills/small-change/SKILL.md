@@ -9,7 +9,8 @@ effort: medium
 # Small change
 
 The escape hatch from the ten-step pipeline. A tight loop for cosmetic work: no plan file,
-no branch ceremony, no pull request.
+no branch ceremony, no pull request, and no version bump — only the pipeline moves
+`version` in `pyproject.toml`.
 
 ## 1. Check it is actually small
 

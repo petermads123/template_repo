@@ -27,6 +27,7 @@
 | Feature | `<branch>` (the folder) |
 | Round | `<N>` |
 | Branch | `<type>/<kebab-case-topic>` |
+| Version | `<patch, minor, major or none>` — <why, in a few words>; step 9 adds `<old> → <new>` |
 | Started | `<YYYY-MM-DD>` |
 
 ## Progress
@@ -34,7 +35,7 @@
 | # | Step | Skill | Runs | Status |
 |---|---|---|---|---|
 | 1 | Conceptualize | `/conceptualize` | with the user | pending |
-| 2 | Plan | `/plan` | with the user | pending |
+| 2 | Plan | `/plan` | with the user, unless the critique is clean | pending |
 | 3 | Implement | `/implement` | in `/build` | pending |
 | 4 | Verify | `/verify` | in `/build` | pending |
 | 5 | Test | `/test` | in `/build` | pending |
@@ -130,8 +131,8 @@ Which existing modules it calls, which call it, what it does not touch.
 
 ## 2. Plan
 
-> Written in step 2, accepted by the user before step 3 starts. Concrete enough that
-> step 3 is transcription, not invention.
+> Written in step 2, accepted before step 3 starts — by the user, or by a clean critique
+> (see `/plan`). Concrete enough that step 3 is transcription, not invention.
 
 ### Approach
 
@@ -170,6 +171,12 @@ Ordered. Each entry small enough to finish and check.
 
 What could make this harder than it looks, and what the build should do if it does —
 including whether it should halt.
+
+### Critique
+
+> The `plan-critic`'s findings, each with what was done — applied, or rebutted in one
+> sentence — then its verdict, and one line saying how the plan was accepted:
+> `Accepted: clean critique, <date>` or `Accepted: by the user, <date>`.
 
 ---
 
