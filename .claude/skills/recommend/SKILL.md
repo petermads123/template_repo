@@ -174,8 +174,9 @@ Then, in order:
 1. In **this** file, mark step 8 `done` and set its marker to
    `<!-- claude-plan step=8 status=done -->`. Exactly one file in the repo is `active`, so
    this one has to stand down before the new one starts.
-2. In the **new** file, set the title, the Feature and Round rows, the same branch, and the
-   marker `<!-- claude-plan step=1 status=active -->`.
+2. In the **new** file, set the title, the Feature and Round rows, the same branch, the
+   Version row copied from this file (step 1 of the new round may raise it, never lower
+   it), and the marker `<!-- claude-plan step=1 status=active -->`.
 3. Fill its **Builds on** section: what each earlier round delivered, the recommendation it
    came from quoted in full, and what is already on the branch that it must not break.
    When the recommendation is a defect, also write "Opened on a bug report — run `/fix`

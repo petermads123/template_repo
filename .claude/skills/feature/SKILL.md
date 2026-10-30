@@ -18,15 +18,15 @@ it first.
 
 | # | Step | Skill | Produces | Waits for |
 |---|---|---|---|---|
-| 1 | Conceptualize | `/conceptualize` | Agreed concept, acceptance criteria, branch | the user |
-| 2 | Plan | `/plan` | Modules, signatures, implementation guide, test intents | the user |
+| 1 | Conceptualize | `/conceptualize` | Agreed concept, acceptance criteria, branch, version bump | the user |
+| 2 | Plan | `/plan` | Modules, signatures, implementation guide, test intents | the user, only if the critic leaves something open |
 | 3 | Implement | `/build` → `/implement` | Working code | — |
 | 4 | Verify | `/build` → `/verify` | ruff, mypy, plan completeness, STRUCTURE.md | — |
 | 5 | Test | `/build` → `/test` | Edge-case suite, pytest green | — |
 | 6 | Concept check | `/build` → `/concept-check` | Audit against step 1, not step 2 | — |
 | 7 | Ship | `/build` → `/ship` | Round complete on the branch | — |
 | 8 | Recommend | `/recommend` | Critical follow-ups, usually none | the user, only if there is one |
-| 9 | Pull request | `/create-pr` | PR to `main`, ready for review | the user, before publishing |
+| 9 | Pull request | `/create-pr` | Version bump written, PR to `main`, ready for review | the user, before publishing |
 | 10 | Review | `/watch-pr` | Hourly check until the PR merges or closes | — |
 
 Steps 3 to 7 are one block: `/build` runs them unattended, each in a subagent on its own

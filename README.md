@@ -178,18 +178,18 @@ development/
 
 | Step | Command | Produces | Waits for |
 |---|---|---|---|
-| 1 | `/conceptualize` | The concept, agreed with you, numbered acceptance criteria, and the branch | you |
-| 2 | `/plan` | Modules, full signatures, implementation guide, test intents | you |
+| 1 | `/conceptualize` | The concept, agreed with you, numbered acceptance criteria, the branch and the version bump | you |
+| 2 | `/plan` | Modules, full signatures, implementation guide, test intents | you, only if the plan critic leaves something open |
 | 3 | `/build` → `/implement` | The production code | — |
 | 4 | `/build` → `/verify` | ruff, mypy, and a check that the code matches the plan | — |
 | 5 | `/build` → `/test` | The edge-case suite, and fixes for what it finds | — |
 | 6 | `/build` → `/concept-check` | An audit against step 1, criterion by criterion | — |
 | 7 | `/build` → `/ship` | The round closed, whole tree green | — |
 | 8 | `/recommend` | Critical follow-ups only, usually none; lesser ideas noted in `DEVELOPMENT.md` | you, only if there is one |
-| 9 | `/create-pr` | A full re-verification of the whole branch, then a pull request to `main` | you, before it publishes |
+| 9 | `/create-pr` | A full re-verification of the whole branch, the version bump written, then a pull request to `main` | you, before it publishes |
 | 10 | `/watch-pr` | An hourly check of the open PR, acting on comments, until it merges or closes | — |
 
-**Steps 3 to 7 run without you.** Once you accept the plan, `/build` runs implement, verify,
+**Steps 3 to 7 run without you.** Once the plan is accepted, `/build` runs implement, verify,
 test, concept-check and ship in order, each in its own subagent on the model that step
 pins, committing and pushing after each. It halts for exactly two things: a finding that
 would change the concept you agreed to, and a check that fails twice the same way after one
@@ -200,7 +200,7 @@ the diff.
 
 Where the work genuinely diverges, more than one agent reads it: a diagnosis critic tries
 to falsify the root cause before a fix is agreed, a plan critic reads the plan against the
-concept before you accept it, two test designers with different briefs find the edge cases
+concept before the build starts, two test designers with different briefs find the edge cases
 at step 5, and on a fix round one more reader asks at step 8 where else the same cause
 lives. The calling step merges what they find and stays the single voice.
 
@@ -218,9 +218,16 @@ review route is unavailable, step 9 assigns you instead, and the merge signal is
 "merge it" from you. `CLAUDE.md` names the approver.
 
 Start with `/feature <what to build>` — it opens step 1. Your confirmation of the concept
-opens step 2 in the same turn, and your acceptance of the plan opens the build. After the
-build, step 8 asks you only if it found something critical, and step 9 asks before it
-publishes.
+opens step 2 in the same turn. The plan opens the build on its own when the plan critic
+leaves nothing open — every finding applied, none disputed — and waits for your acceptance
+when it does. After the build, step 8 asks you only if it found something critical, and
+step 9 asks before it publishes.
+
+Each branch also moves the package version, `MAJOR.MINOR.PATCH` in `pyproject.toml`. The
+bump is decided with the concept at step 1 — `patch` for a fix, `minor` for a change to
+something that exists or a small addition, `major` for a large new feature, `none` when
+nothing that ships changes — and written at step 9, counted from `main` as it stands then.
+`CLAUDE.md` has the scale.
 
 A bug starts with `/fix <symptom>` instead, and gets a diagnosis before step 1: the symptom
 reproduced and its output quoted, the root cause as a file and line, the commit that
